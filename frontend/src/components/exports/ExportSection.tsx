@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import {
   ActionIcon,
-  Anchor,
   Badge,
   Button,
   Card,
@@ -103,13 +102,16 @@ export default function ExportSection({
                 </Table.Td>
                 <Table.Td>
                   <Group gap="xs" justify="flex-end">
-                    <Anchor
+                    <Button
+                      component="a"
                       href={`/api/projects/${projectId}/exports/${e.id}/download`}
                       download
-                      size="sm"
+                      size="xs"
+                      variant="light"
+                      leftSection="⬇"
                     >
-                      다운로드
-                    </Anchor>
+                      zip 다운로드
+                    </Button>
                     <ActionIcon variant="subtle" color="red" onClick={() => remove.mutate(e.id)}>
                       ✕
                     </ActionIcon>
