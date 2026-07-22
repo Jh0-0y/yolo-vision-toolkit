@@ -1,0 +1,23 @@
+# Data & runtime
+data/
+*.pt
+*.onnx
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+
+# Env
+.env
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
