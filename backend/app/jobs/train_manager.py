@@ -120,7 +120,7 @@ class TrainManager:
                         pass
                 if not alive:
                     run.status = "error"
-                    run.error = "API 재시작 시 프로세스가 없음"
+                    run.error = "process missing after API restart"
                     session.add(run)
             session.commit()
 

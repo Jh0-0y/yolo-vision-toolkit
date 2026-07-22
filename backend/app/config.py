@@ -35,8 +35,19 @@ class Settings(BaseSettings):
     def runs_dir(self) -> Path:
         return self.data_dir / "runs"
 
+    @property
+    def datasets_dir(self) -> Path:
+        return self.data_dir / "datasets"
+
     def ensure_dirs(self) -> None:
-        for d in (self.data_dir, self.models_dir, self.projects_dir, self.jobs_dir, self.runs_dir):
+        for d in (
+            self.data_dir,
+            self.models_dir,
+            self.projects_dir,
+            self.jobs_dir,
+            self.runs_dir,
+            self.datasets_dir,
+        ):
             d.mkdir(parents=True, exist_ok=True)
 
 
