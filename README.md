@@ -6,10 +6,12 @@ YOLO 기반 객체 탐지 툴박스 — 앙상블 자동 라벨링 + YOLO 범용
 
 | 모듈 | 설명 | 상태 |
 |---|---|---|
-| 오토라벨링 툴킷 | 학습된 YOLO 모델 1~N개로 앙상블 추론 → confirmed / review 버킷 분리 → 사람 검증(박스 에디터) → train/val 데이터셋 내보내기 | ✅ 완료 |
-| 학습 툴킷 | 웹 UI에서 데이터셋·베이스 모델 선택 → Ultralytics 학습 실행 → 실시간 mAP/loss 차트 → best.pt 레지스트리 등록 | ✅ 완료 |
+| 오토라벨링 툴킷 | 학습된 YOLO 모델 1~N개로 앙상블 추론 → 이미지별 라벨 기록 → 사람 검수(박스 에디터, 검수 완료 체크) → train/val 데이터셋 내보내기 | ✅ 완료 |
+| 학습 툴킷 | 웹 UI에서 데이터셋(내보내기 또는 zip 업로드)·베이스 모델 선택 → Ultralytics 학습 실행 → 실시간 mAP/loss 차트 → best.pt 레지스트리 등록 | ✅ 완료 |
 
-전체 루프: **라벨링 → 리뷰 → 내보내기 → 학습 → 학습된 모델로 다시 라벨링**. 기준 모델은 yolo26n이며, 모델 레지스트리에서 공식 모델(yolo26/12/11 계열)을 바로 내려받거나 직접 학습한 `.pt`를 업로드할 수 있습니다.
+전체 루프: **라벨링 → 검수 → 내보내기 → 학습 → 학습된 모델로 다시 라벨링**. 기준 모델은 yolo26n이며, 모델 레지스트리에서 공식 모델(yolo26/12/11 계열)을 바로 내려받거나 직접 학습한 `.pt`를 업로드할 수 있습니다.
+
+> 구버전(confirmed/review 버킷) 데이터를 쓰던 경우 일회성 마이그레이션이 필요합니다: `cd backend && uv run python scripts/migrate_buckets.py` (미리보기는 `--dry-run`).
 
 ## 개발 환경 실행 (Mac)
 
@@ -42,12 +44,12 @@ uv run python cli.py label \
   --models modelA.pt modelB.pt \
   --images ./raw_images \
   --out ./output \
-  --conf-confirm 0.60
+  --conf 0.4
 ```
 
 - 모델별 클래스가 달라도 클래스명 기준으로 union됩니다 (A={person,car}, B={car,dog} → {person,car,dog}).
-- 복수 모델이 공유하는 클래스는 Weighted Box Fusion으로 병합되고, 모델 간 합의 수(agree_count)가 판정에 사용됩니다.
-- 출력: `output/confirmed/{images,labels}` (자동 확정), `output/review/*.json` (사람 검증 대상), `output/classes.json` (글로벌 클래스 레지스트리)
+- 복수 모델이 공유하는 클래스는 Weighted Box Fusion으로 병합됩니다.
+- 출력: `output/labels/*.txt` (이미지별 YOLO 라벨, 빈 파일 = 네거티브), `output/classes.json` (글로벌 클래스 레지스트리)
 
 ## 배포 — 윈도우 GPU PC (Docker) + 외부 접속
 
