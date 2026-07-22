@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import zipfile
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from pydantic import BaseModel
@@ -12,6 +13,7 @@ from sqlmodel import Session, select
 
 from app.config import settings
 from app.core.inference import IMAGE_EXTS
+from app.core.labels import read_boxes
 from app.db import get_session
 from app.models import Project, ReviewItem
 
@@ -155,13 +157,17 @@ def list_images(
 
     total = len(files)
     start = (page - 1) * size
+    page_files = files[start : start + size]
+    # confirmed/review thumbnails overlay their boxes → include them inline
+    with_boxes = bucket in ("confirmed", "review")
     items = [
         {
             "name": name,
             "thumb": f"/api/files/projects/{project_id}/thumbs/{name}",
             "url": f"/api/files/projects/{project_id}/raw/{name}",
+            "boxes": read_boxes(pdir, bucket, Path(name).stem) if with_boxes else [],
         }
-        for name in files[start : start + size]
+        for name in page_files
     ]
     return {"total": total, "page": page, "size": size, "items": items}
 
