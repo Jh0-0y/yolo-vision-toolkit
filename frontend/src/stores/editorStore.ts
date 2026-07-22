@@ -10,10 +10,12 @@ export interface EditorBox {
   sources?: { model: string; score: number }[] | null
 }
 
+export type EditorTool = 'select' | 'draw'
+
 interface EditorState {
   boxes: EditorBox[]
   selectedId: string | null
-  drawMode: boolean
+  tool: EditorTool
   activeCls: number
   dirty: boolean
   past: EditorBox[][]
@@ -21,7 +23,7 @@ interface EditorState {
 
   load: (boxes: EditorBox[]) => void
   select: (id: string | null) => void
-  setDrawMode: (on: boolean) => void
+  setTool: (tool: EditorTool) => void
   setActiveCls: (cls: number) => void
   updateBox: (id: string, patch: Partial<EditorBox>) => void
   addBox: (box: EditorBox) => void
@@ -41,16 +43,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
   return {
     boxes: [],
     selectedId: null,
-    drawMode: false,
+    tool: 'select',
     activeCls: 0,
     dirty: false,
     past: [],
     future: [],
 
     load: (boxes) =>
-      set({ boxes, selectedId: null, drawMode: false, dirty: false, past: [], future: [] }),
+      set({ boxes, selectedId: null, dirty: false, past: [], future: [] }),
     select: (id) => set({ selectedId: id }),
-    setDrawMode: (on) => set({ drawMode: on, selectedId: on ? null : get().selectedId }),
+    setTool: (tool) => set({ tool, selectedId: tool === 'draw' ? null : get().selectedId }),
     setActiveCls: (cls) => set({ activeCls: cls }),
     updateBox: (id, patch) =>
       push(get().boxes.map((b) => (b.id === id ? { ...b, ...patch, status: 'edited' } : b))),

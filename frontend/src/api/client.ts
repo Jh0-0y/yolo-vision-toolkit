@@ -31,6 +31,12 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
+  patch: <T>(path: string, body?: unknown) =>
+    request<T>(path, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
   upload: <T>(path: string, form: FormData) =>
     request<T>(path, { method: 'POST', body: form }),
@@ -56,19 +62,26 @@ export interface DeviceInfo {
   vram_used_mb: number | null
 }
 
+// ---------- models ----------
+
 export interface ModelOut {
   id: string
   name: string
   classes: Record<number, string>
   task: string
   created_at: string
-  source: 'upload' | 'official'
+  source: 'upload' | 'official' | 'trained'
 }
 
 export interface OfficialModel {
   name: string
   default: boolean
 }
+
+export const patchModel = (id: string, name: string) =>
+  api.patch<ModelOut>(`/models/${id}`, { name })
+
+// ---------- projects ----------
 
 export interface ProjectOut {
   id: string
@@ -77,10 +90,9 @@ export interface ProjectOut {
 }
 
 export interface StatsOut {
-  raw: number
-  confirmed: number
-  review: number
-  review_pending: number
+  images: number
+  labeled: number
+  reviewed: number
   classes: { id: number; name: string; sources: string[] }[]
 }
 
@@ -96,35 +108,89 @@ export interface LabelBox {
 
 export interface ImageItem {
   name: string
+  stem: string
   thumb: string
   url: string
-  boxes?: LabelBox[]
-}
-
-export interface LabelDetail {
-  stem: string
-  bucket: string
-  image_url: string
+  labeled: boolean
+  reviewed: boolean
   boxes: LabelBox[]
-  classes: { id: number; name: string; sources: string[] }[]
+  created_at: number
 }
-
-export const getLabels = (projectId: string, bucket: string, stem: string) =>
-  api.get<LabelDetail>(`/projects/${projectId}/labels/${bucket}/${encodeURIComponent(stem)}`)
-
-export const putLabels = (
-  projectId: string,
-  bucket: string,
-  stem: string,
-  boxes: LabelBox[],
-) =>
-  api.put(`/projects/${projectId}/labels/${bucket}/${encodeURIComponent(stem)}`, { boxes })
 
 export interface ImagePage {
   total: number
   page: number
   size: number
   items: ImageItem[]
+}
+
+export interface ImageQuery {
+  labeled?: boolean
+  reviewed?: boolean
+  cls?: number
+  sort?: 'created' | 'name'
+  order?: 'asc' | 'desc'
+  q?: string
+  page?: number
+  size?: number
+}
+
+export function imagesQueryString(query: ImageQuery): string {
+  const params = new URLSearchParams()
+  if (query.labeled != null) params.set('labeled', String(query.labeled))
+  if (query.reviewed != null) params.set('reviewed', String(query.reviewed))
+  if (query.cls != null) params.set('cls', String(query.cls))
+  if (query.sort) params.set('sort', query.sort)
+  if (query.order) params.set('order', query.order)
+  if (query.q) params.set('q', query.q)
+  if (query.page) params.set('page', String(query.page))
+  if (query.size) params.set('size', String(query.size))
+  return params.toString()
+}
+
+export const listImages = (projectId: string, query: ImageQuery) =>
+  api.get<ImagePage>(`/projects/${projectId}/images?${imagesQueryString(query)}`)
+
+export const listImageNames = (projectId: string, query: ImageQuery) =>
+  api.get<{ total: number; names: string[] }>(
+    `/projects/${projectId}/images?${imagesQueryString(query)}&names_only=true`,
+  )
+
+export const deleteImages = (projectId: string, names: string[]) =>
+  api.post<{ deleted: number }>(`/projects/${projectId}/images/delete`, { names })
+
+export const putReviewed = (projectId: string, stem: string, reviewed: boolean) =>
+  api.put<{ ok: boolean; reviewed: boolean }>(
+    `/projects/${projectId}/images/${encodeURIComponent(stem)}/reviewed`,
+    { reviewed },
+  )
+
+// ---------- labels ----------
+
+export interface LabelDetail {
+  stem: string
+  name: string
+  image_url: string
+  boxes: LabelBox[]
+  classes: { id: number; name: string; sources: string[] }[]
+  reviewed: boolean
+}
+
+export const getLabels = (projectId: string, stem: string) =>
+  api.get<LabelDetail>(`/projects/${projectId}/labels/${encodeURIComponent(stem)}`)
+
+export const putLabels = (projectId: string, stem: string, boxes: LabelBox[]) =>
+  api.put(`/projects/${projectId}/labels/${encodeURIComponent(stem)}`, { boxes })
+
+// ---------- auto-label jobs ----------
+
+export interface JobCreate {
+  model_ids: string[]
+  conf: number
+  iou_wbf: number
+  imgsz: number
+  batch_size: number
+  names: string[] | null
 }
 
 export interface JobOut {
@@ -134,9 +200,8 @@ export interface JobOut {
   config: Record<string, unknown>
   result: {
     total: number
-    confirmed: number
-    review: number
-    negative: number
+    labeled: number
+    boxes: number
   } | null
   error: string | null
   created_at: string
@@ -146,70 +211,90 @@ export interface JobProgressEvent {
   phase: 'inference' | 'done' | 'error' | 'cancelled'
   done?: number
   total?: number
-  confirmed?: number
-  review?: number
-  negative?: number
+  labeled?: number
+  boxes?: number
   msg?: string
+}
+
+export function subscribeJobEvents(
+  jobId: string,
+  onEvent: (ev: JobProgressEvent) => void,
+): () => void {
+  const source = new EventSource(`${BASE}/jobs/${jobId}/events`)
+  source.addEventListener('progress', (e) => {
+    const ev = JSON.parse((e as MessageEvent).data) as JobProgressEvent
+    onEvent(ev)
+    if (ev.phase === 'done' || ev.phase === 'error' || ev.phase === 'cancelled') {
+      source.close()
+    }
+  })
+  source.onerror = () => {
+    // EventSource auto-reconnects; nothing to do
+  }
+  return () => source.close()
+}
+
+// ---------- exports ----------
+
+export interface ExportCreate {
+  kind: 'yolo' | 'images'
+  val_split?: number
+  seed?: number
+  names?: string[] | null
 }
 
 export interface ExportOut {
   id: string
+  kind: 'yolo' | 'images'
   created_at: string
   val_split: number
   seed: number
   train: number
   val: number
+  count: number
   classes: number
   size_bytes: number
 }
 
-export interface ReviewQueueItem {
-  id: string
-  stem: string
-  uncertainty: number
-  n_flagged: number
-  thumb: string | null
-}
+export const createExport = (projectId: string, body: ExportCreate) =>
+  api.post<ExportOut>(`/projects/${projectId}/exports`, body)
 
-export interface ReviewQueue {
-  total: number
-  page: number
-  size: number
-  items: ReviewQueueItem[]
-}
+export const exportDownloadUrl = (projectId: string, exportId: string) =>
+  `${BASE}/projects/${projectId}/exports/${exportId}/download`
 
-export interface ReviewBox {
-  id: string | null
-  cls: number
-  xyxy_n: [number, number, number, number]
-  score?: number | null
-  status?: string | null
-  reason?: string | null
-  sources?: { model: string; score: number }[] | null
-}
-
-export interface ReviewItemDetail {
-  id: string
-  project_id: string
-  stem: string
-  status: string
-  uncertainty: number
-  image_url: string | null
-  width: number
-  height: number
-  boxes: ReviewBox[]
-  original_boxes: ReviewBox[]
-  classes: { id: number; name: string; sources: string[] }[]
-}
+// ---------- training ----------
 
 export interface TrainDataset {
-  project_id: string
-  project_name: string
-  export_id: string
+  dataset: string // token: "export:{pid}:{eid}" | "upload:{uid}"
+  name: string
+  source: 'export' | 'upload'
   train: number
   val: number
   classes: number
   created_at: string
+}
+
+export const uploadTrainDataset = (file: File) => {
+  const form = new FormData()
+  form.append('file', file)
+  return api.upload<TrainDataset & { id: string }>('/train/datasets/upload', form)
+}
+
+export interface TrainParams {
+  epochs: number
+  imgsz: number
+  batch: number
+  patience?: number
+  lr0?: number | null
+  optimizer?: string | null
+}
+
+export interface RunCreate {
+  name?: string | null
+  dataset: string
+  base_model_id: string
+  device?: string | null
+  params: TrainParams
 }
 
 export interface TrainRunOut {
@@ -248,6 +333,8 @@ export function subscribeTrainEvents(
   })
   return () => source.close()
 }
+
+// ---------- videos ----------
 
 export interface VideoUploadParams {
   target_fps: number
@@ -297,23 +384,5 @@ export function subscribeVideoEvents(
       source.close()
     }
   })
-  return () => source.close()
-}
-
-export function subscribeJobEvents(
-  jobId: string,
-  onEvent: (ev: JobProgressEvent) => void,
-): () => void {
-  const source = new EventSource(`${BASE}/jobs/${jobId}/events`)
-  source.addEventListener('progress', (e) => {
-    const ev = JSON.parse((e as MessageEvent).data) as JobProgressEvent
-    onEvent(ev)
-    if (ev.phase === 'done' || ev.phase === 'error' || ev.phase === 'cancelled') {
-      source.close()
-    }
-  })
-  source.onerror = () => {
-    // EventSource auto-reconnects; nothing to do
-  }
   return () => source.close()
 }

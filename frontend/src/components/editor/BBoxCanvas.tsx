@@ -24,8 +24,8 @@ interface Fit {
 }
 
 export default function BBoxCanvas({ imageUrl, width, height }: Props) {
-  const { boxes, selectedId, drawMode, activeCls, select, updateBox, addBox, setDrawMode } =
-    useEditorStore()
+  const { boxes, selectedId, tool, activeCls, select, updateBox, addBox } = useEditorStore()
+  const drawMode = tool === 'draw'
   const [image, setImage] = useState<HTMLImageElement | null>(null)
   const [fit, setFit] = useState<Fit | null>(null)
   const [temp, setTemp] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
@@ -60,14 +60,14 @@ export default function BBoxCanvas({ imageUrl, width, height }: Props) {
     }
   }, [image, width, height])
 
-  // attach transformer to the selected rect
+  // attach transformer to the selected rect (select tool only)
   useEffect(() => {
     const tr = trRef.current
     if (!tr) return
-    const node = selectedId ? rectRefs.current.get(selectedId) : null
+    const node = selectedId && !drawMode ? rectRefs.current.get(selectedId) : null
     tr.nodes(node ? [node] : [])
     tr.getLayer()?.batchDraw()
-  }, [selectedId, boxes])
+  }, [selectedId, boxes, drawMode])
 
   if (!image || !fit) {
     return <div style={{ width, height }} />
@@ -139,12 +139,13 @@ export default function BBoxCanvas({ imageUrl, width, height }: Props) {
   }
 
   const onStageMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    const clickedEmpty = e.target === e.target.getStage() || e.target.name() === 'bg-image'
-    if (drawMode && clickedEmpty) {
+    // draw tool: boxes don't listen, so any press starts a new box
+    if (drawMode) {
       const p = stagePointer()
       if (p) setTemp({ x0: p.x, y0: p.y, x1: p.x, y1: p.y })
       return
     }
+    const clickedEmpty = e.target === e.target.getStage() || e.target.name() === 'bg-image'
     if (clickedEmpty) select(null)
   }
 
@@ -162,8 +163,8 @@ export default function BBoxCanvas({ imageUrl, width, height }: Props) {
     const h = Math.abs(temp.y1 - temp.y0)
     setTemp(null)
     if (w > 5 && h > 5) {
+      // stay in draw tool so consecutive boxes can be drawn without re-toggling
       addBox({ id: newBoxId(), cls: activeCls, xyxy_n: toNorm(x, y, w, h), status: 'edited' })
-      setDrawMode(false)
     }
   }
 
@@ -210,6 +211,7 @@ export default function BBoxCanvas({ imageUrl, width, height }: Props) {
               strokeScaleEnabled={false}
               dash={flagged ? [8, 4] : undefined}
               fill={selected ? classColorAlpha(b.cls, 0.16) : 'transparent'}
+              listening={!drawMode}
               draggable={!drawMode}
               onClick={() => select(b.id)}
               onTap={() => select(b.id)}

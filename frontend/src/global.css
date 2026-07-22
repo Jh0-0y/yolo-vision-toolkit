@@ -1,0 +1,6 @@
+/* keep the vertical scrollbar gutter reserved so centered content doesn't
+   shift horizontally when page height crosses the viewport (page changes,
+   infinite scroll, modals) */
+html {
+  scrollbar-gutter: stable;
+}
