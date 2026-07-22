@@ -32,7 +32,7 @@ def create_app() -> FastAPI:
     def health():
         return {"status": "ok", "data_dir": str(settings.data_dir)}
 
-    from app.api import datasets, files, jobs, models, projects, review, system, training
+    from app.api import datasets, files, jobs, models, projects, review, system, training, videos
 
     app.include_router(models.router)
     app.include_router(projects.router)
@@ -42,6 +42,7 @@ def create_app() -> FastAPI:
     app.include_router(training.router)
     app.include_router(files.router)
     app.include_router(system.router)
+    app.include_router(videos.router)
 
     return app
 

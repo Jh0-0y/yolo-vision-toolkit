@@ -19,6 +19,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api, type ImagePage, type StatsOut } from '../api/client'
 import ExportSection from '../components/exports/ExportSection'
 import JobLaunchModal from '../components/jobs/JobLaunchModal'
+import VideoUploadModal from '../components/videos/VideoUploadModal'
 
 const PAGE_SIZE = 60
 
@@ -28,6 +29,7 @@ export default function ProjectPage() {
   const [bucket, setBucket] = useState<string>('raw')
   const [page, setPage] = useState(1)
   const [jobModalOpen, setJobModalOpen] = useState(false)
+  const [videoModalOpen, setVideoModalOpen] = useState(false)
 
   const stats = useQuery({
     queryKey: ['stats', projectId],
@@ -68,6 +70,9 @@ export default function ProjectPage() {
               </Button>
             )}
           </FileButton>
+          <Button variant="light" onClick={() => setVideoModalOpen(true)}>
+            동영상 업로드
+          </Button>
           <Button onClick={() => setJobModalOpen(true)} disabled={!stats.data?.raw}>
             오토라벨링 실행
           </Button>
@@ -145,6 +150,7 @@ export default function ProjectPage() {
       )}
 
       <JobLaunchModal projectId={projectId} opened={jobModalOpen} onClose={() => setJobModalOpen(false)} />
+      <VideoUploadModal projectId={projectId} opened={videoModalOpen} onClose={() => setVideoModalOpen(false)} />
     </Stack>
   )
 }

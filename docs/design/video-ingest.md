@@ -1,6 +1,10 @@
 # 설계: 동영상 → 오토라벨링 입력 (프레임 추출)
 
-> 상태: 설계 (미구현) · 최종 수정 2026-07-22
+> 상태: 구현됨 · 최종 수정 2026-07-22
+>
+> 구현: `app/core/video.py`(추출), `app/jobs/video_manager.py`(스레드풀 러너),
+> `app/api/videos.py`(업로드/SSE/resample/cancel),
+> `frontend/src/components/videos/VideoUploadModal.tsx`(UI)
 
 ## 목표
 

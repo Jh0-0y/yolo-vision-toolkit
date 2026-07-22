@@ -63,7 +63,7 @@ def list_projects(session: Session = Depends(get_session)):
 def create_project(req: ProjectCreate, session: Session = Depends(get_session)):
     project = Project(name=req.name)
     pdir = _project_dir(project.id)
-    for sub in ("raw", "thumbs", "confirmed/images", "confirmed/labels", "review", "rejected", "exports"):
+    for sub in ("raw", "thumbs", "videos", "confirmed/images", "confirmed/labels", "review", "rejected", "exports"):
         (pdir / sub).mkdir(parents=True, exist_ok=True)
     (pdir / "project.json").write_text(
         json.dumps({"id": project.id, "name": project.name}, ensure_ascii=False)

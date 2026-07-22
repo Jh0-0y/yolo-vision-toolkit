@@ -219,6 +219,57 @@ export function subscribeTrainEvents(
   return () => source.close()
 }
 
+export interface VideoUploadParams {
+  target_fps: number
+  max_frames: number
+  start_sec: number
+  end_sec: number | null
+  dedup: boolean
+  dedup_threshold: number
+}
+
+export interface VideoProgressEvent {
+  phase: 'start' | 'extract' | 'done' | 'error' | 'cancelled'
+  saved?: number
+  scanned?: number
+  total_frames?: number
+  skipped_dup?: number
+  src_fps?: number
+  step?: number
+  msg?: string
+}
+
+export function uploadVideo(projectId: string, file: File, params: VideoUploadParams) {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('target_fps', String(params.target_fps))
+  form.append('max_frames', String(params.max_frames))
+  form.append('start_sec', String(params.start_sec))
+  if (params.end_sec != null) form.append('end_sec', String(params.end_sec))
+  form.append('dedup', String(params.dedup))
+  form.append('dedup_threshold', String(params.dedup_threshold))
+  return api.upload<{ video_id: string; filename: string; status: string }>(
+    `/projects/${projectId}/videos`,
+    form,
+  )
+}
+
+export function subscribeVideoEvents(
+  projectId: string,
+  videoId: string,
+  onEvent: (ev: VideoProgressEvent) => void,
+): () => void {
+  const source = new EventSource(`${BASE}/projects/${projectId}/videos/${videoId}/events`)
+  source.addEventListener('progress', (e) => {
+    const ev = JSON.parse((e as MessageEvent).data) as VideoProgressEvent
+    onEvent(ev)
+    if (ev.phase === 'done' || ev.phase === 'error' || ev.phase === 'cancelled') {
+      source.close()
+    }
+  })
+  return () => source.close()
+}
+
 export function subscribeJobEvents(
   jobId: string,
   onEvent: (ev: JobProgressEvent) => void,
