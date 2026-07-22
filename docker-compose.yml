@@ -1,0 +1,25 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    environment:
+      YVT_DATA_DIR: /data
+      YVT_DEVICE: ${YVT_DEVICE:-auto}
+    volumes:
+      - ./data:/data
+      # 대규모 데이터 폴더 링크용: .env의 EXTRA_DATA_DIR 경로를 /extra 로 마운트
+      - ${EXTRA_DATA_DIR:-./data}:/extra:ro
+    ports:
+      # 호스트 로컬 전용 (디버깅용). 외부에는 frontend(nginx)만 열면 됩니다 —
+      # /api 요청은 nginx가 backend로 프록시합니다.
+      - "127.0.0.1:8000:8000"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"

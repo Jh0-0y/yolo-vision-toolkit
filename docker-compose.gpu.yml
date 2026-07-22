@@ -1,0 +1,13 @@
+# GPU override — 윈도우(WSL2) NVIDIA GPU 호스트에서:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+services:
+  backend:
+    environment:
+      YVT_DEVICE: "0"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
