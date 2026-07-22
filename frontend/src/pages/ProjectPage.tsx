@@ -16,10 +16,12 @@ import {
 import { notifications } from '@mantine/notifications'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
-import { api, type ImagePage, type StatsOut } from '../api/client'
+import { api, type ImagePage, type LabelBox, type StatsOut } from '../api/client'
 import ExportSection from '../components/exports/ExportSection'
 import JobLaunchModal from '../components/jobs/JobLaunchModal'
 import VideoUploadModal from '../components/videos/VideoUploadModal'
+import LabelEditModal from '../components/editor/LabelEditModal'
+import { classColor } from '../stores/editorStore'
 
 const PAGE_SIZE = 60
 
@@ -30,6 +32,7 @@ export default function ProjectPage() {
   const [page, setPage] = useState(1)
   const [jobModalOpen, setJobModalOpen] = useState(false)
   const [videoModalOpen, setVideoModalOpen] = useState(false)
+  const [editStem, setEditStem] = useState<string | null>(null)
 
   const stats = useQuery({
     queryKey: ['stats', projectId],
@@ -112,7 +115,7 @@ export default function ProjectPage() {
         <Tabs.List>
           <Tabs.Tab value="raw">원본</Tabs.Tab>
           <Tabs.Tab value="confirmed">확정</Tabs.Tab>
-          <Tabs.Tab value="review">리뷰</Tabs.Tab>
+          <Tabs.Tab value="review">검수 대기</Tabs.Tab>
         </Tabs.List>
       </Tabs>
 
@@ -123,12 +126,31 @@ export default function ProjectPage() {
       )}
 
       <SimpleGrid cols={{ base: 3, sm: 5, lg: 8 }} spacing="xs">
-        {images.data?.items.map((img) => (
-          <Stack key={img.name} gap={2}>
-            <Image src={img.thumb} radius="sm" loading="lazy" style={{ aspectRatio: '1', objectFit: 'cover' }} />
-            <Text size="xs" c="dimmed" truncate>{img.name}</Text>
-          </Stack>
-        ))}
+        {images.data?.items.map((img) => {
+          const labeled = bucket === 'confirmed' || bucket === 'review'
+          const stem = img.name.replace(/\.[^.]+$/, '')
+          return (
+            <Stack key={img.name} gap={2}>
+              {labeled ? (
+                <LabeledThumb
+                  thumb={img.thumb}
+                  boxes={img.boxes ?? []}
+                  onClick={() => setEditStem(stem)}
+                />
+              ) : (
+                <Image
+                  src={img.thumb}
+                  radius="sm"
+                  loading="lazy"
+                  style={{ aspectRatio: '1', objectFit: 'cover' }}
+                />
+              )}
+              <Text size="xs" c="dimmed" truncate>
+                {img.name}
+              </Text>
+            </Stack>
+          )
+        })}
       </SimpleGrid>
 
       {totalPages > 1 && (
@@ -151,6 +173,82 @@ export default function ProjectPage() {
 
       <JobLaunchModal projectId={projectId} opened={jobModalOpen} onClose={() => setJobModalOpen(false)} />
       <VideoUploadModal projectId={projectId} opened={videoModalOpen} onClose={() => setVideoModalOpen(false)} />
+      <LabelEditModal
+        projectId={projectId}
+        bucket={bucket === 'review' ? 'review' : 'confirmed'}
+        stem={editStem}
+        onClose={() => setEditStem(null)}
+      />
     </Stack>
+  )
+}
+
+/** Square thumbnail with normalized label boxes overlaid, exactly aligned to the
+ *  contained image regardless of aspect ratio. */
+function LabeledThumb({
+  thumb,
+  boxes,
+  onClick,
+}: {
+  thumb: string
+  boxes: LabelBox[]
+  onClick: () => void
+}) {
+  const [aspect, setAspect] = useState<number | null>(null)
+  // rect of the contained image within the square box, in % (accounts for letterboxing)
+  const rect =
+    aspect == null
+      ? null
+      : aspect >= 1
+        ? { left: 0, width: 100, top: (100 - 100 / aspect) / 2, height: 100 / aspect }
+        : { top: 0, height: 100, left: (100 - 100 * aspect) / 2, width: 100 * aspect }
+
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        position: 'relative',
+        aspectRatio: '1',
+        cursor: 'pointer',
+        borderRadius: 6,
+        overflow: 'hidden',
+        background: '#111',
+      }}
+    >
+      <img
+        src={thumb}
+        loading="lazy"
+        onLoad={(e) => setAspect(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)}
+        style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+      />
+      {rect && boxes.length > 0 && (
+        <svg
+          viewBox="0 0 1 1"
+          preserveAspectRatio="none"
+          style={{
+            position: 'absolute',
+            left: `${rect.left}%`,
+            top: `${rect.top}%`,
+            width: `${rect.width}%`,
+            height: `${rect.height}%`,
+            pointerEvents: 'none',
+          }}
+        >
+          {boxes.map((b, i) => (
+            <rect
+              key={i}
+              x={b.xyxy_n[0]}
+              y={b.xyxy_n[1]}
+              width={b.xyxy_n[2] - b.xyxy_n[0]}
+              height={b.xyxy_n[3] - b.xyxy_n[1]}
+              fill="none"
+              stroke={classColor(b.cls)}
+              strokeWidth={1.5}
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+        </svg>
+      )}
+    </div>
   )
 }

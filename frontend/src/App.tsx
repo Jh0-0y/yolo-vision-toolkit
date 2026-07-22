@@ -9,7 +9,7 @@ import ReviewPage from './pages/ReviewPage'
 import TrainingPage from './pages/TrainingPage'
 
 const NAV = [
-  { to: '/projects', label: '프로젝트 (오토라벨링)' },
+  { to: '/projects', label: 'Auto-Labeling' },
   { to: '/models', label: '모델 레지스트리' },
   { to: '/training', label: '학습' },
 ]

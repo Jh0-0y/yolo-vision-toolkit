@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { Image as KonvaImage, Layer, Rect, Stage, Transformer } from 'react-konva'
 import type Konva from 'konva'
-import { classColor, newBoxId, useEditorStore, type EditorBox } from '../../stores/editorStore'
+import {
+  classColor,
+  classColorAlpha,
+  newBoxId,
+  useEditorStore,
+  type EditorBox,
+} from '../../stores/editorStore'
 
 interface Props {
   imageUrl: string
@@ -94,6 +100,24 @@ export default function BBoxCanvas({ imageUrl, width, height }: Props) {
     return { x: (pos.x - stage.x()) / scale, y: (pos.y - stage.y()) / scale }
   }
 
+  // clamp stage position so the image always covers the viewport — panning is
+  // confined to within the image, never revealing empty space around it. When an
+  // axis is smaller than the viewport (not zoomed past fit) the image is centered.
+  const clampPos = (pos: { x: number; y: number }): { x: number; y: number } => {
+    const stage = stageRef.current
+    if (!stage) return pos
+    const s = stage.scaleX()
+    const imgW = fit.iw * fit.scale
+    const imgH = fit.ih * fit.scale
+    const maxX = -fit.x * s
+    const minX = width - (fit.x + imgW) * s
+    const maxY = -fit.y * s
+    const minY = height - (fit.y + imgH) * s
+    const clamp = (v: number, lo: number, hi: number) =>
+      lo <= hi ? Math.max(lo, Math.min(hi, v)) : (lo + hi) / 2
+    return { x: clamp(pos.x, minX, maxX), y: clamp(pos.y, minY, maxY) }
+  }
+
   const onWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault()
     const stage = stageRef.current
@@ -102,13 +126,16 @@ export default function BBoxCanvas({ imageUrl, width, height }: Props) {
     const pointer = stage.getPointerPosition()
     if (!pointer) return
     const factor = e.evt.deltaY > 0 ? 1 / 1.08 : 1.08
-    const newScale = Math.min(8, Math.max(0.3, oldScale * factor))
+    // floor at 1 (fitted view): never zoom out smaller than the image fit
+    const newScale = Math.min(8, Math.max(1, oldScale * factor))
     const mousePoint = {
       x: (pointer.x - stage.x()) / oldScale,
       y: (pointer.y - stage.y()) / oldScale,
     }
     stage.scale({ x: newScale, y: newScale })
-    stage.position({ x: pointer.x - mousePoint.x * newScale, y: pointer.y - mousePoint.y * newScale })
+    stage.position(
+      clampPos({ x: pointer.x - mousePoint.x * newScale, y: pointer.y - mousePoint.y * newScale }),
+    )
   }
 
   const onStageMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -146,6 +173,7 @@ export default function BBoxCanvas({ imageUrl, width, height }: Props) {
       width={width}
       height={height}
       draggable={!drawMode && !temp}
+      dragBoundFunc={clampPos}
       onWheel={onWheel}
       onMouseDown={onStageMouseDown}
       onMouseMove={onStageMouseMove}
@@ -181,7 +209,7 @@ export default function BBoxCanvas({ imageUrl, width, height }: Props) {
               strokeWidth={selected ? 3 : 2}
               strokeScaleEnabled={false}
               dash={flagged ? [8, 4] : undefined}
-              fill={selected ? color + '33' : 'transparent'}
+              fill={selected ? classColorAlpha(b.cls, 0.16) : 'transparent'}
               draggable={!drawMode}
               onClick={() => select(b.id)}
               onTap={() => select(b.id)}

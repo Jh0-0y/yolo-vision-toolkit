@@ -91,6 +91,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
 })
 
 export const classColor = (cls: number) => `hsl(${(cls * 137.508) % 360}, 75%, 55%)`
+// valid translucent fill — never append alpha to hsl() strings (that yields an
+// invalid color that Konva renders as solid black)
+export const classColorAlpha = (cls: number, alpha: number) =>
+  `hsla(${(cls * 137.508) % 360}, 75%, 55%, ${alpha})`
 
 if (import.meta.env.DEV) {
   // debugging aid: window.__editor.getState() in the browser console

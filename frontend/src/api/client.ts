@@ -84,11 +84,41 @@ export interface StatsOut {
   classes: { id: number; name: string; sources: string[] }[]
 }
 
+export interface LabelBox {
+  id?: string | null
+  cls: number
+  xyxy_n: [number, number, number, number]
+  score?: number | null
+  status?: string | null
+  reason?: string | null
+  sources?: { model: string; score: number }[] | null
+}
+
 export interface ImageItem {
   name: string
   thumb: string
   url: string
+  boxes?: LabelBox[]
 }
+
+export interface LabelDetail {
+  stem: string
+  bucket: string
+  image_url: string
+  boxes: LabelBox[]
+  classes: { id: number; name: string; sources: string[] }[]
+}
+
+export const getLabels = (projectId: string, bucket: string, stem: string) =>
+  api.get<LabelDetail>(`/projects/${projectId}/labels/${bucket}/${encodeURIComponent(stem)}`)
+
+export const putLabels = (
+  projectId: string,
+  bucket: string,
+  stem: string,
+  boxes: LabelBox[],
+) =>
+  api.put(`/projects/${projectId}/labels/${bucket}/${encodeURIComponent(stem)}`, { boxes })
 
 export interface ImagePage {
   total: number
