@@ -1,8 +1,10 @@
-"""Read/write labels for the confirmed and review buckets, in editor box shape.
+"""Read/write per-image labels and the reviewed flag.
 
-Editor box = {"id", "cls", "xyxy_n": [x1,y1,x2,y2], ...}. Confirmed labels live
-as YOLO txt (confirmed/labels/{stem}.txt); review labels live as JSON with an
-optional "edits" overlay (review/{stem}.json).
+Labels live as YOLO txt at labels/{stem}.txt — file exists means "labeled"
+(an empty file is a deliberate negative). The user-facing reviewed flag
+lives in reviewed.json as {"<stem>": true}.
+
+Editor box = {"id", "cls", "xyxy_n": [x1,y1,x2,y2], ...}.
 """
 
 from __future__ import annotations
@@ -10,50 +12,78 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.core.yolo_io import read_label_file, write_label_file
-
-BUCKETS = ("confirmed", "review")
+from app.core.yolo_io import atomic_write_text, read_label_file, write_label_file
 
 
-def _confirmed_label_path(pdir: Path, stem: str) -> Path:
-    return pdir / "confirmed" / "labels" / f"{stem}.txt"
+def label_path(pdir: Path, stem: str) -> Path:
+    return pdir / "labels" / f"{stem}.txt"
 
 
-def _review_json_path(pdir: Path, stem: str) -> Path:
-    return pdir / "review" / f"{stem}.json"
+def _reviewed_path(pdir: Path) -> Path:
+    return pdir / "reviewed.json"
 
 
-def read_boxes(pdir: Path, bucket: str, stem: str) -> list[dict]:
+def is_labeled(pdir: Path, stem: str) -> bool:
+    return label_path(pdir, stem).exists()
+
+
+def read_boxes(pdir: Path, stem: str) -> list[dict]:
     """Boxes for one image as a list of editor-shaped dicts (may be empty)."""
-    if bucket == "confirmed":
-        path = _confirmed_label_path(pdir, stem)
-        if not path.exists():
-            return []
-        return [
-            {"id": f"{stem}_{i}", "cls": cls, "xyxy_n": list(xyxy)}
-            for i, (cls, xyxy) in enumerate(read_label_file(path))
-        ]
-    if bucket == "review":
-        path = _review_json_path(pdir, stem)
-        if not path.exists():
-            return []
-        payload = json.loads(path.read_text())
-        return payload.get("edits") or payload.get("boxes", [])
-    raise ValueError(f"unknown bucket: {bucket}")
+    path = label_path(pdir, stem)
+    if not path.exists():
+        return []
+    return [
+        {"id": f"{stem}_{i}", "cls": cls, "xyxy_n": list(xyxy)}
+        for i, (cls, xyxy) in enumerate(read_label_file(path))
+    ]
 
 
-def write_boxes(pdir: Path, bucket: str, stem: str, boxes: list[dict]) -> None:
-    if bucket == "confirmed":
-        write_label_file(
-            _confirmed_label_path(pdir, stem),
-            [(int(b["cls"]), tuple(b["xyxy_n"])) for b in boxes],
-        )
-        return
-    if bucket == "review":
-        path = _review_json_path(pdir, stem)
-        payload = json.loads(path.read_text()) if path.exists() else {}
-        payload["edits"] = boxes
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
-        return
-    raise ValueError(f"unknown bucket: {bucket}")
+def write_boxes(pdir: Path, stem: str, boxes: list[dict]) -> None:
+    write_label_file(
+        label_path(pdir, stem),
+        [(int(b["cls"]), tuple(b["xyxy_n"])) for b in boxes],
+    )
+
+
+def label_classes(pdir: Path, stem: str) -> set[int]:
+    """Class ids present in one image's label file (empty if unlabeled/negative)."""
+    path = label_path(pdir, stem)
+    if not path.exists():
+        return set()
+    classes: set[int] = set()
+    for line in path.read_text().splitlines():
+        head = line.split(maxsplit=1)[:1]
+        if head:
+            try:
+                classes.add(int(head[0]))
+            except ValueError:
+                continue
+    return classes
+
+
+def read_reviewed(pdir: Path) -> set[str]:
+    path = _reviewed_path(pdir)
+    if not path.exists():
+        return set()
+    try:
+        data = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return set()
+    return {stem for stem, flag in data.items() if flag}
+
+
+def write_reviewed(pdir: Path, stems: set[str]) -> None:
+    atomic_write_text(
+        _reviewed_path(pdir),
+        json.dumps({stem: True for stem in sorted(stems)}, ensure_ascii=False, indent=2),
+    )
+
+
+def set_reviewed(pdir: Path, stem: str, flag: bool) -> set[str]:
+    stems = read_reviewed(pdir)
+    if flag:
+        stems.add(stem)
+    else:
+        stems.discard(stem)
+    write_reviewed(pdir, stems)
+    return stems

@@ -1,4 +1,4 @@
-"""Per-image label editing for the confirmed/review buckets (used by the grid edit modal)."""
+"""Per-image label editing (used by the label editor page)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from app.config import settings
-from app.core.labels import BUCKETS, read_boxes, write_boxes
+from app.core.labels import read_boxes, read_reviewed, write_boxes
 from app.db import get_session
 from app.models import Project
 
@@ -33,7 +33,7 @@ class LabelsIn(BaseModel):
 
 def _require_project(session: Session, project_id: str) -> None:
     if session.get(Project, project_id) is None:
-        raise HTTPException(404, "프로젝트가 없습니다")
+        raise HTTPException(404, "Project not found")
 
 
 def _project_dir(project_id: str) -> Path:
@@ -42,13 +42,12 @@ def _project_dir(project_id: str) -> Path:
 
 def _safe_stem(stem: str) -> str:
     if "/" in stem or "\\" in stem or stem.startswith("."):
-        raise HTTPException(422, "잘못된 파일명입니다")
+        raise HTTPException(422, "Invalid filename")
     return stem
 
 
-def _image_name(pdir: Path, bucket: str, stem: str) -> str | None:
-    search = (pdir / "confirmed" / "images") if bucket == "confirmed" else (pdir / "raw")
-    for p in search.glob(f"{stem}.*"):
+def _image_name(pdir: Path, stem: str) -> str | None:
+    for p in (pdir / "raw").glob(f"{stem}.*"):
         if p.suffix.lower() != ".json":
             return p.name
     return None
@@ -61,41 +60,35 @@ def _classes(pdir: Path) -> list[dict]:
     return json.loads(path.read_text()).get("classes", [])
 
 
-@router.get("/{bucket}/{stem}")
-def get_labels(
-    project_id: str, bucket: str, stem: str, session: Session = Depends(get_session)
-):
+@router.get("/{stem}")
+def get_labels(project_id: str, stem: str, session: Session = Depends(get_session)):
     _require_project(session, project_id)
-    if bucket not in BUCKETS:
-        raise HTTPException(422, f"알 수 없는 bucket: {bucket}")
     stem = _safe_stem(stem)
     pdir = _project_dir(project_id)
-    name = _image_name(pdir, bucket, stem)
+    name = _image_name(pdir, stem)
     if name is None:
-        raise HTTPException(404, "이미지가 없습니다")
+        raise HTTPException(404, "Image not found")
     return {
         "stem": stem,
-        "bucket": bucket,
+        "name": name,
         "image_url": f"/api/files/projects/{project_id}/raw/{name}",
-        "boxes": read_boxes(pdir, bucket, stem),
+        "boxes": read_boxes(pdir, stem),
         "classes": _classes(pdir),
+        "reviewed": stem in read_reviewed(pdir),
     }
 
 
-@router.put("/{bucket}/{stem}")
+@router.put("/{stem}")
 def put_labels(
     project_id: str,
-    bucket: str,
     stem: str,
     body: LabelsIn,
     session: Session = Depends(get_session),
 ):
     _require_project(session, project_id)
-    if bucket not in BUCKETS:
-        raise HTTPException(422, f"알 수 없는 bucket: {bucket}")
     stem = _safe_stem(stem)
     pdir = _project_dir(project_id)
-    if _image_name(pdir, bucket, stem) is None:
-        raise HTTPException(404, "이미지가 없습니다")
-    write_boxes(pdir, bucket, stem, [b.model_dump() for b in body.boxes])
+    if _image_name(pdir, stem) is None:
+        raise HTTPException(404, "Image not found")
+    write_boxes(pdir, stem, [b.model_dump() for b in body.boxes])
     return {"ok": True, "count": len(body.boxes)}

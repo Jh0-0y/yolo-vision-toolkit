@@ -17,7 +17,6 @@ def _append_progress(path: Path, event: dict) -> None:
 
 
 def run_label_job(job_id: str, cfg_dict: dict, jobs_dir: str) -> dict:
-    from app.core.decision import DecisionConfig
     from app.core.inference import JobCancelled, LabelJobConfig, run_labeling
 
     job_dir = Path(jobs_dir) / job_id
@@ -30,19 +29,12 @@ def run_label_job(job_id: str, cfg_dict: dict, jobs_dir: str) -> dict:
         model_names=cfg_dict.get("model_names"),
         images_dir=Path(cfg_dict["images_dir"]),
         out_dir=Path(cfg_dict["out_dir"]),
-        decision=DecisionConfig(
-            conf_min=cfg_dict.get("conf_min", 0.10),
-            conf_confirm=cfg_dict.get("conf_confirm", 0.60),
-            per_class_confirm={
-                int(k): v for k, v in cfg_dict.get("per_class_confirm", {}).items()
-            },
-            iou_conflict=cfg_dict.get("iou_conflict", 0.50),
-            empty_policy=cfg_dict.get("empty_policy", "review"),
-        ),
+        conf=cfg_dict.get("conf", 0.4),
         iou_wbf=cfg_dict.get("iou_wbf", 0.55),
         device=cfg_dict.get("device"),
         batch_size=cfg_dict.get("batch_size", 16),
         imgsz=cfg_dict.get("imgsz", 640),
+        image_names=cfg_dict.get("image_names"),
         job_id=job_id,
     )
 
@@ -61,8 +53,8 @@ def run_label_job(job_id: str, cfg_dict: dict, jobs_dir: str) -> dict:
     return {
         "status": "done",
         "total": result.total,
-        "confirmed": result.confirmed,
-        "review": result.review,
-        "negative": result.negative,
+        "labeled": result.labeled,
+        "boxes": result.boxes,
+        "stems": result.stems,
         "registry": result.registry,
     }

@@ -39,7 +39,6 @@ def create_app() -> FastAPI:
         labels,
         models,
         projects,
-        review,
         system,
         training,
         videos,
@@ -48,7 +47,6 @@ def create_app() -> FastAPI:
     app.include_router(models.router)
     app.include_router(projects.router)
     app.include_router(jobs.router)
-    app.include_router(review.router)
     app.include_router(datasets.router)
     app.include_router(training.router)
     app.include_router(files.router)

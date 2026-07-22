@@ -1,4 +1,6 @@
-"""Dataset export: confirmed/ → train/val split + data.yaml + downloadable zip."""
+"""Dataset export: labeled images → train/val split + data.yaml zip, or a
+plain zip of original images. Optionally restricted to a selected file list.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +10,7 @@ import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
@@ -25,19 +28,24 @@ router = APIRouter(prefix="/api/projects/{project_id}/exports", tags=["exports"]
 
 
 class ExportCreate(BaseModel):
+    kind: Literal["yolo", "images"] = "yolo"
     val_split: float = Field(default=0.2, ge=0.0, le=0.9)
     seed: int = 42
+    # restrict to these file names (None = all eligible images)
+    names: list[str] | None = None
 
 
 class ExportOut(BaseModel):
     id: str
+    kind: str = "yolo"
     created_at: str
-    val_split: float
-    seed: int
-    train: int
-    val: int
-    classes: int
-    size_bytes: int
+    val_split: float = 0.0
+    seed: int = 0
+    train: int = 0
+    val: int = 0
+    count: int = 0
+    classes: int = 0
+    size_bytes: int = 0
 
 
 def _project_dir(project_id: str) -> Path:
@@ -46,73 +54,96 @@ def _project_dir(project_id: str) -> Path:
 
 def _require_project(session: Session, project_id: str) -> None:
     if session.get(Project, project_id) is None:
-        raise HTTPException(404, "프로젝트가 없습니다")
+        raise HTTPException(404, "Project not found")
 
 
 def _export_meta_path(project_id: str, export_id: str) -> Path:
     return _project_dir(project_id) / "exports" / export_id / "export.json"
 
 
+def _target_images(pdir: Path, req: ExportCreate) -> list[Path]:
+    raw = pdir / "raw"
+    images = sorted(
+        p for p in raw.iterdir() if p.suffix.lower() in IMAGE_EXTS
+    ) if raw.exists() else []
+    if req.names is not None:
+        wanted = set(req.names)
+        images = [p for p in images if p.name in wanted]
+    return images
+
+
 def _build_export(project_id: str, req: ExportCreate) -> dict:
     pdir = _project_dir(project_id)
-    images_dir = pdir / "confirmed" / "images"
-    labels_dir = pdir / "confirmed" / "labels"
-
-    images = sorted(
-        p for p in images_dir.iterdir() if p.suffix.lower() in IMAGE_EXTS
-    ) if images_dir.exists() else []
-    if not images:
-        raise HTTPException(422, "확정된 이미지가 없습니다. 먼저 라벨링/리뷰를 진행하세요.")
-
-    rng = random.Random(req.seed)
-    shuffled = images[:]
-    rng.shuffle(shuffled)
-    n_val = int(len(shuffled) * req.val_split)
-    if req.val_split > 0 and n_val == 0 and len(shuffled) >= 2:
-        n_val = 1
-    val_set = set(shuffled[:n_val])
+    labels_dir = pdir / "labels"
+    images = _target_images(pdir, req)
 
     export_id = f"e_{uuid.uuid4().hex[:10]}"
     out = pdir / "exports" / export_id
-    counts = {"train": 0, "val": 0}
-    for img in images:
-        split = "val" if img in val_set else "train"
-        (out / "images" / split).mkdir(parents=True, exist_ok=True)
-        (out / "labels" / split).mkdir(parents=True, exist_ok=True)
-        shutil.copy2(img, out / "images" / split / img.name)
-        label = labels_dir / f"{img.stem}.txt"
-        if label.exists():
-            shutil.copy2(label, out / "labels" / split / label.name)
-        else:
-            (out / "labels" / split / f"{img.stem}.txt").write_text("")
-        counts[split] += 1
+    meta: dict = {
+        "id": export_id,
+        "kind": req.kind,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "val_split": 0.0,
+        "seed": req.seed,
+        "train": 0,
+        "val": 0,
+        "count": 0,
+        "classes": 0,
+    }
 
-    classes_path = pdir / "classes.json"
-    names: dict[int, str] = {}
-    if classes_path.exists():
-        for c in json.loads(classes_path.read_text()).get("classes", []):
-            names[int(c["id"])] = c["name"]
+    if req.kind == "images":
+        if not images:
+            raise HTTPException(422, "No images to export")
+        (out / "images").mkdir(parents=True, exist_ok=True)
+        for img in images:
+            shutil.copy2(img, out / "images" / img.name)
+        meta["count"] = len(images)
+    else:
+        # yolo: only labeled images qualify
+        images = [p for p in images if (labels_dir / f"{p.stem}.txt").exists()]
+        if not images:
+            raise HTTPException(422, "No labeled images. Label some images first.")
 
-    write_data_yaml(
-        out / "data.yaml",
-        names,
-        train="images/train",
-        val="images/val" if counts["val"] else "images/train",
-    )
+        rng = random.Random(req.seed)
+        shuffled = images[:]
+        rng.shuffle(shuffled)
+        n_val = int(len(shuffled) * req.val_split)
+        if req.val_split > 0 and n_val == 0 and len(shuffled) >= 2:
+            n_val = 1
+        val_set = set(shuffled[:n_val])
+
+        counts = {"train": 0, "val": 0}
+        for img in images:
+            split = "val" if img in val_set else "train"
+            (out / "images" / split).mkdir(parents=True, exist_ok=True)
+            (out / "labels" / split).mkdir(parents=True, exist_ok=True)
+            shutil.copy2(img, out / "images" / split / img.name)
+            shutil.copy2(labels_dir / f"{img.stem}.txt", out / "labels" / split / f"{img.stem}.txt")
+            counts[split] += 1
+
+        classes_path = pdir / "classes.json"
+        names: dict[int, str] = {}
+        if classes_path.exists():
+            for c in json.loads(classes_path.read_text()).get("classes", []):
+                names[int(c["id"])] = c["name"]
+
+        write_data_yaml(
+            out / "data.yaml",
+            names,
+            train="images/train",
+            val="images/val" if counts["val"] else "images/train",
+        )
+        meta.update(
+            val_split=req.val_split,
+            train=counts["train"],
+            val=counts["val"],
+            count=len(images),
+            classes=len(names),
+        )
 
     zip_base = pdir / "exports" / export_id
     zip_path = Path(shutil.make_archive(str(zip_base), "zip", root_dir=out))
-
-    meta = {
-        "id": export_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "val_split": req.val_split,
-        "seed": req.seed,
-        "train": counts["train"],
-        "val": counts["val"],
-        "classes": len(names),
-        "size_bytes": zip_path.stat().st_size,
-    }
+    meta["size_bytes"] = zip_path.stat().st_size
     atomic_write_text(_export_meta_path(project_id, export_id), json.dumps(meta))
     return meta
 
@@ -144,10 +175,10 @@ def list_exports(project_id: str, session: Session = Depends(get_session)):
 def download_export(project_id: str, export_id: str, session: Session = Depends(get_session)):
     _require_project(session, project_id)
     if "/" in export_id or export_id.startswith("."):
-        raise HTTPException(422, "잘못된 id입니다")
+        raise HTTPException(422, "Invalid id")
     zip_path = _project_dir(project_id) / "exports" / f"{export_id}.zip"
     if not zip_path.exists():
-        raise HTTPException(404, "내보내기가 없습니다")
+        raise HTTPException(404, "Export not found")
     return FileResponse(
         zip_path,
         media_type="application/zip",
@@ -159,7 +190,7 @@ def download_export(project_id: str, export_id: str, session: Session = Depends(
 def delete_export(project_id: str, export_id: str, session: Session = Depends(get_session)):
     _require_project(session, project_id)
     if "/" in export_id or export_id.startswith("."):
-        raise HTTPException(422, "잘못된 id입니다")
+        raise HTTPException(422, "Invalid id")
     exports_dir = _project_dir(project_id) / "exports"
     shutil.rmtree(exports_dir / export_id, ignore_errors=True)
     (exports_dir / f"{export_id}.zip").unlink(missing_ok=True)

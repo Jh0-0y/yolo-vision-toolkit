@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 def _safe_name(name: str) -> str:
     clean = Path(name).name
     if clean != name or not clean or clean.startswith("."):
-        raise HTTPException(422, "잘못된 파일명입니다")
+        raise HTTPException(422, "Invalid filename")
     return clean
 
 
@@ -24,7 +24,7 @@ def _safe_name(name: str) -> str:
 def raw_image(project_id: str, name: str):
     path = settings.projects_dir / _safe_name(project_id) / "raw" / _safe_name(name)
     if not path.exists():
-        raise HTTPException(404, "파일이 없습니다")
+        raise HTTPException(404, "File not found")
     return FileResponse(path)
 
 
@@ -33,9 +33,9 @@ def thumbnail(project_id: str, name: str):
     pdir = settings.projects_dir / _safe_name(project_id)
     src = pdir / "raw" / _safe_name(name)
     if not src.exists():
-        raise HTTPException(404, "파일이 없습니다")
+        raise HTTPException(404, "File not found")
     try:
         thumb = get_thumbnail(src, pdir / "thumbs")
     except OSError as e:
-        raise HTTPException(422, f"썸네일 생성 실패: {e}")
+        raise HTTPException(422, f"Thumbnail generation failed: {e}")
     return FileResponse(thumb, media_type="image/jpeg")

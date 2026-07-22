@@ -1,7 +1,8 @@
 """JobManager: single-worker process pool for labeling jobs.
 
 One GPU → one job at a time; queued jobs wait in the executor. The parent
-process updates the DB when a job finishes and indexes review items.
+process updates the DB when a job finishes and resets the reviewed flag for
+re-labeled images (auto labels always need a fresh user review).
 """
 
 from __future__ import annotations
@@ -10,14 +11,12 @@ import json
 import multiprocessing
 from concurrent.futures import Future, ProcessPoolExecutor
 from datetime import datetime, timezone
-from pathlib import Path
-
-from sqlmodel import select
 
 from app.config import settings
+from app.core.labels import read_reviewed, write_reviewed
 from app.db import session_scope
 from app.jobs.worker import run_label_job
-from app.models import Job, ReviewItem
+from app.models import Job
 
 
 class JobManager:
@@ -85,38 +84,18 @@ class JobManager:
             finished_at=datetime.now(timezone.utc),
         )
         if status == "done":
-            index_review_items(project_id)
+            reset_reviewed(project_id, result.get("stems", []))
 
 
-def index_review_items(project_id: str) -> None:
-    """Sync ReviewItem rows with review/*.json files on disk."""
-    review_dir = settings.projects_dir / project_id / "review"
-    if not review_dir.exists():
+def reset_reviewed(project_id: str, stems: list[str]) -> None:
+    """Auto-labeled images need a fresh review — drop their reviewed flag."""
+    if not stems:
         return
-    with session_scope() as session:
-        existing = {
-            item.stem: item
-            for item in session.exec(
-                select(ReviewItem).where(ReviewItem.project_id == project_id)
-            )
-        }
-        for path in sorted(review_dir.glob("*.json")):
-            stem = path.stem
-            try:
-                payload = json.loads(path.read_text())
-            except (json.JSONDecodeError, OSError):
-                continue
-            flagged = sum(
-                1 for b in payload.get("boxes", []) if b.get("status") == "needs_review"
-            )
-            item = existing.get(stem)
-            if item is None:
-                item = ReviewItem(project_id=project_id, stem=stem)
-            item.uncertainty = float(payload.get("uncertainty", 0.0))
-            item.n_flagged = flagged
-            item.status = "pending"
-            session.add(item)
-        session.commit()
+    pdir = settings.projects_dir / project_id
+    reviewed = read_reviewed(pdir)
+    remaining = reviewed - set(stems)
+    if remaining != reviewed:
+        write_reviewed(pdir, remaining)
 
 
 job_manager = JobManager()

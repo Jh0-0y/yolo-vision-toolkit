@@ -26,7 +26,7 @@ TERMINAL_PHASES = {"done", "error", "cancelled"}
 
 def _require_project(session: Session, project_id: str) -> None:
     if session.get(Project, project_id) is None:
-        raise HTTPException(404, "프로젝트가 없습니다")
+        raise HTTPException(404, "Project not found")
 
 
 def _project_dir(project_id: str) -> Path:
@@ -48,9 +48,9 @@ def _params(
     dedup_threshold: float,
 ) -> ExtractParams:
     if target_fps <= 0:
-        raise HTTPException(422, "target_fps는 0보다 커야 합니다")
+        raise HTTPException(422, "target_fps must be greater than 0")
     if max_frames <= 0:
-        raise HTTPException(422, "max_frames는 0보다 커야 합니다")
+        raise HTTPException(422, "max_frames must be greater than 0")
     return ExtractParams(
         target_fps=target_fps,
         max_frames=max_frames,
@@ -80,7 +80,7 @@ async def upload_video(
     ext = Path(name).suffix.lower()
     if ext not in VIDEO_EXTS:
         raise HTTPException(
-            422, f"지원하지 않는 동영상 형식입니다: {ext or '없음'} ({', '.join(sorted(VIDEO_EXTS))})"
+            422, f"Unsupported video format: {ext or 'none'} ({', '.join(sorted(VIDEO_EXTS))})"
         )
 
     video_id = f"vid_{uuid.uuid4().hex[:10]}"
@@ -123,13 +123,13 @@ def resample_video(
     videos_dir = _project_dir(project_id) / "videos"
     meta_path = videos_dir / f"{video_id}.json"
     if not meta_path.exists():
-        raise HTTPException(404, "동영상이 없습니다")
+        raise HTTPException(404, "Video not found")
     meta = json.loads(meta_path.read_text())
     video_path = videos_dir / f"{video_id}{meta['ext']}"
     if not video_path.exists():
-        raise HTTPException(404, "동영상 파일이 없습니다")
+        raise HTTPException(404, "Video file missing")
     if video_manager.is_active(video_id):
-        raise HTTPException(409, "이미 추출 중입니다")
+        raise HTTPException(409, "Extraction already in progress")
 
     meta["params"] = params.__dict__
     meta_path.write_text(json.dumps(meta, ensure_ascii=False))
@@ -150,7 +150,7 @@ def cancel_video(project_id: str, video_id: str, session: Session = Depends(get_
 async def video_events(project_id: str, video_id: str, session: Session = Depends(get_session)):
     _require_project(session, project_id)
     if not (task_dir(video_id) / "progress.jsonl").exists():
-        raise HTTPException(404, "추출 작업이 없습니다")
+        raise HTTPException(404, "Extraction task not found")
 
     async def stream():
         offset = 0

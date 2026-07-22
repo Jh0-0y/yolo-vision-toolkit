@@ -59,15 +59,3 @@ class TrainRun(SQLModel, table=True):
     finished_at: datetime | None = None
     error: str | None = None
     metrics_json: str | None = None  # final epoch metrics
-
-
-class ReviewItem(SQLModel, table=True):
-    __tablename__ = "review_item"
-
-    id: str = Field(default_factory=lambda: _uid("r"), primary_key=True)
-    project_id: str = Field(index=True)
-    stem: str = Field(index=True)
-    uncertainty: float = 0.0
-    n_flagged: int = 0
-    status: str = "pending"  # pending | approved | rejected
-    updated_at: datetime = Field(default_factory=_now)

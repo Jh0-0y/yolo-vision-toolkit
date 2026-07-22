@@ -23,13 +23,12 @@ TERMINAL_STATUSES = {"done", "error", "cancelled"}
 
 class JobCreate(BaseModel):
     model_ids: list[str]
-    conf_min: float = 0.10
-    conf_confirm: float = 0.60
+    conf: float = 0.4
     iou_wbf: float = 0.55
-    iou_conflict: float = 0.50
-    empty_policy: str = "review"
     imgsz: int = 640
     batch_size: int = 16
+    # restrict to these file names (None = all raw images)
+    names: list[str] | None = None
 
 
 class JobOut(BaseModel):
@@ -57,19 +56,19 @@ def _to_out(job: Job) -> JobOut:
 @router.post("/projects/{project_id}/jobs", response_model=JobOut)
 def create_job(project_id: str, req: JobCreate, session: Session = Depends(get_session)):
     if session.get(Project, project_id) is None:
-        raise HTTPException(404, "프로젝트가 없습니다")
+        raise HTTPException(404, "Project not found")
     if not req.model_ids:
-        raise HTTPException(422, "모델을 1개 이상 선택하세요")
+        raise HTTPException(422, "Select at least one model")
 
     model_paths = []
     model_names = []
     for mid in req.model_ids:
         entry = session.get(ModelEntry, mid)
         if entry is None:
-            raise HTTPException(422, f"모델이 없습니다: {mid}")
+            raise HTTPException(422, f"Model not found: {mid}")
         pt = settings.models_dir / mid / "model.pt"
         if not pt.exists():
-            raise HTTPException(422, f"모델 파일이 없습니다: {mid}")
+            raise HTTPException(422, f"Model file missing: {mid}")
         model_paths.append(str(pt))
         # unique display id: name, disambiguated by registry id on collision
         name = entry.name if entry.name not in model_names else f"{entry.name}#{mid[-4:]}"
@@ -81,13 +80,11 @@ def create_job(project_id: str, req: JobCreate, session: Session = Depends(get_s
         "model_names": model_names,
         "images_dir": str(pdir / "raw"),
         "out_dir": str(pdir),
-        "conf_min": req.conf_min,
-        "conf_confirm": req.conf_confirm,
+        "conf": req.conf,
         "iou_wbf": req.iou_wbf,
-        "iou_conflict": req.iou_conflict,
-        "empty_policy": req.empty_policy,
         "imgsz": req.imgsz,
         "batch_size": req.batch_size,
+        "image_names": req.names,
         "device": settings.device,
     }
     job = Job(project_id=project_id, kind="label", config_json=json.dumps(req.model_dump()))
@@ -112,7 +109,7 @@ def list_jobs(project_id: str, session: Session = Depends(get_session)):
 def get_job(job_id: str, session: Session = Depends(get_session)):
     job = session.get(Job, job_id)
     if job is None:
-        raise HTTPException(404, "잡이 없습니다")
+        raise HTTPException(404, "Job not found")
     return _to_out(job)
 
 
@@ -120,7 +117,7 @@ def get_job(job_id: str, session: Session = Depends(get_session)):
 def cancel_job(job_id: str, session: Session = Depends(get_session)):
     job = session.get(Job, job_id)
     if job is None:
-        raise HTTPException(404, "잡이 없습니다")
+        raise HTTPException(404, "Job not found")
     if job.status not in TERMINAL_STATUSES:
         job_manager.cancel(job_id)
         session.expire_all()
@@ -131,7 +128,7 @@ def cancel_job(job_id: str, session: Session = Depends(get_session)):
 @router.get("/jobs/{job_id}/events")
 async def job_events(job_id: str, session: Session = Depends(get_session)):
     if session.get(Job, job_id) is None:
-        raise HTTPException(404, "잡이 없습니다")
+        raise HTTPException(404, "Job not found")
 
     async def stream():
         offset = 0

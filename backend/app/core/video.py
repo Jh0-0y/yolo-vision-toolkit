@@ -56,8 +56,8 @@ def extract_frames(
 
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
-        _append(progress_path, {"phase": "error", "msg": "동영상을 열 수 없습니다"})
-        raise ValueError("동영상을 열 수 없습니다")
+        _append(progress_path, {"phase": "error", "msg": "Cannot open video"})
+        raise ValueError("Cannot open video")
 
     src_fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
