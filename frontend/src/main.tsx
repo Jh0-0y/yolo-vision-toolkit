@@ -17,7 +17,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <MantineProvider defaultColorScheme="auto" theme={{ cursorType: 'pointer' }}>
-        <Notifications />
+        <Notifications position="top-right" style={{ top: 72 }} />
         <BrowserRouter>
           <App />
         </BrowserRouter>

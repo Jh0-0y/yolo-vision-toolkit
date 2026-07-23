@@ -7,11 +7,13 @@ interface Props {
   color?: string
   icon?: ReactNode
   title?: string
+  /** small secondary line under the value (e.g. a comparison value) */
+  sub?: ReactNode
   style?: React.CSSProperties
 }
 
 /** Prominent count tile: a large colored number over an uppercase label. */
-export default function StatTile({ label, value, color = 'gray', icon, title, style }: Props) {
+export default function StatTile({ label, value, color = 'gray', icon, title, sub, style }: Props) {
   return (
     <Paper
       withBorder
@@ -30,6 +32,11 @@ export default function StatTile({ label, value, color = 'gray', icon, title, st
       <Text size="1.6rem" fw={800} lh={1.1} c={color}>
         {value}
       </Text>
+      {sub != null && (
+        <Text size="xs" c="dimmed" mt={2}>
+          {sub}
+        </Text>
+      )}
     </Paper>
   )
 }

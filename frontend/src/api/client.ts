@@ -347,7 +347,7 @@ export interface TrainRunOut {
 }
 
 export interface TrainEpochEvent {
-  phase: 'epoch' | 'done' | 'error' | 'cancelled'
+  phase: 'preparing' | 'start' | 'epoch_start' | 'epoch' | 'done' | 'error' | 'cancelled'
   epoch?: number
   epochs?: number
   metrics?: Record<string, number>
@@ -368,6 +368,33 @@ export function subscribeTrainEvents(
   })
   return () => source.close()
 }
+
+// full per-epoch metrics from ultralytics results.csv (train+val loss, mAP, P/R, lr, time)
+export type TrainResultRow = Record<string, number | string>
+
+export const getRunResults = (runId: string) =>
+  api.get<TrainResultRow[]>(`/train/runs/${runId}/results`)
+
+export interface PerClassRow {
+  cls: number
+  name: string
+  instances: number | null
+  precision: number
+  recall: number
+  mAP50: number
+  'mAP50-95': number
+}
+
+export const getRunPerClass = (runId: string) =>
+  api.get<PerClassRow[]>(`/train/runs/${runId}/per-class`)
+
+export interface PerClassEpoch {
+  epoch: number
+  metrics: PerClassRow[]
+}
+
+export const getRunPerClassHistory = (runId: string) =>
+  api.get<PerClassEpoch[]>(`/train/runs/${runId}/per-class-history`)
 
 // ---------- videos ----------
 

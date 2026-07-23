@@ -34,6 +34,21 @@ TERMINAL = {"done", "error", "stopped"}
 ARTIFACT_EXTS = {".png", ".jpg", ".jpeg", ".csv"}
 
 
+def _safe_part(s: str) -> str:
+    """Filename-safe token (keeps unicode letters/digits, e.g. Korean)."""
+    return "".join(c if c.isalnum() or c in "-_" else "_" for c in str(s)).strip("_") or "x"
+
+
+def _fdt(dt) -> str:
+    """Local-time stamp for filenames: YYYYMMDD_HHMMSS (naive is assumed UTC)."""
+    try:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone().strftime("%Y%m%d_%H%M%S")
+    except Exception:
+        return dt.strftime("%Y%m%d_%H%M%S")
+
+
 class TrainParams(BaseModel):
     epochs: int = Field(default=100, ge=1, le=10000)
     imgsz: int = Field(default=640, ge=64, le=4096)
@@ -111,7 +126,7 @@ def list_datasets(project_id: str | None = None, session: Session = Depends(get_
             out.append(
                 {
                     "dataset": f"export:{pid}:{meta['id']}",
-                    "name": f"{pname} · {meta.get('name') or meta['id']}",
+                    "name": meta.get("name") or meta["id"],
                     "source": "export",
                     "train": meta.get("train", 0),
                     "val": meta.get("val", 0),
@@ -362,6 +377,77 @@ def run_history(run_id: str, session: Session = Depends(get_session)):
     return [e for e in events if e.get("phase") == "epoch"]
 
 
+@router.get("/runs/{run_id}/per-class")
+def run_per_class(run_id: str, session: Session = Depends(get_session)):
+    """Per-class metrics (P/R/mAP) captured at the end of training; [] if absent
+    (older runs, or the extraction failed)."""
+    run = session.get(TrainRun, run_id)
+    if run is None:
+        raise HTTPException(404, "Training run not found")
+    path = settings.run_dir(run.project_id, run_id) / "per_class.json"
+    if not path.exists():
+        return []
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+@router.get("/runs/{run_id}/per-class-history")
+def run_per_class_history(run_id: str, session: Session = Depends(get_session)):
+    """Per-class metrics per epoch (for 'class metric over epochs' charts); []
+    for older runs that predate this capture."""
+    run = session.get(TrainRun, run_id)
+    if run is None:
+        raise HTTPException(404, "Training run not found")
+    path = settings.run_dir(run.project_id, run_id) / "per_class_history.jsonl"
+    if not path.exists():
+        return []
+    rows = []
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return rows
+
+
+@router.get("/runs/{run_id}/results")
+def run_results(run_id: str, session: Session = Depends(get_session)):
+    """Full per-epoch metrics from ultralytics results.csv (train+val loss, mAP,
+    precision/recall, lr, time). Works for completed and past runs; [] if none."""
+    run = session.get(TrainRun, run_id)
+    if run is None:
+        raise HTTPException(404, "Training run not found")
+    rdir = settings.run_dir(run.project_id, run_id)
+    csv_path = rdir / "results.csv"
+    if not csv_path.exists():
+        found = sorted(rdir.glob("*/results.csv"))
+        csv_path = found[0] if found else csv_path
+    if not csv_path.exists():
+        return []
+
+    import csv as _csv
+
+    rows: list[dict] = []
+    with open(csv_path, newline="") as f:
+        for raw in _csv.DictReader(f):
+            row: dict = {}
+            for k, v in raw.items():
+                key = (k or "").strip()
+                if not key:
+                    continue
+                try:
+                    row[key] = float(v)
+                except (TypeError, ValueError):
+                    row[key] = v
+            rows.append(row)
+    return rows
+
+
 @router.post("/runs/{run_id}/stop", response_model=RunOut)
 def stop_run(run_id: str, session: Session = Depends(get_session)):
     run = session.get(TrainRun, run_id)
@@ -464,7 +550,9 @@ def download_weights(run_id: str, which: str, session: Session = Depends(get_ses
     path = settings.run_dir(run.project_id, run_id) / "weights" / f"{which}.pt"
     if not path.exists():
         raise HTTPException(404, "Weights not found")
-    return FileResponse(path, filename=f"{run_id}_{which}.pt")
+    stamp = _fdt(run.created_at)
+    fname = f"{stamp}-{_safe_part(run.name)}-{which}.pt"
+    return FileResponse(path, filename=fname)
 
 
 class RegisterIn(BaseModel):
@@ -489,5 +577,8 @@ def register_weights(run_id: str, req: RegisterIn, session: Session = Depends(ge
     tmp = settings.models_dir / f".register_{run_id}_{req.which}.pt"
     tmp.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, tmp)
-    entry = _register(session, req.name or run.name, tmp, source="trained", project_id=run.project_id)
+    default_name = f"{run.name}-{req.which}"
+    entry = _register(
+        session, req.name or default_name, tmp, source="trained", project_id=run.project_id
+    )
     return model_out(entry)

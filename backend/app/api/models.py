@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from datetime import timezone
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -169,9 +170,16 @@ def download_model(model_id: str, session: Session = Depends(get_session)):
     pt = settings.model_dir(entry.project_id, model_id) / "model.pt"
     if not pt.exists():
         raise HTTPException(404, "Model file missing")
-    # sanitize the display name for the download filename
-    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in entry.name) or model_id
-    return FileResponse(pt, media_type="application/octet-stream", filename=f"{safe}.pt")
+    # {date_time}-{name}.pt — timestamp keeps downloads from colliding on disk
+    try:
+        dt = entry.created_at
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        stamp = dt.astimezone().strftime("%Y%m%d_%H%M%S")
+    except Exception:
+        stamp = entry.created_at.strftime("%Y%m%d_%H%M%S")
+    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in entry.name).strip("_") or model_id
+    return FileResponse(pt, media_type="application/octet-stream", filename=f"{stamp}-{safe}.pt")
 
 
 @router.patch("/{model_id}", response_model=ModelOut)

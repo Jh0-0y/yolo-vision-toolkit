@@ -4,3 +4,13 @@
 html {
   scrollbar-gutter: stable;
 }
+
+/* the notifications container overlays the page; let clicks pass through the
+   empty container (only the toasts themselves are interactive) so it never
+   blocks buttons/inputs underneath — matters now that it sits top-right */
+.mantine-Notifications-root {
+  pointer-events: none;
+}
+.mantine-Notification-root {
+  pointer-events: auto;
+}

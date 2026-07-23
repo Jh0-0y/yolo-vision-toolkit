@@ -53,6 +53,25 @@ class ExportRename(BaseModel):
     name: str
 
 
+# export kind -> human "type" token used in the name/filename
+_EXPORT_TYPE = {"yolo": "train", "images": "original"}
+
+
+def _safe(s: str) -> str:
+    """Filename-safe token (keeps unicode letters/digits, e.g. Korean)."""
+    return "".join(c if c.isalnum() or c in "-_" else "_" for c in str(s)).strip("_") or "x"
+
+
+def _fdt(dt: datetime) -> str:
+    """Local-time stamp for filenames: YYYYMMDD_HHMMSS (naive is assumed UTC)."""
+    try:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone().strftime("%Y%m%d_%H%M%S")
+    except Exception:
+        return dt.strftime("%Y%m%d_%H%M%S")
+
+
 def _project_dir(project_id: str) -> Path:
     return settings.projects_dir / project_id
 
@@ -77,18 +96,20 @@ def _target_images(pdir: Path, req: ExportCreate) -> list[Path]:
     return images
 
 
-def _build_export(project_id: str, req: ExportCreate) -> dict:
+def _build_export(project_id: str, project_name: str, req: ExportCreate) -> dict:
     pdir = _project_dir(project_id)
     labels_dir = pdir / "labels"
     images = _target_images(pdir, req)
 
+    now = datetime.now(timezone.utc)
     export_id = f"e_{uuid.uuid4().hex[:10]}"
     out = pdir / "exports" / export_id
     meta: dict = {
         "id": export_id,
-        "name": f"{req.kind}-{export_id[2:8]}",
+        # {date_time}-{project}-{type} — date-time makes it collision-safe without an id
+        "name": f"{_fdt(now)}-{_safe(project_name)}-{_EXPORT_TYPE.get(req.kind, req.kind)}",
         "kind": req.kind,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": now.isoformat(),
         "val_split": 0.0,
         "seed": req.seed,
         "train": 0,
@@ -159,7 +180,9 @@ async def create_export(
     project_id: str, req: ExportCreate, session: Session = Depends(get_session)
 ):
     _require_project(session, project_id)
-    return await run_in_threadpool(_build_export, project_id, req)
+    project = session.get(Project, project_id)
+    project_name = project.name if project else project_id
+    return await run_in_threadpool(_build_export, project_id, project_name, req)
 
 
 @router.get("", response_model=list[ExportOut])
@@ -187,10 +210,17 @@ def download_export(project_id: str, export_id: str, session: Session = Depends(
     zip_path = _project_dir(project_id) / "exports" / f"{export_id}.zip"
     if not zip_path.exists():
         raise HTTPException(404, "Export not found")
+    meta_path = _export_meta_path(project_id, export_id)
+    name = export_id
+    if meta_path.exists():
+        try:
+            name = json.loads(meta_path.read_text()).get("name", export_id)
+        except (json.JSONDecodeError, OSError):
+            pass
     return FileResponse(
         zip_path,
         media_type="application/zip",
-        filename=f"dataset_{project_id}_{export_id}.zip",
+        filename=f"{_safe(name)}.zip",
     )
 
 
