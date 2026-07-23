@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActionIcon,
-  Badge,
   Center,
   Group,
   Loader,
@@ -32,6 +31,7 @@ import {
   type ImageQuery,
   type StatsOut,
 } from '../api/client'
+import StatTile from '../components/StatTile'
 import AutoLabelModal from '../components/dataset/AutoLabelModal'
 import ExportModal from '../components/dataset/ExportModal'
 import ImageGrid from '../components/dataset/ImageGrid'
@@ -150,23 +150,20 @@ export default function DatasetPage() {
       <Group justify="space-between" align="flex-end">
         <div>
           <Title order={3}>Dataset</Title>
-          <Group gap="xs" mt={4}>
-            <Badge variant="light" color="gray">
-              Images {stats.data?.images ?? '–'}
-            </Badge>
-            <Badge variant="light" color="blue">
-              Labeled {stats.data?.labeled ?? '–'}
-            </Badge>
-            <Badge variant="light" color="teal">
-              Reviewed {stats.data?.reviewed ?? '–'}
-            </Badge>
-            {stats.data && stats.data.classes.length > 0 && (
-              <Tooltip label={stats.data.classes.map((c) => `${c.id}: ${c.name}`).join(', ')}>
-                <Badge variant="light" color="grape" style={{ cursor: 'default' }}>
-                  Classes {stats.data.classes.length}
-                </Badge>
-              </Tooltip>
-            )}
+          <Group gap="sm" mt="xs">
+            <StatTile label="Images" value={stats.data?.images ?? '–'} color="gray.7" />
+            <StatTile label="Labeled" value={stats.data?.labeled ?? '–'} color="blue" />
+            <StatTile label="Reviewed" value={stats.data?.reviewed ?? '–'} color="teal" />
+            <StatTile
+              label="Classes"
+              value={stats.data?.classes.length ?? '–'}
+              color="grape"
+              title={
+                stats.data && stats.data.classes.length > 0
+                  ? stats.data.classes.map((c) => `${c.id}: ${c.name}`).join(', ')
+                  : undefined
+              }
+            />
           </Group>
         </div>
       </Group>
@@ -224,7 +221,6 @@ export default function DatasetPage() {
             })) ?? []),
           ]}
           clearable
-          searchable
         />
         <Group gap={4}>
           <Select

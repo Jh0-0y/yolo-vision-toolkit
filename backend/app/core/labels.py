@@ -12,7 +12,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.core.yolo_io import atomic_write_text, read_label_file, write_label_file
+from app.core.yolo_io import (
+    atomic_write_text,
+    read_box_meta,
+    read_label_file,
+    write_box_meta,
+    write_label_file,
+)
 
 
 def label_path(pdir: Path, stem: str) -> Path:
@@ -28,20 +34,35 @@ def is_labeled(pdir: Path, stem: str) -> bool:
 
 
 def read_boxes(pdir: Path, stem: str) -> list[dict]:
-    """Boxes for one image as a list of editor-shaped dicts (may be empty)."""
+    """Boxes for one image as a list of editor-shaped dicts (may be empty).
+
+    Attaches each box's confidence and review status from the meta sidecar.
+    """
     path = label_path(pdir, stem)
     if not path.exists():
         return []
-    return [
-        {"id": f"{stem}_{i}", "cls": cls, "xyxy_n": list(xyxy)}
-        for i, (cls, xyxy) in enumerate(read_label_file(path))
-    ]
+    metas = read_box_meta(path)
+    boxes: list[dict] = []
+    for i, (cls, xyxy) in enumerate(read_label_file(path)):
+        box: dict = {"id": f"{stem}_{i}", "cls": cls, "xyxy_n": list(xyxy)}
+        meta = metas[i] if i < len(metas) else {}
+        if meta.get("score") is not None:
+            box["score"] = meta["score"]
+        if meta.get("status"):
+            box["status"] = meta["status"]
+        boxes.append(box)
+    return boxes
 
 
 def write_boxes(pdir: Path, stem: str, boxes: list[dict]) -> None:
+    path = label_path(pdir, stem)
     write_label_file(
-        label_path(pdir, stem),
+        path,
         [(int(b["cls"]), tuple(b["xyxy_n"])) for b in boxes],
+    )
+    write_box_meta(
+        path,
+        [{"score": b.get("score"), "status": b.get("status")} for b in boxes],
     )
 
 

@@ -16,9 +16,14 @@ from typing import Callable
 
 from app.core.class_registry import ClassRegistry
 from app.core.ensemble import Detection, merge_detections
-from app.core.yolo_io import atomic_write_text, write_label_file
+from app.core.yolo_io import atomic_write_text, write_box_meta, write_label_file
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
+
+# Detection floor for auto-labeling: boxes are kept down to this confidence so
+# low-confidence detections aren't silently dropped. `cfg.conf` is then a review
+# boundary — boxes below it are flagged "needs_review" rather than discarded.
+DETECT_FLOOR = 0.05
 
 ProgressFn = Callable[[dict], None]
 CancelFn = Callable[[], bool]
@@ -114,7 +119,7 @@ def run_labeling(
         for model_id, model, mapping in models:
             results = model.predict(
                 [str(p) for p in batch],
-                conf=cfg.conf,
+                conf=min(cfg.conf, DETECT_FLOOR),
                 imgsz=cfg.imgsz,
                 device=device,
                 verbose=False,
@@ -137,9 +142,18 @@ def run_labeling(
 
         for i, img_path in enumerate(batch):
             fused = merge_detections(per_image[i], class_sources, iou_thr=cfg.iou_wbf)
-            write_label_file(
-                labels_dir / f"{img_path.stem}.txt",
-                [(fb.cls, fb.xyxy) for fb in fused],
+            label_file = labels_dir / f"{img_path.stem}.txt"
+            write_label_file(label_file, [(fb.cls, fb.xyxy) for fb in fused])
+            # Boxes below the user's conf are kept but flagged for review.
+            write_box_meta(
+                label_file,
+                [
+                    {
+                        "score": fb.score,
+                        "status": "needs_review" if fb.score < cfg.conf else None,
+                    }
+                    for fb in fused
+                ],
             )
             result.labeled += 1
             result.boxes += len(fused)

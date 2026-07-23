@@ -4,14 +4,19 @@ from __future__ import annotations
 
 import json
 import shutil
+import tempfile
+import uuid
 import zipfile
 from pathlib import Path
 
+import yaml
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.config import settings
+from app.core.class_registry import ClassRegistry
 from app.core.inference import IMAGE_EXTS
 from app.core.labels import (
     label_classes,
@@ -21,6 +26,7 @@ from app.core.labels import (
     set_reviewed,
     write_reviewed,
 )
+from app.core.yolo_io import atomic_write_text
 from app.db import get_session
 from app.models import Project
 
@@ -151,6 +157,115 @@ async def upload_images(
         else:
             skipped += 1
     return {"added": added, "skipped": skipped}
+
+
+def _read_yaml_names(extract: Path) -> dict[int, str]:
+    """Read the class names from a YOLO dataset's data.yaml (list or dict form)."""
+    yaml_path = None
+    for candidate in ("data.yaml", "data.yml"):
+        hits = sorted(extract.rglob(candidate))
+        if hits:
+            yaml_path = hits[0]
+            break
+    if yaml_path is None:
+        raise HTTPException(422, "data.yaml not found in the zip (a YOLO-format dataset is required)")
+    data = yaml.safe_load(yaml_path.read_text()) or {}
+    raw = data.get("names")
+    if isinstance(raw, dict):
+        return {int(k): str(v) for k, v in raw.items()}
+    if isinstance(raw, list):
+        return {i: str(v) for i, v in enumerate(raw)}
+    return {}
+
+
+def _remap_label_text(path: Path, mapping: dict[int, int]) -> str:
+    """Rewrite a YOLO label file's class ids through ``mapping`` (local -> project)."""
+    lines: list[str] = []
+    for line in path.read_text().splitlines():
+        parts = line.split()
+        if len(parts) < 5:
+            continue
+        try:
+            old = int(parts[0])
+        except ValueError:
+            continue
+        parts[0] = str(mapping.get(old, old))
+        lines.append(" ".join(parts))
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def _import_labeled_zip(tmp_zip: Path, pdir: Path) -> dict:
+    """Import a YOLO-format dataset zip (images + labels + data.yaml) into a
+    project's raw/ + labels/, merging its classes into classes.json and
+    remapping label class ids so they stay valid project-wide."""
+    with tempfile.TemporaryDirectory() as td:
+        extract = Path(td)
+        try:
+            with zipfile.ZipFile(tmp_zip) as zf:
+                zf.extractall(extract)
+        except zipfile.BadZipFile:
+            raise HTTPException(422, "Corrupted zip file")
+
+        names = _read_yaml_names(extract)
+
+        classes_path = pdir / "classes.json"
+        if classes_path.exists():
+            registry = ClassRegistry.from_dict(json.loads(classes_path.read_text()))
+        else:
+            registry = ClassRegistry()
+        mapping = registry.add_model("import", names) if names else {}
+
+        # YOLO puts labels under a `labels/` directory; key them by image stem.
+        label_files: dict[str, Path] = {}
+        for p in extract.rglob("*.txt"):
+            if any(part.lower() == "labels" for part in p.parts):
+                label_files.setdefault(p.stem, p)
+
+        raw_dir = pdir / "raw"
+        labels_dir = pdir / "labels"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        labels_dir.mkdir(parents=True, exist_ok=True)
+
+        added_images = 0
+        added_labels = 0
+        for img in extract.rglob("*"):
+            if img.suffix.lower() not in IMAGE_EXTS or img.name.startswith("."):
+                continue
+            shutil.copyfile(img, raw_dir / img.name)
+            added_images += 1
+            lbl = label_files.get(img.stem)
+            if lbl is not None:
+                atomic_write_text(labels_dir / f"{img.stem}.txt", _remap_label_text(lbl, mapping))
+                added_labels += 1
+
+        atomic_write_text(classes_path, json.dumps(registry.to_dict(), indent=2))
+        return {
+            "images": added_images,
+            "labeled": added_labels,
+            "classes": len(registry.classes),
+        }
+
+
+@router.post("/{project_id}/dataset-zip")
+async def import_dataset_zip(
+    project_id: str,
+    file: UploadFile,
+    session: Session = Depends(get_session),
+):
+    """Ingest an already-labeled YOLO dataset zip so it shows up in the dataset view."""
+    _get_project(session, project_id)
+    if not file.filename or not file.filename.lower().endswith(".zip"):
+        raise HTTPException(422, "Only .zip files are accepted")
+    pdir = _project_dir(project_id)
+    pdir.mkdir(parents=True, exist_ok=True)
+    tmp_zip = pdir / f".import_{uuid.uuid4().hex[:8]}.zip"
+    try:
+        with open(tmp_zip, "wb") as f:
+            while chunk := await file.read(1 << 20):
+                f.write(chunk)
+        return await run_in_threadpool(_import_labeled_zip, tmp_zip, pdir)
+    finally:
+        tmp_zip.unlink(missing_ok=True)
 
 
 @router.get("/{project_id}/images")

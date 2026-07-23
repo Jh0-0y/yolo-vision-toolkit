@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import {
   ActionIcon,
-  Badge,
   Button,
   Card,
   Container,
@@ -27,6 +26,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api, type ProjectOut, type StatsOut } from '../api/client'
+import StatTile from '../components/StatTile'
 
 function ProjectCard({ project, onDelete }: { project: ProjectOut; onDelete: () => void }) {
   const stats = useQuery({
@@ -78,16 +78,25 @@ function ProjectCard({ project, onDelete }: { project: ProjectOut; onDelete: () 
         </Menu>
       </Group>
 
-      <Group gap="xs" mt="md">
-        <Badge variant="light" color="gray" leftSection={<IconLibraryPhoto size={12} />}>
-          Images {s?.images ?? '–'}
-        </Badge>
-        <Badge variant="light" color="blue" leftSection={<IconTags size={12} />}>
-          Labeled {s?.labeled ?? '–'}
-        </Badge>
-        <Badge variant="light" color="teal" leftSection={<IconUserCheck size={12} />}>
-          Reviewed {s?.reviewed ?? '–'}
-        </Badge>
+      <Group gap="sm" mt="md" grow>
+        <StatTile
+          label="Images"
+          value={s?.images ?? '–'}
+          color="gray.7"
+          icon={<IconLibraryPhoto size={13} />}
+        />
+        <StatTile
+          label="Labeled"
+          value={s?.labeled ?? '–'}
+          color="blue"
+          icon={<IconTags size={13} />}
+        />
+        <StatTile
+          label="Reviewed"
+          value={s?.reviewed ?? '–'}
+          color="teal"
+          icon={<IconUserCheck size={13} />}
+        />
       </Group>
     </Card>
   )
@@ -156,22 +165,25 @@ export default function HomePage() {
         )}
 
         <Modal opened={opened} onClose={() => setOpened(false)} title="New project">
-          <Stack>
-            <TextInput
-              label="Name"
-              value={name}
-              onChange={(e) => setName(e.currentTarget.value)}
-              onKeyDown={(e) => e.key === 'Enter' && name.trim() && create.mutate(name.trim())}
-              data-autofocus
-            />
-            <Button
-              onClick={() => create.mutate(name.trim())}
-              disabled={!name.trim()}
-              loading={create.isPending}
-            >
-              Create
-            </Button>
-          </Stack>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              const n = name.trim()
+              if (n && !create.isPending) create.mutate(n)
+            }}
+          >
+            <Stack>
+              <TextInput
+                label="Name"
+                value={name}
+                onChange={(e) => setName(e.currentTarget.value)}
+                data-autofocus
+              />
+              <Button type="submit" disabled={!name.trim()} loading={create.isPending}>
+                Create
+              </Button>
+            </Stack>
+          </form>
         </Modal>
       </Stack>
     </Container>

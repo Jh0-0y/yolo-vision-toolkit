@@ -112,7 +112,7 @@ export default function TrainPage() {
             <Text fw={600} mb={4}>
               1. Dataset
             </Text>
-            <Group align="center" gap="md" wrap="wrap">
+            <Stack gap="xs">
               <Select
                 w={420}
                 placeholder={
@@ -123,7 +123,6 @@ export default function TrainPage() {
                 data={datasetOptions}
                 value={datasetToken}
                 onChange={setDatasetToken}
-                searchable
               />
               <Dropzone
                 onDrop={(files) => files[0] && uploadZip.mutate(files[0])}
@@ -131,15 +130,14 @@ export default function TrainPage() {
                 multiple={false}
                 loading={uploadZip.isPending}
                 radius="md"
-                p="xs"
-                style={{ flex: 1, minWidth: 260 }}
+                p="sm"
               >
                 <Group gap="xs" justify="center" style={{ pointerEvents: 'none' }} py={4}>
                   <IconFileZip size={20} stroke={1.5} />
-                  <Text size="sm">Upload a YOLO dataset zip (with data.yaml)</Text>
+                  <Text size="sm">Or upload a YOLO dataset zip (with data.yaml)</Text>
                 </Group>
               </Dropzone>
-            </Group>
+            </Stack>
           </div>
 
           <div>
@@ -152,7 +150,6 @@ export default function TrainPage() {
               data={models.data?.map((m) => ({ value: m.id, label: m.name })) ?? []}
               value={baseModel}
               onChange={setBaseModel}
-              searchable
             />
           </div>
 

@@ -171,24 +171,37 @@ export default function LabelEditorPage() {
       const t = e.target as HTMLElement
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return
       const s = useEditorStore.getState()
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
-        e.preventDefault()
-        if (e.shiftKey) s.redo()
-        else s.undo()
-        return
+      // Match by physical key (e.code) so shortcuts work regardless of the active
+      // input source — e.key is remapped by the Korean IME (w -> ㅈ, r -> ㄱ ...).
+      const mod = e.metaKey || e.ctrlKey
+
+      if (mod) {
+        if (e.code === 'KeyZ') {
+          e.preventDefault()
+          if (e.shiftKey) s.redo()
+          else s.undo()
+        } else if (e.code === 'KeyC' && s.selectedId) {
+          e.preventDefault()
+          s.copy()
+        } else if (e.code === 'KeyV' && s.clipboard.length) {
+          e.preventDefault()
+          s.paste()
+        }
+        return // let the browser own every other cmd/ctrl combo
       }
-      if (e.key === 'ArrowLeft') goTo(prevStem)
-      else if (e.key === 'ArrowRight') goTo(nextStem)
-      else if (e.key === 'v' || e.key === 'V') s.setTool('select')
-      else if (e.key === 'w' || e.key === 'W') s.setTool(s.tool === 'draw' ? 'select' : 'draw')
-      else if (e.key === 'r' || e.key === 'R') toggleReviewed.mutate(!reviewed)
-      else if (['d', 'D', 'Delete', 'Backspace'].includes(e.key) && s.selectedId)
+
+      if (e.code === 'ArrowLeft') goTo(prevStem)
+      else if (e.code === 'ArrowRight') goTo(nextStem)
+      else if (e.code === 'KeyV') s.setTool('select')
+      else if (e.code === 'KeyW') s.setTool(s.tool === 'draw' ? 'select' : 'draw')
+      else if (e.code === 'KeyR') toggleReviewed.mutate(!reviewed)
+      else if ((e.code === 'KeyD' || e.code === 'Delete' || e.code === 'Backspace') && s.selectedId)
         s.deleteBox(s.selectedId)
-      else if (e.key === 'Escape') {
+      else if (e.code === 'Escape') {
         s.setTool('select')
         s.select(null)
-      } else if (/^[1-9]$/.test(e.key) && detail.data) {
-        const cls = detail.data.classes[Number(e.key) - 1]
+      } else if (/^Digit[1-9]$/.test(e.code) && detail.data) {
+        const cls = detail.data.classes[Number(e.code.slice(5)) - 1]
         if (cls) {
           if (s.selectedId) s.updateBox(s.selectedId, { cls: cls.id })
           else s.setActiveCls(cls.id)
@@ -273,7 +286,6 @@ export default function LabelEditorPage() {
         <Select
           size="xs"
           w={180}
-          searchable
           placeholder="Class"
           data={classOptions}
           value={selectedBox ? String(selectedBox.cls) : String(store.activeCls)}
@@ -296,7 +308,7 @@ export default function LabelEditorPage() {
         )}
         <Text size="xs" c="dimmed" ml="auto">
           Wheel zoom · drag pan · <b>V/W</b> tools · <b>D</b> delete · <b>1-9</b> class ·{' '}
-          <b>R</b> reviewed · <b>⌘Z</b> undo
+          <b>R</b> reviewed · <b>⌘C/⌘V</b> copy/paste · <b>⌘Z</b> undo
         </Text>
       </Group>
 
@@ -305,7 +317,14 @@ export default function LabelEditorPage() {
           ref={canvasBox}
           style={{ flex: 1, minWidth: 0, borderRadius: 8, overflow: 'hidden' }}
         >
-          {d?.image_url && <BBoxCanvas imageUrl={d.image_url} width={size.w} height={size.h} />}
+          {d?.image_url && (
+            <BBoxCanvas
+              imageUrl={d.image_url}
+              width={size.w}
+              height={size.h}
+              classNames={Object.fromEntries((d?.classes ?? []).map((c) => [c.id, c.name]))}
+            />
+          )}
         </div>
 
         <Card withBorder radius="md" padding="sm" w={240} style={{ flexShrink: 0 }}>

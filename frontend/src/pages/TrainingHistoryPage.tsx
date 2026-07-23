@@ -1,5 +1,7 @@
-import { Badge, Card, Group, Stack, Table, Text, Title } from '@mantine/core'
-import { useQuery } from '@tanstack/react-query'
+import { ActionIcon, Badge, Card, Group, Stack, Table, Text, Title, Tooltip } from '@mantine/core'
+import { notifications } from '@mantine/notifications'
+import { IconTrash } from '@tabler/icons-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { api, type TrainRunOut } from '../api/client'
 
@@ -11,12 +13,24 @@ const RUN_STATUS_COLOR: Record<string, string> = {
   queued: 'gray',
 }
 
+const TERMINAL_STATUS = new Set(['done', 'error', 'stopped'])
+
 export default function TrainingHistoryPage() {
   const navigate = useNavigate()
+  const qc = useQueryClient()
   const runs = useQuery({
     queryKey: ['train-runs'],
     queryFn: () => api.get<TrainRunOut[]>('/train/runs'),
     refetchInterval: 15_000,
+  })
+
+  const remove = useMutation({
+    mutationFn: (id: string) => api.delete(`/train/runs/${id}`),
+    onSuccess: () => {
+      notifications.show({ message: 'Training run deleted', color: 'green' })
+      qc.invalidateQueries({ queryKey: ['train-runs'] })
+    },
+    onError: (e) => notifications.show({ message: String(e), color: 'red' }),
   })
 
   return (
@@ -38,6 +52,7 @@ export default function TrainingHistoryPage() {
               <Table.Th>mAP50</Table.Th>
               <Table.Th>Started</Table.Th>
               <Table.Th ta="right">Status</Table.Th>
+              <Table.Th w={48} />
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -74,6 +89,30 @@ export default function TrainingHistoryPage() {
                       {r.status}
                     </Badge>
                   </Group>
+                </Table.Td>
+                <Table.Td onClick={(e) => e.stopPropagation()}>
+                  <Tooltip
+                    label={
+                      TERMINAL_STATUS.has(r.status)
+                        ? 'Delete run'
+                        : 'Stop the run before deleting'
+                    }
+                    withArrow
+                  >
+                    <ActionIcon
+                      variant="subtle"
+                      color="red"
+                      aria-label="Delete run"
+                      disabled={!TERMINAL_STATUS.has(r.status)}
+                      loading={remove.isPending && remove.variables === r.id}
+                      onClick={() => {
+                        if (confirm(`Delete training run "${r.name}"? This removes its logs and weights.`))
+                          remove.mutate(r.id)
+                      }}
+                    >
+                      <IconTrash size={16} />
+                    </ActionIcon>
+                  </Tooltip>
                 </Table.Td>
               </Table.Tr>
             ))}

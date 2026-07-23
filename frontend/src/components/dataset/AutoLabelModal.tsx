@@ -122,8 +122,8 @@ export default function AutoLabelModal({ projectId, opened, onClose, names }: Pr
           disabled={running}
         />
         <NumberInput
-          label="Confidence threshold (conf)"
-          description="Only boxes above this confidence are kept"
+          label="Review threshold (conf)"
+          description="Boxes below this are kept but flagged for review (dashed); above are accepted"
           value={conf}
           onChange={setConf}
           min={0.05}

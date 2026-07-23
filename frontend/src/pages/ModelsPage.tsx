@@ -213,7 +213,6 @@ export default function ModelsPage() {
             data={catalog.data?.map((c) => c.name) ?? []}
             value={officialName}
             onChange={setOfficialName}
-            searchable
           />
           <Text size="xs" c="dimmed">
             Sizes grow from n to x — larger is more accurate but slower.

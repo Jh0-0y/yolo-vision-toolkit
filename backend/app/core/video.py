@@ -113,7 +113,9 @@ def extract_frames(
                         prev_small = small
 
                 if keep:
-                    fname = f"{stem}_{idx:06d}.jpg"
+                    # Sequential, contiguous frame numbering: {video-name}_00001.jpg,
+                    # _00002.jpg ... in save order (not the sparse source frame index).
+                    fname = f"{stem}_{saved + 1:05d}.jpg"
                     cv2.imwrite(str(raw_dir / fname), frame)
                     saved += 1
                     if saved % 10 == 0 or saved == 1:

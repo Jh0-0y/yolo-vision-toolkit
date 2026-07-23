@@ -5,6 +5,7 @@ import {
   Card,
   Collapse,
   Group,
+  Input,
   NumberInput,
   Progress,
   Slider,
@@ -131,7 +132,7 @@ export default function VideoExtractCard({ projectId }: { projectId: string }) {
           </Group>
         )}
 
-        <Group grow>
+        <Group grow align="flex-start">
           <NumberInput
             label="Frames per second"
             description="Independent of the source fps"
@@ -143,6 +144,7 @@ export default function VideoExtractCard({ projectId }: { projectId: string }) {
           />
           <NumberInput
             label="Max frames"
+            description="Cap on total saved frames"
             value={maxFrames}
             onChange={(v) => setMaxFrames(Number(v) || 1)}
             min={1}
@@ -158,55 +160,56 @@ export default function VideoExtractCard({ projectId }: { projectId: string }) {
           disabled={busy}
         />
 
-        <Button
-          variant="subtle"
-          size="compact-sm"
-          leftSection={<IconSettings size={14} />}
-          onClick={() => setAdvanced((v) => !v)}
-          style={{ alignSelf: 'flex-start' }}
-        >
-          Advanced
-        </Button>
-        <Collapse expanded={advanced}>
-          <Stack gap="sm">
-            <Group grow>
-              <NumberInput
-                label="Start (sec)"
-                value={startSec}
-                onChange={(v) => setStartSec(Number(v) || 0)}
-                min={0}
-                disabled={busy}
-              />
-              <NumberInput
-                label="End (sec)"
-                description="Empty = until the end"
-                value={endSec}
-                onChange={(v) => setEndSec(v === '' ? '' : Number(v))}
-                min={0}
-                disabled={busy}
-              />
-            </Group>
-            {dedup && (
-              <div>
-                <Text size="sm" mb={4}>
-                  Dedup threshold: {dedupThreshold.toFixed(2)}
-                </Text>
-                <Slider
-                  value={dedupThreshold}
-                  onChange={setDedupThreshold}
-                  min={0.8}
-                  max={1}
-                  step={0.01}
+        <Stack gap="sm">
+          <Button
+            variant="subtle"
+            size="compact-sm"
+            leftSection={<IconSettings size={14} />}
+            onClick={() => setAdvanced((v) => !v)}
+            style={{ alignSelf: 'flex-start' }}
+          >
+            Advanced
+          </Button>
+          <Collapse expanded={advanced}>
+            <Stack gap="sm">
+              <Group grow align="flex-start">
+                <NumberInput
+                  label="Start (sec)"
+                  description="0 = from the beginning"
+                  value={startSec}
+                  onChange={(v) => setStartSec(Number(v) || 0)}
+                  min={0}
                   disabled={busy}
-                  label={(v) => v.toFixed(2)}
                 />
-                <Text size="xs" c="dimmed" mt={4}>
-                  Higher = frames must be more similar to be skipped
-                </Text>
-              </div>
-            )}
-          </Stack>
-        </Collapse>
+                <NumberInput
+                  label="End (sec)"
+                  description="Empty = until the end"
+                  value={endSec}
+                  onChange={(v) => setEndSec(v === '' ? '' : Number(v))}
+                  min={0}
+                  disabled={busy}
+                />
+              </Group>
+              {dedup && (
+                <Input.Wrapper
+                  label={`Dedup threshold: ${dedupThreshold.toFixed(2)}`}
+                  description="Higher = frames must be more similar to be skipped"
+                >
+                  <Slider
+                    mt={6}
+                    value={dedupThreshold}
+                    onChange={setDedupThreshold}
+                    min={0.8}
+                    max={1}
+                    step={0.01}
+                    disabled={busy}
+                    label={(v) => v.toFixed(2)}
+                  />
+                </Input.Wrapper>
+              )}
+            </Stack>
+          </Collapse>
+        </Stack>
 
         {progress && (
           <Stack gap={4}>

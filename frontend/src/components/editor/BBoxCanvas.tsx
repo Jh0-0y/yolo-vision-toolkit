@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { Image as KonvaImage, Layer, Rect, Stage, Transformer } from 'react-konva'
+import { Fragment, useEffect, useRef, useState } from 'react'
+import { Image as KonvaImage, Label, Layer, Rect, Stage, Tag, Text, Transformer } from 'react-konva'
 import type Konva from 'konva'
 import {
   classColor,
@@ -13,6 +13,7 @@ interface Props {
   imageUrl: string
   width: number // container size
   height: number
+  classNames?: Record<number, string>
 }
 
 interface Fit {
@@ -23,7 +24,7 @@ interface Fit {
   ih: number
 }
 
-export default function BBoxCanvas({ imageUrl, width, height }: Props) {
+export default function BBoxCanvas({ imageUrl, width, height, classNames = {} }: Props) {
   const { boxes, selectedId, tool, activeCls, select, updateBox, addBox } = useEditorStore()
   const drawMode = tool === 'draw'
   const [image, setImage] = useState<HTMLImageElement | null>(null)
@@ -195,39 +196,50 @@ export default function BBoxCanvas({ imageUrl, width, height }: Props) {
           const color = classColor(b.cls)
           const flagged = b.status === 'needs_review'
           const selected = b.id === selectedId
+          const label =
+            b.score != null
+              ? `${classNames[b.cls] ?? `class ${b.cls}`} ${(b.score * 100).toFixed(0)}%`
+              : null
           return (
-            <Rect
-              key={b.id}
-              ref={(node) => {
-                if (node) rectRefs.current.set(b.id, node)
-                else rectRefs.current.delete(b.id)
-              }}
-              x={px.x}
-              y={px.y}
-              width={px.w}
-              height={px.h}
-              stroke={color}
-              strokeWidth={selected ? 3 : 2}
-              strokeScaleEnabled={false}
-              dash={flagged ? [8, 4] : undefined}
-              fill={selected ? classColorAlpha(b.cls, 0.16) : 'transparent'}
-              listening={!drawMode}
-              draggable={!drawMode}
-              onClick={() => select(b.id)}
-              onTap={() => select(b.id)}
-              onDragEnd={(e) => {
-                const node = e.target
-                updateBox(b.id, { xyxy_n: toNorm(node.x(), node.y(), node.width(), node.height()) })
-              }}
-              onTransformEnd={(e) => {
-                const node = e.target as Konva.Rect
-                const w = Math.max(4, node.width() * node.scaleX())
-                const h = Math.max(4, node.height() * node.scaleY())
-                node.scaleX(1)
-                node.scaleY(1)
-                updateBox(b.id, { xyxy_n: toNorm(node.x(), node.y(), w, h) })
-              }}
-            />
+            <Fragment key={b.id}>
+              <Rect
+                ref={(node) => {
+                  if (node) rectRefs.current.set(b.id, node)
+                  else rectRefs.current.delete(b.id)
+                }}
+                x={px.x}
+                y={px.y}
+                width={px.w}
+                height={px.h}
+                stroke={color}
+                strokeWidth={selected ? 3 : 2}
+                strokeScaleEnabled={false}
+                dash={flagged ? [8, 4] : undefined}
+                fill={selected ? classColorAlpha(b.cls, 0.16) : 'transparent'}
+                listening={!drawMode}
+                draggable={!drawMode}
+                onClick={() => select(b.id)}
+                onTap={() => select(b.id)}
+                onDragEnd={(e) => {
+                  const node = e.target
+                  updateBox(b.id, { xyxy_n: toNorm(node.x(), node.y(), node.width(), node.height()) })
+                }}
+                onTransformEnd={(e) => {
+                  const node = e.target as Konva.Rect
+                  const w = Math.max(4, node.width() * node.scaleX())
+                  const h = Math.max(4, node.height() * node.scaleY())
+                  node.scaleX(1)
+                  node.scaleY(1)
+                  updateBox(b.id, { xyxy_n: toNorm(node.x(), node.y(), w, h) })
+                }}
+              />
+              {selected && label && (
+                <Label x={px.x} y={Math.max(0, px.y - 16)} listening={false}>
+                  <Tag fill={color} opacity={0.85} cornerRadius={2} />
+                  <Text text={label} fontSize={12} padding={2} fill="#fff" />
+                </Label>
+              )}
+            </Fragment>
           )
         })}
         {temp && (

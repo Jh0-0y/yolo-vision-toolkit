@@ -9,7 +9,7 @@ import {
   Title,
 } from '@mantine/core'
 import { Dropzone, IMAGE_MIME_TYPE } from '@mantine/dropzone'
-import { IconPhoto, IconUpload, IconX } from '@tabler/icons-react'
+import { IconFileZip, IconPhoto, IconUpload, IconX } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
@@ -42,12 +42,32 @@ export default function UploadPage() {
     onError: (e) => notifications.show({ message: String(e), color: 'red' }),
   })
 
+  const importZip = useMutation({
+    mutationFn: (file: File) => {
+      const form = new FormData()
+      form.append('file', file)
+      return api.upload<{ images: number; labeled: number; classes: number }>(
+        `/projects/${projectId}/dataset-zip`,
+        form,
+      )
+    },
+    onSuccess: (res) => {
+      notifications.show({
+        message: `${res.images} images imported (${res.labeled} labeled, ${res.classes} classes)`,
+        color: 'green',
+      })
+      queryClient.invalidateQueries({ queryKey: ['images', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['stats', projectId] })
+    },
+    onError: (e) => notifications.show({ message: String(e), color: 'red' }),
+  })
+
   return (
     <Stack gap="lg">
       <div>
         <Title order={3}>Upload Data</Title>
         <Text c="dimmed" size="sm">
-          Upload images or extract frames from a video to build your dataset.
+          Upload images, extract frames from a video, or import a labeled YOLO dataset.
         </Text>
       </div>
 
@@ -99,6 +119,45 @@ export default function UploadPage() {
         </Card>
 
         <VideoExtractCard projectId={projectId} />
+
+        <Card withBorder radius="md" padding="lg">
+          <Stack>
+            <Group gap="xs">
+              <ThemeIcon variant="light" size="lg" radius="md">
+                <IconFileZip size={20} />
+              </ThemeIcon>
+              <div>
+                <Text fw={600}>Labeled dataset (YOLO .zip)</Text>
+                <Text size="xs" c="dimmed">
+                  Import an already-labeled dataset (images + labels + data.yaml)
+                </Text>
+              </div>
+            </Group>
+
+            <Dropzone
+              onDrop={(files) => files[0] && importZip.mutate(files[0])}
+              accept={['application/zip', 'application/x-zip-compressed']}
+              multiple={false}
+              loading={importZip.isPending}
+              radius="md"
+              style={{ flex: 1 }}
+            >
+              <Stack align="center" gap={6} py="xl" style={{ pointerEvents: 'none' }}>
+                <IconFileZip size={32} stroke={1.4} />
+                <Text size="sm">Drag a YOLO dataset .zip here or click to browse</Text>
+                <Text size="xs" c="dimmed">
+                  images + labels + data.yaml — classes are merged in
+                </Text>
+              </Stack>
+            </Dropzone>
+
+            {importZip.isPending && (
+              <Text size="xs" c="dimmed">
+                Importing dataset…
+              </Text>
+            )}
+          </Stack>
+        </Card>
       </SimpleGrid>
     </Stack>
   )

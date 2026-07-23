@@ -20,6 +20,7 @@ interface EditorState {
   dirty: boolean
   past: EditorBox[][]
   future: EditorBox[][]
+  clipboard: EditorBox[]
 
   load: (boxes: EditorBox[]) => void
   select: (id: string | null) => void
@@ -28,6 +29,8 @@ interface EditorState {
   updateBox: (id: string, patch: Partial<EditorBox>) => void
   addBox: (box: EditorBox) => void
   deleteBox: (id: string) => void
+  copy: () => void
+  paste: () => void
   undo: () => void
   redo: () => void
   markSaved: () => void
@@ -48,6 +51,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     dirty: false,
     past: [],
     future: [],
+    clipboard: [],
 
     load: (boxes) =>
       set({ boxes, selectedId: null, dirty: false, past: [], future: [] }),
@@ -63,6 +67,31 @@ export const useEditorStore = create<EditorState>((set, get) => {
     deleteBox: (id) => {
       push(get().boxes.filter((b) => b.id !== id))
       if (get().selectedId === id) set({ selectedId: null })
+    },
+    copy: () => {
+      const { boxes, selectedId } = get()
+      const sel = boxes.find((b) => b.id === selectedId)
+      if (sel) set({ clipboard: [sel] })
+    },
+    paste: () => {
+      const { clipboard, boxes } = get()
+      if (!clipboard.length) return
+      const OFFSET = 0.02
+      const shifted = clipboard.map((b): EditorBox => {
+        const [x1, y1, x2, y2] = b.xyxy_n
+        const dx = Math.max(0, Math.min(OFFSET, 1 - Math.max(x1, x2)))
+        const dy = Math.max(0, Math.min(OFFSET, 1 - Math.max(y1, y2)))
+        // a pasted box is a fresh manual box: keep class/size, drop model metadata
+        return {
+          ...b,
+          id: newBoxId(),
+          xyxy_n: [x1 + dx, y1 + dy, x2 + dx, y2 + dy],
+          score: null,
+          status: 'edited',
+        }
+      })
+      push([...boxes, ...shifted])
+      set({ selectedId: shifted[shifted.length - 1].id })
     },
     undo: () =>
       set((s) => {

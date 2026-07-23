@@ -353,6 +353,20 @@ def stop_run(run_id: str, session: Session = Depends(get_session)):
     return _to_out(session.get(TrainRun, run_id), session)
 
 
+@router.delete("/runs/{run_id}")
+def delete_run(run_id: str, session: Session = Depends(get_session)):
+    run = session.get(TrainRun, run_id)
+    if run is None:
+        raise HTTPException(404, "Training run not found")
+    if run.status not in TERMINAL:
+        raise HTTPException(409, "Cannot delete a run that is still active. Stop it first.")
+    session.delete(run)
+    session.commit()
+    shutil.rmtree(settings.runs_dir / run_id, ignore_errors=True)
+    shutil.rmtree(settings.jobs_dir / run_id, ignore_errors=True)
+    return {"ok": True}
+
+
 @router.get("/runs/{run_id}/events")
 async def run_events(run_id: str, session: Session = Depends(get_session)):
     if session.get(TrainRun, run_id) is None:
