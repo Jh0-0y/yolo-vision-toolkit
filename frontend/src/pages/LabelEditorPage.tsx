@@ -5,18 +5,21 @@ import {
   Button,
   Card,
   Group,
+  Modal,
   ScrollArea,
   SegmentedControl,
   Select,
   Stack,
   Switch,
   Text,
+  TextInput,
   Tooltip,
 } from '@mantine/core'
 import {
   IconArrowLeft,
   IconChevronLeft,
   IconChevronRight,
+  IconPlus,
   IconPointer,
   IconSquarePlus,
   IconTrash,
@@ -25,6 +28,7 @@ import { notifications } from '@mantine/notifications'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
+  addClass,
   getLabels,
   listImageNames,
   putLabels,
@@ -51,6 +55,8 @@ export default function LabelEditorPage() {
   const canvasBox = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 800, h: 560 })
   const [reviewed, setReviewed] = useState(false)
+  const [addClassOpen, setAddClassOpen] = useState(false)
+  const [newClassName, setNewClassName] = useState('')
 
   // the filtered/sorted name list this editor navigates within (frozen per filter set)
   const filterQuery: ImageQuery = useMemo(
@@ -160,6 +166,22 @@ export default function LabelEditorPage() {
       setReviewed(res.reviewed)
       queryClient.invalidateQueries({ queryKey: ['images', projectId] })
       queryClient.invalidateQueries({ queryKey: ['stats', projectId] })
+    },
+    onError: (e) => notifications.show({ message: String(e), color: 'red' }),
+  })
+
+  const createClass = useMutation({
+    mutationFn: (name: string) => addClass(projectId, name),
+    onSuccess: (cls) => {
+      notifications.show({ message: `Class added: ${cls.name}`, color: 'green' })
+      // refresh the label detail (its classes) and the active class becomes the new one
+      queryClient.invalidateQueries({ queryKey: ['labels', projectId, stem] })
+      queryClient.invalidateQueries({ queryKey: ['stats', projectId] })
+      const s = useEditorStore.getState()
+      if (s.selectedId) s.updateBox(s.selectedId, { cls: cls.id })
+      else s.setActiveCls(cls.id)
+      setAddClassOpen(false)
+      setNewClassName('')
     },
     onError: (e) => notifications.show({ message: String(e), color: 'red' }),
   })
@@ -295,6 +317,16 @@ export default function LabelEditorPage() {
             else store.setActiveCls(Number(v))
           }}
         />
+        <Tooltip label="Add a new class">
+          <Button
+            size="xs"
+            variant="light"
+            leftSection={<IconPlus size={14} />}
+            onClick={() => setAddClassOpen(true)}
+          >
+            Class
+          </Button>
+        </Tooltip>
         {selectedBox && (
           <Button
             size="xs"
@@ -381,6 +413,34 @@ export default function LabelEditorPage() {
           </ScrollArea.Autosize>
         </Card>
       </Group>
+
+      <Modal
+        opened={addClassOpen}
+        onClose={() => setAddClassOpen(false)}
+        title="New class"
+        size="sm"
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            const name = newClassName.trim()
+            if (name && !createClass.isPending) createClass.mutate(name)
+          }}
+        >
+          <Stack>
+            <TextInput
+              label="Class name"
+              placeholder="e.g. player"
+              value={newClassName}
+              onChange={(e) => setNewClassName(e.currentTarget.value)}
+              data-autofocus
+            />
+            <Button type="submit" disabled={!newClassName.trim()} loading={createClass.isPending}>
+              Add
+            </Button>
+          </Stack>
+        </form>
+      </Modal>
     </Stack>
   )
 }

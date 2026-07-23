@@ -17,6 +17,7 @@ import {
   IconHistory,
   IconLibraryPhoto,
   IconPlayerPlay,
+  IconTag,
   IconTool,
   IconUpload,
 } from '@tabler/icons-react'
@@ -30,6 +31,7 @@ const NAV_SECTIONS = [
     items: [
       { to: 'upload', label: 'Upload Data', icon: IconUpload },
       { to: 'dataset', label: 'Dataset', icon: IconLibraryPhoto },
+      { to: 'classes', label: 'Classes', icon: IconTag },
     ],
   },
   {

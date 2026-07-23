@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import ProjectLayout from './layouts/ProjectLayout'
+import ClassesPage from './pages/ClassesPage'
 import DatasetPage from './pages/DatasetPage'
 import HomePage from './pages/HomePage'
 import LabelEditorPage from './pages/LabelEditorPage'
@@ -19,6 +20,7 @@ export default function App() {
         <Route path="upload" element={<UploadPage />} />
         <Route path="dataset" element={<DatasetPage />} />
         <Route path="dataset/label/:stem" element={<LabelEditorPage />} />
+        <Route path="classes" element={<ClassesPage />} />
         <Route path="train" element={<TrainPage />} />
         <Route path="history" element={<TrainingHistoryPage />} />
         <Route path="history/:runId" element={<TrainRunDetailPage />} />

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Badge, Checkbox, SimpleGrid, Stack, Text } from '@mantine/core'
+import { Badge, Checkbox, SimpleGrid, Stack, Text, Tooltip } from '@mantine/core'
 import type { ImageItem, LabelBox } from '../../api/client'
 import { classColor } from '../../stores/editorStore'
 
@@ -138,10 +138,17 @@ export default function ImageGrid({ items, selected, onSelectedChange, onOpen }:
                 style={{ position: 'absolute', top: 6, left: 6 }}
               />
               <div style={{ position: 'absolute', top: 6, right: 6, display: 'flex', gap: 4 }}>
-                {img.labeled && (
+                {img.labeled && img.boxes.length > 0 && (
                   <Badge size="xs" variant="filled" color="blue">
                     L
                   </Badge>
+                )}
+                {img.labeled && img.boxes.length === 0 && (
+                  <Tooltip label="No class — label file has no boxes (negative sample)">
+                    <Badge size="xs" variant="filled" color="gray">
+                      N
+                    </Badge>
+                  </Tooltip>
                 )}
                 {img.reviewed && (
                   <Badge size="xs" variant="filled" color="teal">

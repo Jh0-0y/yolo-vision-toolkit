@@ -33,6 +33,7 @@ def create_app() -> FastAPI:
         return {"status": "ok", "data_dir": str(settings.data_dir)}
 
     from app.api import (
+        classes,
         datasets,
         files,
         jobs,
@@ -53,6 +54,7 @@ def create_app() -> FastAPI:
     app.include_router(system.router)
     app.include_router(videos.router)
     app.include_router(labels.router)
+    app.include_router(classes.router)
 
     return app
 

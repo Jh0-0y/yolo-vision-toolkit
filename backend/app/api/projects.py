@@ -47,7 +47,7 @@ class ProjectOut(BaseModel):
 
 class StatsOut(BaseModel):
     images: int
-    labeled: int
+    labeled: int  # label file exists (may be empty = a "no class" negative)
     reviewed: int
     classes: list[dict]
 
