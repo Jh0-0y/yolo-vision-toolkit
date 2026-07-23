@@ -2,7 +2,7 @@ import { ActionIcon, Badge, Card, Group, Stack, Table, Text, Title, Tooltip } fr
 import { notifications } from '@mantine/notifications'
 import { IconTrash } from '@tabler/icons-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { api, type TrainRunOut } from '../api/client'
 
 const RUN_STATUS_COLOR: Record<string, string> = {
@@ -16,11 +16,12 @@ const RUN_STATUS_COLOR: Record<string, string> = {
 const TERMINAL_STATUS = new Set(['done', 'error', 'stopped'])
 
 export default function TrainingHistoryPage() {
+  const { projectId = '' } = useParams()
   const navigate = useNavigate()
   const qc = useQueryClient()
   const runs = useQuery({
-    queryKey: ['train-runs'],
-    queryFn: () => api.get<TrainRunOut[]>('/train/runs'),
+    queryKey: ['train-runs', projectId],
+    queryFn: () => api.get<TrainRunOut[]>(`/train/runs?project_id=${projectId}`),
     refetchInterval: 15_000,
   })
 
@@ -28,7 +29,7 @@ export default function TrainingHistoryPage() {
     mutationFn: (id: string) => api.delete(`/train/runs/${id}`),
     onSuccess: () => {
       notifications.show({ message: 'Training run deleted', color: 'green' })
-      qc.invalidateQueries({ queryKey: ['train-runs'] })
+      qc.invalidateQueries({ queryKey: ['train-runs', projectId] })
     },
     onError: (e) => notifications.show({ message: String(e), color: 'red' }),
   })

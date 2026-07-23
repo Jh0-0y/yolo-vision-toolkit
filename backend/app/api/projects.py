@@ -28,7 +28,7 @@ from app.core.labels import (
 )
 from app.core.yolo_io import atomic_write_text
 from app.db import get_session
-from app.models import Project
+from app.models import ModelEntry, Project, TrainRun
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -108,6 +108,14 @@ def create_project(req: ProjectCreate, session: Session = Depends(get_session)):
 @router.delete("/{project_id}")
 def delete_project(project_id: str, session: Session = Depends(get_session)):
     project = _get_project(session, project_id)
+    # cascade: this project's scoped models & training runs. Their files live
+    # under the project dir (removed by the rmtree below); here we drop the DB
+    # rows and each run's progress log in the shared jobs pool.
+    for run in session.exec(select(TrainRun).where(TrainRun.project_id == project_id)).all():
+        shutil.rmtree(settings.jobs_dir / run.id, ignore_errors=True)
+        session.delete(run)
+    for model in session.exec(select(ModelEntry).where(ModelEntry.project_id == project_id)).all():
+        session.delete(model)
     session.delete(project)
     session.commit()
     shutil.rmtree(_project_dir(project_id), ignore_errors=True)

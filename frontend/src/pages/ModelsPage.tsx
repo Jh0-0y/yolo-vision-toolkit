@@ -18,13 +18,15 @@ import {
 import {
   IconCloudDownload,
   IconDotsVertical,
+  IconDownload,
   IconPencil,
   IconTrash,
   IconUpload,
 } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, patchModel, type ModelOut, type OfficialModel } from '../api/client'
+import { useParams } from 'react-router-dom'
+import { api, modelDownloadUrl, patchModel, type ModelOut, type OfficialModel } from '../api/client'
 
 const SOURCE_LABEL: Record<string, { label: string; color: string }> = {
   official: { label: 'Official', color: 'blue' },
@@ -33,6 +35,7 @@ const SOURCE_LABEL: Record<string, { label: string; color: string }> = {
 }
 
 export default function ModelsPage() {
+  const { projectId = '' } = useParams()
   const queryClient = useQueryClient()
   const [downloadOpen, setDownloadOpen] = useState(false)
   const [officialName, setOfficialName] = useState<string | null>(null)
@@ -40,8 +43,8 @@ export default function ModelsPage() {
   const [renameValue, setRenameValue] = useState('')
 
   const models = useQuery({
-    queryKey: ['models'],
-    queryFn: () => api.get<ModelOut[]>('/models'),
+    queryKey: ['models', projectId],
+    queryFn: () => api.get<ModelOut[]>(`/models?project_id=${projectId}`),
   })
   const catalog = useQuery({
     queryKey: ['models-official'],
@@ -49,10 +52,11 @@ export default function ModelsPage() {
     enabled: downloadOpen,
   })
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['models'] })
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['models', projectId] })
 
   const download = useMutation({
-    mutationFn: (name: string) => api.post<ModelOut>('/models/official', { name }),
+    mutationFn: (name: string) =>
+      api.post<ModelOut>('/models/official', { name, project_id: projectId }),
     onSuccess: (m) => {
       notifications.show({
         message: `${m.name} downloaded (${Object.keys(m.classes).length} classes)`,
@@ -69,7 +73,7 @@ export default function ModelsPage() {
     mutationFn: (file: File) => {
       const form = new FormData()
       form.append('file', file)
-      return api.upload<ModelOut>('/models', form)
+      return api.upload<ModelOut>(`/models?project_id=${projectId}`, form)
     },
     onSuccess: (m) => {
       notifications.show({ message: `${m.name} uploaded`, color: 'green' })
@@ -169,6 +173,13 @@ export default function ModelsPage() {
                       </ActionIcon>
                     </Menu.Target>
                     <Menu.Dropdown>
+                      <Menu.Item
+                        leftSection={<IconDownload size={14} />}
+                        component="a"
+                        href={modelDownloadUrl(m.id)}
+                      >
+                        Download .pt
+                      </Menu.Item>
                       <Menu.Item
                         leftSection={<IconPencil size={14} />}
                         onClick={() => {

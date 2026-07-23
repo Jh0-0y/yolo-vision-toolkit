@@ -81,6 +81,8 @@ export interface OfficialModel {
 export const patchModel = (id: string, name: string) =>
   api.patch<ModelOut>(`/models/${id}`, { name })
 
+export const modelDownloadUrl = (id: string) => `${BASE}/models/${id}/download`
+
 // ---------- projects ----------
 
 export interface ProjectOut {
@@ -267,6 +269,7 @@ export interface ExportCreate {
 
 export interface ExportOut {
   id: string
+  name: string
   kind: 'yolo' | 'images'
   created_at: string
   val_split: number
@@ -280,6 +283,15 @@ export interface ExportOut {
 
 export const createExport = (projectId: string, body: ExportCreate) =>
   api.post<ExportOut>(`/projects/${projectId}/exports`, body)
+
+export const listExports = (projectId: string) =>
+  api.get<ExportOut[]>(`/projects/${projectId}/exports`)
+
+export const renameExport = (projectId: string, exportId: string, name: string) =>
+  api.patch<ExportOut>(`/projects/${projectId}/exports/${exportId}`, { name })
+
+export const deleteExport = (projectId: string, exportId: string) =>
+  api.delete<{ ok: boolean }>(`/projects/${projectId}/exports/${exportId}`)
 
 export const exportDownloadUrl = (projectId: string, exportId: string) =>
   `${BASE}/projects/${projectId}/exports/${exportId}/download`
@@ -313,6 +325,7 @@ export interface TrainParams {
 
 export interface RunCreate {
   name?: string | null
+  project_id?: string | null
   dataset: string
   base_model_id: string
   device?: string | null

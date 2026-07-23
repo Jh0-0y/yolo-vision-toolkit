@@ -30,11 +30,15 @@ class TrainManager:
 
     def start(self, run_id: str) -> int:
         backend_dir = Path(__file__).resolve().parents[2]
+        with session_scope() as session:
+            run = session.get(TrainRun, run_id)
+            project_id = run.project_id if run is not None else None
+        run_dir = settings.run_dir(project_id, run_id)
         proc = subprocess.Popen(
-            [sys.executable, "-m", "app.core.training_runner", run_id],
+            [sys.executable, "-m", "app.core.training_runner", str(run_dir)],
             cwd=backend_dir,
             env={**os.environ, "YVT_DATA_DIR": str(settings.data_dir)},
-            stdout=open(settings.runs_dir / run_id / "train.log", "w"),
+            stdout=open(run_dir / "train.log", "w"),
             stderr=subprocess.STDOUT,
         )
         with self._lock:

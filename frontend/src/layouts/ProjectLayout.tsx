@@ -16,6 +16,7 @@ import {
   IconFolder,
   IconHistory,
   IconLibraryPhoto,
+  IconPackageExport,
   IconPlayerPlay,
   IconTag,
   IconTool,
@@ -32,6 +33,7 @@ const NAV_SECTIONS = [
       { to: 'upload', label: 'Upload Data', icon: IconUpload },
       { to: 'dataset', label: 'Dataset', icon: IconLibraryPhoto },
       { to: 'classes', label: 'Classes', icon: IconTag },
+      { to: 'exports', label: 'Exports', icon: IconPackageExport },
     ],
   },
   {

@@ -1,7 +1,8 @@
-"""Training worker process: `python -m app.core.training_runner <run_id>`.
+"""Training worker process: `python -m app.core.training_runner <run_dir>`.
 
 Runs ultralytics train in its own process so it can be SIGTERM-stopped and
-never loads CUDA/torch in the API. Per-epoch metrics stream to
+never loads CUDA/torch in the API. `run_dir` is the run's artifact directory
+(project-scoped or the flat pool). Per-epoch metrics stream to
 jobs/<run_id>/progress.jsonl (same tail contract as labeling jobs).
 """
 
@@ -18,11 +19,12 @@ def _emit(path: Path, event: dict) -> None:
         f.write(json.dumps({"ts": time.time(), **event}) + "\n")
 
 
-def main(run_id: str) -> int:
+def main(run_dir_arg: str) -> int:
     from app.config import resolve_device, settings
 
     settings.ensure_dirs()
-    run_dir = settings.runs_dir / run_id
+    run_dir = Path(run_dir_arg)
+    run_id = run_dir.name
     cfg = json.loads((run_dir / "config.json").read_text())
 
     job_dir = settings.jobs_dir / run_id
@@ -49,7 +51,7 @@ def main(run_id: str) -> int:
     try:
         results = model.train(
             data=str(Path(cfg["dataset_path"]) / "data.yaml"),
-            project=str(settings.runs_dir),
+            project=str(run_dir.parent),
             name=run_id,
             exist_ok=True,
             device=resolve_device(cfg.get("device")),

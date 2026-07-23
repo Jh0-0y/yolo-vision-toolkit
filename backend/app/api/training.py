@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 from sse_starlette.sse import EventSourceResponse
 from sqlmodel import Session, select
 
@@ -45,6 +46,7 @@ class TrainParams(BaseModel):
 
 class RunCreate(BaseModel):
     name: str | None = None
+    project_id: str | None = None
     # dataset token: "export:{project_id}:{export_id}" | "upload:{dataset_id}"
     dataset: str
     base_model_id: str
@@ -84,12 +86,16 @@ def _to_out(run: TrainRun, session: Session) -> RunOut:
 
 
 @router.get("/datasets")
-def list_datasets(session: Session = Depends(get_session)):
+def list_datasets(project_id: str | None = None, session: Session = Depends(get_session)):
     """Trainable datasets: project exports + uploaded zips, newest first.
 
-    Each item carries a `dataset` token consumed by POST /runs.
+    Each item carries a `dataset` token consumed by POST /runs. When project_id
+    is given, only that project's exports are listed (uploaded zips have no
+    project and are always shown).
     """
     projects = {p.id: p.name for p in session.exec(select(Project)).all()}
+    if project_id is not None:
+        projects = {pid: name for pid, name in projects.items() if pid == project_id}
     out = []
     for pid, pname in projects.items():
         exports_dir = settings.projects_dir / pid / "exports"
@@ -105,7 +111,7 @@ def list_datasets(session: Session = Depends(get_session)):
             out.append(
                 {
                     "dataset": f"export:{pid}:{meta['id']}",
-                    "name": f"{pname} · {meta['id']}",
+                    "name": f"{pname} · {meta.get('name') or meta['id']}",
                     "source": "export",
                     "train": meta.get("train", 0),
                     "val": meta.get("val", 0),
@@ -286,14 +292,22 @@ def create_run(req: RunCreate, session: Session = Depends(get_session)):
     base = session.get(ModelEntry, req.base_model_id)
     if base is None:
         raise HTTPException(422, "Base model not found")
-    base_pt = settings.models_dir / req.base_model_id / "model.pt"
+    base_pt = settings.model_dir(base.project_id, req.base_model_id) / "model.pt"
     if not base_pt.exists():
         raise HTTPException(422, "Base model file missing")
     if train_manager.has_active():
         raise HTTPException(409, "A training run is already in progress. Try again after it finishes.")
 
+    # for export-sourced datasets the project id is embedded in the token
+    project_id = req.project_id
+    if project_id is None and req.dataset.startswith("export:"):
+        parts = req.dataset.split(":")
+        if len(parts) >= 2:
+            project_id = parts[1]
+
     run = TrainRun(
         name=req.name or f"{base.name}-{req.dataset.rsplit(':', 1)[-1][-4:]}",
+        project_id=project_id,
         dataset_path=str(dataset_dir),
         base_model_id=req.base_model_id,
         params_json=json.dumps(req.params.model_dump(exclude_none=True)),
@@ -302,7 +316,7 @@ def create_run(req: RunCreate, session: Session = Depends(get_session)):
     session.commit()
     session.refresh(run)
 
-    run_dir = settings.runs_dir / run.id
+    run_dir = settings.run_dir(run.project_id, run.id)
     run_dir.mkdir(parents=True, exist_ok=True)
     (settings.jobs_dir / run.id).mkdir(parents=True, exist_ok=True)
     (run_dir / "config.json").write_text(
@@ -321,8 +335,14 @@ def create_run(req: RunCreate, session: Session = Depends(get_session)):
 
 
 @router.get("/runs", response_model=list[RunOut])
-def list_runs(session: Session = Depends(get_session)):
-    runs = session.exec(select(TrainRun).order_by(TrainRun.created_at.desc())).all()
+def list_runs(project_id: str | None = None, session: Session = Depends(get_session)):
+    stmt = select(TrainRun)
+    if project_id is not None:
+        # this project's runs plus legacy/shared (project_id NULL)
+        stmt = stmt.where(
+            or_(TrainRun.project_id == project_id, TrainRun.project_id.is_(None))
+        )
+    runs = session.exec(stmt.order_by(TrainRun.created_at.desc())).all()
     return [_to_out(r, session) for r in runs]
 
 
@@ -360,9 +380,10 @@ def delete_run(run_id: str, session: Session = Depends(get_session)):
         raise HTTPException(404, "Training run not found")
     if run.status not in TERMINAL:
         raise HTTPException(409, "Cannot delete a run that is still active. Stop it first.")
+    run_dir = settings.run_dir(run.project_id, run_id)
     session.delete(run)
     session.commit()
-    shutil.rmtree(settings.runs_dir / run_id, ignore_errors=True)
+    shutil.rmtree(run_dir, ignore_errors=True)
     shutil.rmtree(settings.jobs_dir / run_id, ignore_errors=True)
     return {"ok": True}
 
@@ -404,9 +425,10 @@ async def run_events(run_id: str, session: Session = Depends(get_session)):
 
 @router.get("/runs/{run_id}/artifacts")
 def list_artifacts(run_id: str, session: Session = Depends(get_session)):
-    if session.get(TrainRun, run_id) is None:
+    run = session.get(TrainRun, run_id)
+    if run is None:
         raise HTTPException(404, "Training run not found")
-    run_dir = settings.runs_dir / run_id
+    run_dir = settings.run_dir(run.project_id, run_id)
     files = []
     if run_dir.exists():
         for p in sorted(run_dir.iterdir()):
@@ -423,7 +445,10 @@ def list_artifacts(run_id: str, session: Session = Depends(get_session)):
 def get_artifact(run_id: str, name: str, session: Session = Depends(get_session)):
     if "/" in name or name.startswith("."):
         raise HTTPException(422, "Invalid filename")
-    path = settings.runs_dir / run_id / name
+    run = session.get(TrainRun, run_id)
+    if run is None:
+        raise HTTPException(404, "Training run not found")
+    path = settings.run_dir(run.project_id, run_id) / name
     if not path.exists() or path.suffix.lower() not in ARTIFACT_EXTS:
         raise HTTPException(404, "File not found")
     return FileResponse(path)
@@ -433,7 +458,10 @@ def get_artifact(run_id: str, name: str, session: Session = Depends(get_session)
 def download_weights(run_id: str, which: str, session: Session = Depends(get_session)):
     if which not in ("best", "last"):
         raise HTTPException(422, "Only best or last is allowed")
-    path = settings.runs_dir / run_id / "weights" / f"{which}.pt"
+    run = session.get(TrainRun, run_id)
+    if run is None:
+        raise HTTPException(404, "Training run not found")
+    path = settings.run_dir(run.project_id, run_id) / "weights" / f"{which}.pt"
     if not path.exists():
         raise HTTPException(404, "Weights not found")
     return FileResponse(path, filename=f"{run_id}_{which}.pt")
@@ -453,7 +481,7 @@ def register_weights(run_id: str, req: RegisterIn, session: Session = Depends(ge
         raise HTTPException(404, "Training run not found")
     if req.which not in ("best", "last"):
         raise HTTPException(422, "Only best or last is allowed")
-    src = settings.runs_dir / run_id / "weights" / f"{req.which}.pt"
+    src = settings.run_dir(run.project_id, run_id) / "weights" / f"{req.which}.pt"
     if not src.exists():
         raise HTTPException(404, "Weights not found")
 
@@ -461,5 +489,5 @@ def register_weights(run_id: str, req: RegisterIn, session: Session = Depends(ge
     tmp = settings.models_dir / f".register_{run_id}_{req.which}.pt"
     tmp.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, tmp)
-    entry = _register(session, req.name or run.name, tmp, source="trained")
+    entry = _register(session, req.name or run.name, tmp, source="trained", project_id=run.project_id)
     return model_out(entry)

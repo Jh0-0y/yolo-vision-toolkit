@@ -39,6 +39,20 @@ class Settings(BaseSettings):
     def datasets_dir(self) -> Path:
         return self.data_dir / "datasets"
 
+    def model_dir(self, project_id: str | None, model_id: str) -> Path:
+        """Where a model's files live. Scoped models sit under their project
+        folder; shared/legacy models (project_id None) stay in the flat pool."""
+        if project_id:
+            return self.projects_dir / project_id / "models" / model_id
+        return self.models_dir / model_id
+
+    def run_dir(self, project_id: str | None, run_id: str) -> Path:
+        """Where a training run's artifacts live. Scoped runs sit under their
+        project folder; shared/legacy runs stay in the flat pool."""
+        if project_id:
+            return self.projects_dir / project_id / "runs" / run_id
+        return self.runs_dir / run_id
+
     def ensure_dirs(self) -> None:
         for d in (
             self.data_dir,

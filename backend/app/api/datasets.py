@@ -37,6 +37,7 @@ class ExportCreate(BaseModel):
 
 class ExportOut(BaseModel):
     id: str
+    name: str = ""
     kind: str = "yolo"
     created_at: str
     val_split: float = 0.0
@@ -46,6 +47,10 @@ class ExportOut(BaseModel):
     count: int = 0
     classes: int = 0
     size_bytes: int = 0
+
+
+class ExportRename(BaseModel):
+    name: str
 
 
 def _project_dir(project_id: str) -> Path:
@@ -81,6 +86,7 @@ def _build_export(project_id: str, req: ExportCreate) -> dict:
     out = pdir / "exports" / export_id
     meta: dict = {
         "id": export_id,
+        "name": f"{req.kind}-{export_id[2:8]}",
         "kind": req.kind,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "val_split": 0.0,
@@ -164,9 +170,11 @@ def list_exports(project_id: str, session: Session = Depends(get_session)):
     if exports_dir.exists():
         for meta_path in exports_dir.glob("*/export.json"):
             try:
-                metas.append(json.loads(meta_path.read_text()))
+                meta = json.loads(meta_path.read_text())
             except (json.JSONDecodeError, OSError):
                 continue
+            meta.setdefault("name", meta.get("id", ""))  # older exports had no name
+            metas.append(meta)
     metas.sort(key=lambda m: m.get("created_at", ""), reverse=True)
     return metas
 
@@ -184,6 +192,28 @@ def download_export(project_id: str, export_id: str, session: Session = Depends(
         media_type="application/zip",
         filename=f"dataset_{project_id}_{export_id}.zip",
     )
+
+
+@router.patch("/{export_id}", response_model=ExportOut)
+def rename_export(
+    project_id: str,
+    export_id: str,
+    body: ExportRename,
+    session: Session = Depends(get_session),
+):
+    _require_project(session, project_id)
+    if "/" in export_id or export_id.startswith("."):
+        raise HTTPException(422, "Invalid id")
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(422, "Name cannot be empty")
+    meta_path = _export_meta_path(project_id, export_id)
+    if not meta_path.exists():
+        raise HTTPException(404, "Export not found")
+    meta = json.loads(meta_path.read_text())
+    meta["name"] = name
+    atomic_write_text(meta_path, json.dumps(meta))
+    return meta
 
 
 @router.delete("/{export_id}")

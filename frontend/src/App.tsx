@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import ProjectLayout from './layouts/ProjectLayout'
 import ClassesPage from './pages/ClassesPage'
 import DatasetPage from './pages/DatasetPage'
+import ExportsPage from './pages/ExportsPage'
 import HomePage from './pages/HomePage'
 import LabelEditorPage from './pages/LabelEditorPage'
 import ModelsPage from './pages/ModelsPage'
@@ -21,6 +22,7 @@ export default function App() {
         <Route path="dataset" element={<DatasetPage />} />
         <Route path="dataset/label/:stem" element={<LabelEditorPage />} />
         <Route path="classes" element={<ClassesPage />} />
+        <Route path="exports" element={<ExportsPage />} />
         <Route path="train" element={<TrainPage />} />
         <Route path="history" element={<TrainingHistoryPage />} />
         <Route path="history/:runId" element={<TrainRunDetailPage />} />

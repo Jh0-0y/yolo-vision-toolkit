@@ -17,6 +17,8 @@ class ModelEntry(SQLModel, table=True):
 
     id: str = Field(default_factory=lambda: _uid("m"), primary_key=True)
     name: str
+    # project scope; None = legacy/shared (visible in every project)
+    project_id: str | None = Field(default=None, index=True)
     # JSON: {"0": "person", "1": "car", ...} as stored in model.names
     classes_json: str = "{}"
     task: str = "detect"
@@ -50,6 +52,8 @@ class TrainRun(SQLModel, table=True):
 
     id: str = Field(default_factory=lambda: _uid("t"), primary_key=True)
     name: str
+    # project scope; None = legacy/shared (visible in every project)
+    project_id: str | None = Field(default=None, index=True)
     dataset_path: str  # directory containing data.yaml
     base_model_id: str
     params_json: str = "{}"

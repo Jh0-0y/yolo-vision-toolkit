@@ -92,7 +92,7 @@ export default function TrainRunDetailPage() {
       if (p) setPoints((prev) => (prev.some((x) => x.epoch === p.epoch) ? prev : [...prev, p]))
       if (ev.phase !== 'epoch') {
         queryClient.invalidateQueries({ queryKey: ['train-run', runId] })
-        queryClient.invalidateQueries({ queryKey: ['train-runs'] })
+        queryClient.invalidateQueries({ queryKey: ['train-runs', projectId] })
         queryClient.invalidateQueries({ queryKey: ['train-artifacts', runId] })
       }
     })
@@ -111,7 +111,7 @@ export default function TrainRunDetailPage() {
     mutationFn: () => api.post<TrainRunOut>(`/train/runs/${runId}/stop`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['train-run', runId] })
-      queryClient.invalidateQueries({ queryKey: ['train-runs'] })
+      queryClient.invalidateQueries({ queryKey: ['train-runs', projectId] })
     },
   })
 
@@ -119,7 +119,7 @@ export default function TrainRunDetailPage() {
     mutationFn: (which: string) => api.post<ModelOut>(`/train/runs/${runId}/register`, { which }),
     onSuccess: (m) => {
       notifications.show({ message: `Added to models: ${m.name}`, color: 'green' })
-      queryClient.invalidateQueries({ queryKey: ['models'] })
+      queryClient.invalidateQueries({ queryKey: ['models', projectId] })
     },
     onError: (e) => notifications.show({ message: String(e), color: 'red' }),
   })

@@ -7,7 +7,9 @@ import shutil
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from sqlalchemy import or_
 from sqlmodel import Session, select
 
 from app.config import settings
@@ -33,6 +35,7 @@ class ModelOut(BaseModel):
 
 class OfficialRequest(BaseModel):
     name: str  # e.g. "yolo26n"
+    project_id: str | None = None
 
 
 class ModelPatch(BaseModel):
@@ -40,7 +43,7 @@ class ModelPatch(BaseModel):
 
 
 def _to_out(entry: ModelEntry) -> ModelOut:
-    meta_path = settings.models_dir / entry.id / "meta.json"
+    meta_path = settings.model_dir(entry.project_id, entry.id) / "meta.json"
     source = "upload"
     if meta_path.exists():
         source = json.loads(meta_path.read_text()).get("source", "upload")
@@ -62,13 +65,17 @@ def _load_names(pt_path) -> tuple[dict[int, str], str]:
     return dict(model.names), getattr(model, "task", "detect") or "detect"
 
 
-def _register(session: Session, name: str, pt_src, source: str) -> ModelEntry:
+def _register(
+    session: Session, name: str, pt_src, source: str, project_id: str | None = None
+) -> ModelEntry:
     try:
         names, task = _load_names(pt_src)
     except Exception as e:
         raise HTTPException(422, f"Failed to load model: {e}")
-    entry = ModelEntry(name=name, classes_json=json.dumps(names), task=task)
-    model_dir = settings.models_dir / entry.id
+    entry = ModelEntry(
+        name=name, classes_json=json.dumps(names), task=task, project_id=project_id
+    )
+    model_dir = settings.model_dir(project_id, entry.id)
     model_dir.mkdir(parents=True, exist_ok=True)
     shutil.move(str(pt_src), model_dir / "model.pt")
     (model_dir / "meta.json").write_text(
@@ -81,8 +88,14 @@ def _register(session: Session, name: str, pt_src, source: str) -> ModelEntry:
 
 
 @router.get("", response_model=list[ModelOut])
-def list_models(session: Session = Depends(get_session)):
-    entries = session.exec(select(ModelEntry).order_by(ModelEntry.created_at.desc())).all()
+def list_models(project_id: str | None = None, session: Session = Depends(get_session)):
+    stmt = select(ModelEntry)
+    if project_id is not None:
+        # this project's models plus legacy/shared (project_id NULL)
+        stmt = stmt.where(
+            or_(ModelEntry.project_id == project_id, ModelEntry.project_id.is_(None))
+        )
+    entries = session.exec(stmt.order_by(ModelEntry.created_at.desc())).all()
     return [_to_out(e) for e in entries]
 
 
@@ -117,12 +130,16 @@ async def download_official(req: OfficialRequest, session: Session = Depends(get
     except Exception as e:
         raise HTTPException(502, f"Download failed: {e}")
 
-    entry = _register(session, req.name, downloaded, source="official")
+    entry = _register(session, req.name, downloaded, source="official", project_id=req.project_id)
     return _to_out(entry)
 
 
 @router.post("", response_model=ModelOut)
-async def upload_model(file: UploadFile, session: Session = Depends(get_session)):
+async def upload_model(
+    file: UploadFile,
+    project_id: str | None = None,
+    session: Session = Depends(get_session),
+):
     if not file.filename or not file.filename.endswith(".pt"):
         raise HTTPException(422, "Only .pt files can be uploaded")
     settings.models_dir.mkdir(parents=True, exist_ok=True)
@@ -130,7 +147,9 @@ async def upload_model(file: UploadFile, session: Session = Depends(get_session)
     with open(tmp, "wb") as f:
         while chunk := await file.read(1 << 20):
             f.write(chunk)
-    entry = _register(session, file.filename.removesuffix(".pt"), tmp, source="upload")
+    entry = _register(
+        session, file.filename.removesuffix(".pt"), tmp, source="upload", project_id=project_id
+    )
     return _to_out(entry)
 
 
@@ -140,6 +159,19 @@ def get_model(model_id: str, session: Session = Depends(get_session)):
     if entry is None:
         raise HTTPException(404, "Model not found")
     return _to_out(entry)
+
+
+@router.get("/{model_id}/download")
+def download_model(model_id: str, session: Session = Depends(get_session)):
+    entry = session.get(ModelEntry, model_id)
+    if entry is None:
+        raise HTTPException(404, "Model not found")
+    pt = settings.model_dir(entry.project_id, model_id) / "model.pt"
+    if not pt.exists():
+        raise HTTPException(404, "Model file missing")
+    # sanitize the display name for the download filename
+    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in entry.name) or model_id
+    return FileResponse(pt, media_type="application/octet-stream", filename=f"{safe}.pt")
 
 
 @router.patch("/{model_id}", response_model=ModelOut)
@@ -155,7 +187,7 @@ def rename_model(model_id: str, req: ModelPatch, session: Session = Depends(get_
     session.commit()
     session.refresh(entry)
 
-    meta_path = settings.models_dir / model_id / "meta.json"
+    meta_path = settings.model_dir(entry.project_id, model_id) / "meta.json"
     if meta_path.exists():
         try:
             meta = json.loads(meta_path.read_text())
@@ -171,7 +203,8 @@ def delete_model(model_id: str, session: Session = Depends(get_session)):
     entry = session.get(ModelEntry, model_id)
     if entry is None:
         raise HTTPException(404, "Model not found")
+    model_dir = settings.model_dir(entry.project_id, model_id)
     session.delete(entry)
     session.commit()
-    shutil.rmtree(settings.models_dir / model_id, ignore_errors=True)
+    shutil.rmtree(model_dir, ignore_errors=True)
     return {"ok": True}

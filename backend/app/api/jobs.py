@@ -66,7 +66,10 @@ def create_job(project_id: str, req: JobCreate, session: Session = Depends(get_s
         entry = session.get(ModelEntry, mid)
         if entry is None:
             raise HTTPException(422, f"Model not found: {mid}")
-        pt = settings.models_dir / mid / "model.pt"
+        # only this project's models or legacy/shared (project_id NULL) are usable
+        if entry.project_id is not None and entry.project_id != project_id:
+            raise HTTPException(422, f"Model does not belong to this project: {mid}")
+        pt = settings.model_dir(entry.project_id, mid) / "model.pt"
         if not pt.exists():
             raise HTTPException(422, f"Model file missing: {mid}")
         model_paths.append(str(pt))

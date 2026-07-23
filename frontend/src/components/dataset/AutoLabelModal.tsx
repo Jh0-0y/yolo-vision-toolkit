@@ -41,8 +41,8 @@ export default function AutoLabelModal({ projectId, opened, onClose, names }: Pr
   const unsubscribe = useRef<(() => void) | null>(null)
 
   const models = useQuery({
-    queryKey: ['models'],
-    queryFn: () => api.get<ModelOut[]>('/models'),
+    queryKey: ['models', projectId],
+    queryFn: () => api.get<ModelOut[]>(`/models?project_id=${projectId}`),
   })
 
   useEffect(() => () => unsubscribe.current?.(), [])

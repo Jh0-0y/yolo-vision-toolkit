@@ -43,12 +43,12 @@ export default function TrainPage() {
   const [optimizer, setOptimizer] = useState<string | null>(null)
 
   const datasets = useQuery({
-    queryKey: ['train-datasets'],
-    queryFn: () => api.get<TrainDataset[]>('/train/datasets'),
+    queryKey: ['train-datasets', projectId],
+    queryFn: () => api.get<TrainDataset[]>(`/train/datasets?project_id=${projectId}`),
   })
   const models = useQuery({
-    queryKey: ['models'],
-    queryFn: () => api.get<ModelOut[]>('/models'),
+    queryKey: ['models', projectId],
+    queryFn: () => api.get<ModelOut[]>(`/models?project_id=${projectId}`),
   })
 
   const uploadZip = useMutation({
@@ -58,7 +58,7 @@ export default function TrainPage() {
         message: `Dataset registered: ${d.name} (train ${d.train} · val ${d.val})`,
         color: 'green',
       })
-      queryClient.invalidateQueries({ queryKey: ['train-datasets'] })
+      queryClient.invalidateQueries({ queryKey: ['train-datasets', projectId] })
       setDatasetToken(d.dataset)
     },
     onError: (e) => notifications.show({ message: String(e), color: 'red' }),
@@ -68,6 +68,7 @@ export default function TrainPage() {
     mutationFn: () =>
       api.post<TrainRunOut>('/train/runs', {
         name: runName.trim() || null,
+        project_id: projectId,
         dataset: datasetToken,
         base_model_id: baseModel,
         device: device === 'auto' ? null : device,
@@ -82,7 +83,7 @@ export default function TrainPage() {
       }),
     onSuccess: (r) => {
       notifications.show({ message: `Training started: ${r.name}`, color: 'green' })
-      queryClient.invalidateQueries({ queryKey: ['train-runs'] })
+      queryClient.invalidateQueries({ queryKey: ['train-runs', projectId] })
       navigate(`/projects/${projectId}/history/${r.id}`)
     },
     onError: (e) => notifications.show({ message: String(e), color: 'red' }),
