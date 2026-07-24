@@ -8,8 +8,9 @@ import TestControls, { type TestConfig } from '../components/test/TestControls'
 import SingleMode from '../components/test/SingleMode'
 import BatchMode from '../components/test/BatchMode'
 import ABMode from '../components/test/ABMode'
+import VideoMode from '../components/test/VideoMode'
 
-type Mode = 'single' | 'batch' | 'ab'
+type Mode = 'single' | 'batch' | 'ab' | 'video'
 
 export default function TestPage() {
   const { projectId = '' } = useParams()
@@ -82,6 +83,7 @@ export default function TestPage() {
           { label: '단일 이미지', value: 'single' },
           { label: '배치 그리드', value: 'batch' },
           { label: 'A/B 비교', value: 'ab' },
+          { label: '비디오', value: 'video' },
         ]}
       />
 
@@ -100,6 +102,7 @@ export default function TestPage() {
           {mode === 'single' && <SingleMode projectId={projectId} cfg={cfg} />}
           {mode === 'batch' && <BatchMode projectId={projectId} cfg={cfg} />}
           {mode === 'ab' && <ABMode projectId={projectId} cfg={cfg} models={models} />}
+          {mode === 'video' && <VideoMode projectId={projectId} cfg={cfg} />}
         </Grid.Col>
       </Grid>
     </Stack>

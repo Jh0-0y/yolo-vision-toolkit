@@ -20,6 +20,11 @@ class PredictResponse(BaseModel):
     floor: float  # detections returned down to this conf (slider filters above it)
 
 
+class VideoUpload(BaseModel):
+    video_id: str
+    frame_count: int
+
+
 class ResidentModel(BaseModel):
     model_id: str
     device: str | None = None

@@ -536,3 +536,36 @@ export function predict(opts: {
   if (opts.imageName) form.append('image_name', opts.imageName)
   return api.upload<PredictResponse>('/predict', form)
 }
+
+// ---------- test: video frame scrub ----------
+
+export interface VideoUpload {
+  video_id: string
+  frame_count: number
+}
+
+export function uploadTestVideo(file: File): Promise<VideoUpload> {
+  const form = new FormData()
+  form.append('file', file)
+  return api.upload<VideoUpload>('/predict/video', form)
+}
+
+export const videoFrameUrl = (videoId: string, idx: number) =>
+  `${BASE}/predict/video/${videoId}/frame/${idx}`
+
+export function predictVideoFrame(opts: {
+  videoId: string
+  idx: number
+  modelIds: string[]
+  projectId: string
+  params: PredictParams
+}): Promise<PredictResponse> {
+  const form = new FormData()
+  form.append('model_ids', opts.modelIds.join(','))
+  form.append('project_id', opts.projectId)
+  form.append('conf', String(opts.params.conf))
+  form.append('iou_wbf', String(opts.params.iou_wbf))
+  form.append('imgsz', String(opts.params.imgsz))
+  if (opts.params.device) form.append('device', opts.params.device)
+  return api.upload<PredictResponse>(`/predict/video/${opts.videoId}/frame/${opts.idx}`, form)
+}
