@@ -15,6 +15,10 @@ async def lifespan(app: FastAPI):
 
     train_manager.reconcile_on_boot()
     yield
+    # release the warm inference worker (and its framework context) on shutdown
+    from app.services.infer_manager import infer_manager
+
+    infer_manager.shutdown()
 
 
 def create_app() -> FastAPI:

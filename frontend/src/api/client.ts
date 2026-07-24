@@ -455,3 +455,84 @@ export function subscribeVideoEvents(
   })
   return () => source.close()
 }
+
+// ---------- test / inference (playground — no DB writes) ----------
+
+export interface PredictBox {
+  cls: number
+  name: string
+  score: number
+  xyxyn: [number, number, number, number]
+  model_ids: string[]
+  agree: number
+}
+
+export interface PredictResponse {
+  task: string
+  names: Record<number, string>
+  boxes: PredictBox[]
+  device: string
+  floor: number
+}
+
+export interface ResidentModel {
+  model_id: string
+  device?: string | null
+  task?: string | null
+  classes?: Record<number, string> | null
+  weight_mb?: number | null
+  loaded_at?: number | null
+}
+
+export interface ResourceInfo {
+  accelerator: 'cuda' | 'mps' | 'cpu'
+  device_label: string
+  ram_total_mb?: number | null
+  ram_available_mb?: number | null
+  ram_used_mb?: number | null
+  vram_total_mb?: number | null
+  vram_used_mb?: number | null
+  vram_free_mb?: number | null
+  training_active: boolean
+  resident_models: number
+  warning?: string | null
+}
+
+export interface PredictParams {
+  conf: number
+  iou_wbf: number
+  imgsz: number
+  device?: string | null
+}
+
+export const getResources = () => api.get<ResourceInfo>('/system/resources')
+
+export const listResidents = () => api.get<ResidentModel[]>('/predict/residents')
+
+export const loadResident = (modelId: string, projectId: string, device?: string) =>
+  api.post<ResidentModel>(
+    `/predict/residents/${modelId}?project_id=${projectId}${device ? `&device=${device}` : ''}`,
+  )
+
+export const unloadResident = (modelId: string) => api.delete<void>(`/predict/residents/${modelId}`)
+
+export function predict(opts: {
+  modelIds: string[]
+  projectId: string
+  params: PredictParams
+  file?: File
+  imageProjectId?: string
+  imageName?: string
+}): Promise<PredictResponse> {
+  const form = new FormData()
+  form.append('model_ids', opts.modelIds.join(','))
+  form.append('project_id', opts.projectId)
+  form.append('conf', String(opts.params.conf))
+  form.append('iou_wbf', String(opts.params.iou_wbf))
+  form.append('imgsz', String(opts.params.imgsz))
+  if (opts.params.device) form.append('device', opts.params.device)
+  if (opts.file) form.append('file', opts.file)
+  if (opts.imageProjectId) form.append('image_project_id', opts.imageProjectId)
+  if (opts.imageName) form.append('image_name', opts.imageName)
+  return api.upload<PredictResponse>('/predict', form)
+}

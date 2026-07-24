@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     def datasets_dir(self) -> Path:
         return self.data_dir / "datasets"
 
+    @property
+    def test_dir(self) -> Path:
+        """Scratch space for the Test playground (uploads, video frames).
+        Nothing here is committed to the DB — it's transient."""
+        return self.data_dir / "test"
+
     def model_dir(self, project_id: str | None, model_id: str) -> Path:
         """Where a model's files live. Scoped models sit under their project
         folder; shared/legacy models (project_id None) stay in the flat pool."""
@@ -63,8 +69,27 @@ class Settings(BaseSettings):
             self.jobs_dir,
             self.runs_dir,
             self.datasets_dir,
+            self.test_dir,
         ):
             d.mkdir(parents=True, exist_ok=True)
+
+
+def get_resource_info(device: str | None = None) -> dict:
+    """Device info + live memory pressure, for the Test page's resource guard.
+
+    CUDA reports VRAM (via torch); MPS/CPU report system RAM (unified memory on
+    Apple = the relevant budget). psutil is cross-platform (Windows + macOS).
+    """
+    import psutil
+
+    info = get_device_info(device)
+    vm = psutil.virtual_memory()
+    info["ram_total_mb"] = round(vm.total / 1024 / 1024)
+    info["ram_available_mb"] = round(vm.available / 1024 / 1024)
+    info["ram_used_mb"] = round((vm.total - vm.available) / 1024 / 1024)
+    if info.get("vram_total_mb") and info.get("vram_used_mb") is not None:
+        info["vram_free_mb"] = info["vram_total_mb"] - info["vram_used_mb"]
+    return info
 
 
 settings = Settings()

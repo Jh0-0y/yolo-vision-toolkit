@@ -13,6 +13,7 @@ from app.api.v1.endpoints import (
     jobs,
     labels,
     models,
+    predict,
     projects,
     system,
     training,
@@ -31,6 +32,7 @@ def health():
 for _router in (
     models.router,
     projects.router,
+    predict.router,
     jobs.router,
     exports.router,
     training.router,

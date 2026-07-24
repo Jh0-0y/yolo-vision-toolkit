@@ -29,6 +29,14 @@ class TrainManager:
             return any(p.poll() is None for p in self._procs.values())
 
     def start(self, run_id: str) -> int:
+        # reclaim any idle inference worker so training gets a clean device
+        # (esp. Apple unified memory) — lazy import avoids a services cycle
+        try:
+            from app.services.infer_manager import infer_manager
+
+            infer_manager.evict_for_training()
+        except Exception:
+            pass
         backend_dir = Path(__file__).resolve().parents[2]
         with session_scope() as session:
             run = session.get(TrainRun, run_id)
