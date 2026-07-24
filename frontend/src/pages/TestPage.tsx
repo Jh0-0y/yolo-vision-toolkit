@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Alert, Badge, Card, Grid, Group, SegmentedControl, Stack, Text, Title } from '@mantine/core'
+import { Alert, Badge, Grid, Group, SegmentedControl, Stack, Text, Title } from '@mantine/core'
 import { IconAlertTriangle, IconFlask } from '@tabler/icons-react'
 import { api, getResources, type ModelOut } from '../api/client'
 import TestControls, { type TestConfig } from '../components/test/TestControls'
 import AnnotateMode from '../components/test/AnnotateMode'
+import AnalyzeMode from '../components/test/AnalyzeMode'
 
 type Mode = 'annotate' | 'analyze'
 
@@ -91,11 +92,7 @@ export default function TestPage() {
         </Grid.Col>
         <Grid.Col span={{ base: 12, md: 9 }}>
           {mode === 'annotate' && <AnnotateMode projectId={projectId} cfg={cfg} />}
-          {mode === 'analyze' && (
-            <Card withBorder radius="md" padding="xl">
-              <Text c="dimmed" ta="center">정밀 분석 — 준비 중</Text>
-            </Card>
-          )}
+          {mode === 'analyze' && <AnalyzeMode projectId={projectId} cfg={cfg} />}
         </Grid.Col>
       </Grid>
     </Stack>

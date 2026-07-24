@@ -611,3 +611,91 @@ export function subscribeAnnotateEvents(jobId: string, onEvent: (ev: AnnotatePro
 }
 
 export const annotateResultUrl = (jobId: string) => `${BASE}/predict/annotate/${jobId}/result`
+
+// ---------- test: precise analysis (model vs labeled ground truth) ----------
+
+export interface ClassMetric {
+  cls: number
+  name: string
+  tp: number
+  fp: number
+  fn: number
+  gt: number
+  pred: number
+  precision: number
+  recall: number
+  f1: number
+}
+
+export interface AnalyzeOverall {
+  tp: number
+  fp: number
+  fn: number
+  precision: number
+  recall: number
+  f1: number
+}
+
+export interface AnalyzeBox {
+  cls: number
+  name: string
+  xyxyn: [number, number, number, number]
+  score?: number
+}
+
+export interface WorstImage {
+  stem: string
+  name: string
+  url: string
+  tp: number
+  fp: number
+  fn: number
+  gt_boxes: AnalyzeBox[]
+  pred_boxes: AnalyzeBox[]
+}
+
+export interface AnalyzeResult {
+  per_class: ClassMetric[]
+  overall: AnalyzeOverall
+  worst: WorstImage[]
+  images: number
+  conf: number
+  iou: number
+}
+
+export interface AnalyzeProgress {
+  phase: 'start' | 'analyze' | 'done' | 'error' | 'cancelled'
+  done?: number
+  total?: number
+  msg?: string
+}
+
+export function startAnalyze(opts: {
+  projectId: string
+  modelIds: string[]
+  params: PredictParams
+  reviewedOnly?: boolean
+}): Promise<TestJobStart> {
+  const form = new FormData()
+  form.append('project_id', opts.projectId)
+  form.append('model_ids', opts.modelIds.join(','))
+  form.append('conf', String(opts.params.conf))
+  form.append('iou', String(opts.params.iou_wbf))
+  form.append('imgsz', String(opts.params.imgsz))
+  if (opts.params.device) form.append('device', opts.params.device)
+  form.append('reviewed_only', String(!!opts.reviewedOnly))
+  return api.upload<TestJobStart>('/predict/analyze', form)
+}
+
+export function subscribeAnalyzeEvents(jobId: string, onEvent: (ev: AnalyzeProgress) => void): () => void {
+  const source = new EventSource(`${BASE}/predict/analyze/${jobId}/events`)
+  source.addEventListener('progress', (e) => {
+    const ev = JSON.parse((e as MessageEvent).data) as AnalyzeProgress
+    onEvent(ev)
+    if (ev.phase === 'done' || ev.phase === 'error' || ev.phase === 'cancelled') source.close()
+  })
+  return () => source.close()
+}
+
+export const getAnalyzeResult = (jobId: string) =>
+  api.get<AnalyzeResult>(`/predict/analyze/${jobId}/result`)

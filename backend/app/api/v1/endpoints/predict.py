@@ -247,3 +247,54 @@ def annotate_result(job_id: str):
     if not out.exists():
         raise HTTPException(404, "Annotated video not ready")
     return FileResponse(out, media_type="video/mp4")  # FileResponse handles Range
+
+
+# ---------- precise analysis (model vs labeled ground truth) ----------
+
+
+@router.post("/analyze", response_model=TestJobStart, status_code=201)
+async def start_analyze(
+    project_id: str = Form(...),
+    model_ids: str = Form(...),
+    conf: float = Form(0.4),
+    iou: float = Form(0.5),  # IoU match threshold (pred↔GT)
+    imgsz: int = Form(640),
+    device: str | None = Form(None),
+    reviewed_only: bool = Form(False),
+    session: Session = Depends(get_session),
+):
+    ids = [m.strip() for m in model_ids.split(",") if m.strip()]
+    if not ids:
+        raise HTTPException(422, "Select at least one model")
+    specs = [(mid, _model_pt(session, mid, project_id)) for mid in ids]
+    if not (settings.projects_dir / project_id / "labels").exists():
+        raise HTTPException(422, "No labeled data to analyze in this project")
+
+    job_id = uuid.uuid4().hex
+    cfg = {
+        "project_id": project_id,
+        "specs": specs,
+        "conf": conf,
+        "iou": iou,
+        "iou_wbf": iou,
+        "imgsz": imgsz,
+        "device": device,
+        "reviewed_only": reviewed_only,
+    }
+    await run_in_threadpool(test_job_manager.submit_analyze, job_id, cfg)
+    return TestJobStart(job_id=job_id)
+
+
+@router.get("/analyze/{job_id}/events")
+async def analyze_events(job_id: str):
+    return await _job_event_stream(job_id)
+
+
+@router.get("/analyze/{job_id}/result")
+def analyze_result(job_id: str):
+    if not job_id.isalnum():
+        raise HTTPException(422, "Invalid job id")
+    path = settings.jobs_dir / job_id / "result.json"
+    if not path.exists():
+        raise HTTPException(404, "Analysis result not ready")
+    return json.loads(path.read_text())
