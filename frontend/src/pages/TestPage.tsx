@@ -1,16 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Alert, Badge, Grid, Group, SegmentedControl, Stack, Text, Title } from '@mantine/core'
+import { Alert, Badge, Card, Grid, Group, SegmentedControl, Stack, Text, Title } from '@mantine/core'
 import { IconAlertTriangle, IconFlask } from '@tabler/icons-react'
 import { api, getResources, type ModelOut } from '../api/client'
 import TestControls, { type TestConfig } from '../components/test/TestControls'
-import SingleMode from '../components/test/SingleMode'
-import BatchMode from '../components/test/BatchMode'
-import ABMode from '../components/test/ABMode'
-import VideoMode from '../components/test/VideoMode'
+import AnnotateMode from '../components/test/AnnotateMode'
 
-type Mode = 'single' | 'batch' | 'ab' | 'video'
+type Mode = 'annotate' | 'analyze'
 
 export default function TestPage() {
   const { projectId = '' } = useParams()
@@ -25,7 +22,7 @@ export default function TestPage() {
     refetchInterval: 5000,
   })
 
-  const [mode, setMode] = useState<Mode>('single')
+  const [mode, setMode] = useState<Mode>('annotate')
   const [cfg, setCfg] = useState<TestConfig>({
     selected: [],
     device: 'auto',
@@ -58,14 +55,11 @@ export default function TestPage() {
         <Group gap="xs">
           <IconFlask size={22} />
           <Title order={3}>Test</Title>
-          <Text c="dimmed" size="sm">
-            학습한 모델을 이미지에 바로 돌려보세요 (저장되지 않음)
-          </Text>
+          <Text c="dimmed" size="sm">학습한 모델을 영상에 돌려보고, 라벨 데이터로 성능을 분석합니다</Text>
         </Group>
         {resources && (
           <Badge variant="light" color={resources.training_active ? 'orange' : 'gray'}>
             {resources.device_label}
-            {resources.resident_models > 0 ? ` · 상주 ${resources.resident_models}` : ''}
           </Badge>
         )}
       </Group>
@@ -80,10 +74,8 @@ export default function TestPage() {
         value={mode}
         onChange={(v) => setMode(v as Mode)}
         data={[
-          { label: '단일 이미지', value: 'single' },
-          { label: '배치 그리드', value: 'batch' },
-          { label: 'A/B 비교', value: 'ab' },
-          { label: '비디오', value: 'video' },
+          { label: '영상 주석', value: 'annotate' },
+          { label: '정밀 분석', value: 'analyze' },
         ]}
       />
 
@@ -95,14 +87,15 @@ export default function TestPage() {
             cfg={cfg}
             set={set}
             deviceOptions={deviceOptions}
-            hideModelSelect={mode === 'ab'}
           />
         </Grid.Col>
         <Grid.Col span={{ base: 12, md: 9 }}>
-          {mode === 'single' && <SingleMode projectId={projectId} cfg={cfg} />}
-          {mode === 'batch' && <BatchMode projectId={projectId} cfg={cfg} />}
-          {mode === 'ab' && <ABMode projectId={projectId} cfg={cfg} models={models} />}
-          {mode === 'video' && <VideoMode projectId={projectId} cfg={cfg} />}
+          {mode === 'annotate' && <AnnotateMode projectId={projectId} cfg={cfg} />}
+          {mode === 'analyze' && (
+            <Card withBorder radius="md" padding="xl">
+              <Text c="dimmed" ta="center">정밀 분석 — 준비 중</Text>
+            </Card>
+          )}
         </Grid.Col>
       </Grid>
     </Stack>

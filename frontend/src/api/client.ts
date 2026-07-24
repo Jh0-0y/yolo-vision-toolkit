@@ -569,3 +569,45 @@ export function predictVideoFrame(opts: {
   if (opts.params.device) form.append('device', opts.params.device)
   return api.upload<PredictResponse>(`/predict/video/${opts.videoId}/frame/${opts.idx}`, form)
 }
+
+// ---------- test: video annotation (batch → annotated video) ----------
+
+export interface TestJobStart {
+  job_id: string
+}
+
+export interface AnnotateProgress {
+  phase: 'start' | 'annotate' | 'encoding' | 'done' | 'error' | 'cancelled'
+  done?: number
+  total?: number
+  msg?: string
+}
+
+export function startAnnotate(opts: {
+  file: File
+  modelIds: string[]
+  projectId: string
+  params: PredictParams
+}): Promise<TestJobStart> {
+  const form = new FormData()
+  form.append('file', opts.file)
+  form.append('model_ids', opts.modelIds.join(','))
+  form.append('project_id', opts.projectId)
+  form.append('conf', String(opts.params.conf))
+  form.append('iou_wbf', String(opts.params.iou_wbf))
+  form.append('imgsz', String(opts.params.imgsz))
+  if (opts.params.device) form.append('device', opts.params.device)
+  return api.upload<TestJobStart>('/predict/annotate', form)
+}
+
+export function subscribeAnnotateEvents(jobId: string, onEvent: (ev: AnnotateProgress) => void): () => void {
+  const source = new EventSource(`${BASE}/predict/annotate/${jobId}/events`)
+  source.addEventListener('progress', (e) => {
+    const ev = JSON.parse((e as MessageEvent).data) as AnnotateProgress
+    onEvent(ev)
+    if (ev.phase === 'done' || ev.phase === 'error' || ev.phase === 'cancelled') source.close()
+  })
+  return () => source.close()
+}
+
+export const annotateResultUrl = (jobId: string) => `${BASE}/predict/annotate/${jobId}/result`

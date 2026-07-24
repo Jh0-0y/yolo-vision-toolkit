@@ -25,6 +25,10 @@ class VideoUpload(BaseModel):
     frame_count: int
 
 
+class TestJobStart(BaseModel):
+    job_id: str
+
+
 class ResidentModel(BaseModel):
     model_id: str
     device: str | None = None

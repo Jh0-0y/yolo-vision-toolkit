@@ -14,6 +14,9 @@ async def lifespan(app: FastAPI):
     from app.services.train_manager import train_manager
 
     train_manager.reconcile_on_boot()
+    from app.services.test_jobs import sweep_old_annotations
+
+    sweep_old_annotations()  # clear stale annotated videos from a previous run
     yield
     # release the warm inference worker (and its framework context) on shutdown
     from app.services.infer_manager import infer_manager
