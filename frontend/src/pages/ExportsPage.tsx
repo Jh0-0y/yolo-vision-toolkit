@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import {
   ActionIcon,
-  Anchor,
   Badge,
   Button,
   Card,
@@ -130,7 +129,7 @@ export default function ExportsPage() {
                       <ActionIcon
                         variant="subtle"
                         color="gray"
-                        component={Anchor}
+                        component="a"
                         href={exportDownloadUrl(projectId, e.id)}
                       >
                         <IconDownload size={16} />
