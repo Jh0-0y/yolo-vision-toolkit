@@ -30,7 +30,6 @@ export default function TestPage() {
     iou: 0.55,
     imgsz: '640',
     conf: 0.4,
-    showLabels: true,
   })
   const set = <K extends keyof TestConfig>(key: K, value: TestConfig[K]) =>
     setCfg((prev) => ({ ...prev, [key]: value }))

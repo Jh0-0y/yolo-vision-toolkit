@@ -467,23 +467,6 @@ export interface PredictBox {
   agree: number
 }
 
-export interface PredictResponse {
-  task: string
-  names: Record<number, string>
-  boxes: PredictBox[]
-  device: string
-  floor: number
-}
-
-export interface ResidentModel {
-  model_id: string
-  device?: string | null
-  task?: string | null
-  classes?: Record<number, string> | null
-  weight_mb?: number | null
-  loaded_at?: number | null
-}
-
 export interface ResourceInfo {
   accelerator: 'cuda' | 'mps' | 'cpu'
   device_label: string
@@ -506,69 +489,6 @@ export interface PredictParams {
 }
 
 export const getResources = () => api.get<ResourceInfo>('/system/resources')
-
-export const listResidents = () => api.get<ResidentModel[]>('/predict/residents')
-
-export const loadResident = (modelId: string, projectId: string, device?: string) =>
-  api.post<ResidentModel>(
-    `/predict/residents/${modelId}?project_id=${projectId}${device ? `&device=${device}` : ''}`,
-  )
-
-export const unloadResident = (modelId: string) => api.delete<void>(`/predict/residents/${modelId}`)
-
-export function predict(opts: {
-  modelIds: string[]
-  projectId: string
-  params: PredictParams
-  file?: File
-  imageProjectId?: string
-  imageName?: string
-}): Promise<PredictResponse> {
-  const form = new FormData()
-  form.append('model_ids', opts.modelIds.join(','))
-  form.append('project_id', opts.projectId)
-  form.append('conf', String(opts.params.conf))
-  form.append('iou_wbf', String(opts.params.iou_wbf))
-  form.append('imgsz', String(opts.params.imgsz))
-  if (opts.params.device) form.append('device', opts.params.device)
-  if (opts.file) form.append('file', opts.file)
-  if (opts.imageProjectId) form.append('image_project_id', opts.imageProjectId)
-  if (opts.imageName) form.append('image_name', opts.imageName)
-  return api.upload<PredictResponse>('/predict', form)
-}
-
-// ---------- test: video frame scrub ----------
-
-export interface VideoUpload {
-  video_id: string
-  frame_count: number
-}
-
-export function uploadTestVideo(file: File): Promise<VideoUpload> {
-  const form = new FormData()
-  form.append('file', file)
-  return api.upload<VideoUpload>('/predict/video', form)
-}
-
-export const videoFrameUrl = (videoId: string, idx: number) =>
-  `${BASE}/predict/video/${videoId}/frame/${idx}`
-
-export function predictVideoFrame(opts: {
-  videoId: string
-  idx: number
-  modelIds: string[]
-  projectId: string
-  params: PredictParams
-}): Promise<PredictResponse> {
-  const form = new FormData()
-  form.append('model_ids', opts.modelIds.join(','))
-  form.append('project_id', opts.projectId)
-  form.append('conf', String(opts.params.conf))
-  form.append('iou_wbf', String(opts.params.iou_wbf))
-  form.append('imgsz', String(opts.params.imgsz))
-  if (opts.params.device) form.append('device', opts.params.device)
-  return api.upload<PredictResponse>(`/predict/video/${opts.videoId}/frame/${opts.idx}`, form)
-}
 
 // ---------- test: video annotation (batch → annotated video) ----------
 

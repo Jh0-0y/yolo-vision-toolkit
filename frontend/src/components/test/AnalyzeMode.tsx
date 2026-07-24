@@ -24,7 +24,7 @@ import {
   type WorstImage,
 } from '../../api/client'
 import type { TestConfig } from './TestControls'
-import { clsColor } from './BoxOverlay'
+import { clsColor } from './colors'
 
 const GT_COLOR = '#51cf66' // ground truth = green (dashed)
 

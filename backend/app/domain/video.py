@@ -26,38 +26,6 @@ class ExtractParams:
     dedup_threshold: float = 0.92  # >= means "too similar", frame is skipped
 
 
-def extract_scrub_frames(video_path: Path, out_dir: Path, max_frames: int = 150) -> int:
-    """Uniformly sample up to ``max_frames`` frames into ``out_dir`` as ``{idx}.jpg``
-    (sequential 0-based indices). For the Test page's video scrubber — CPU/IO only.
-    Returns the number of frames written."""
-    out_dir.mkdir(parents=True, exist_ok=True)
-    cap = cv2.VideoCapture(str(video_path))
-    try:
-        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
-        if total <= 0:  # some containers don't report a frame count — read sequentially
-            written = 0
-            while written < max_frames:
-                ok, frame = cap.read()
-                if not ok:
-                    break
-                cv2.imwrite(str(out_dir / f"{written}.jpg"), frame)
-                written += 1
-            return written
-        count = min(max_frames, total)
-        step = max(1, total // count)
-        written = 0
-        for i in range(count):
-            cap.set(cv2.CAP_PROP_POS_FRAMES, i * step)
-            ok, frame = cap.read()
-            if not ok:
-                break
-            cv2.imwrite(str(out_dir / f"{written}.jpg"), frame)
-            written += 1
-        return written
-    finally:
-        cap.release()
-
-
 def _append(progress_path: Path, event: dict) -> None:
     with open(progress_path, "a") as f:
         f.write(json.dumps(event) + "\n")

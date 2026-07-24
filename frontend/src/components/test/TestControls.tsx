@@ -1,4 +1,4 @@
-import { Badge, Card, Checkbox, Group, Loader, SegmentedControl, Select, Slider, Stack, Switch, Text } from '@mantine/core'
+import { Badge, Card, Checkbox, Group, Loader, SegmentedControl, Select, Slider, Stack, Text } from '@mantine/core'
 import type { ModelOut } from '../../api/client'
 
 export interface TestConfig {
@@ -7,7 +7,6 @@ export interface TestConfig {
   iou: number
   imgsz: string
   conf: number
-  showLabels: boolean
 }
 
 const IMGSZ_OPTIONS = ['320', '480', '640', '960', '1280']
@@ -97,15 +96,8 @@ export default function TestControls({ models, loading, cfg, set, deviceOptions,
           allowDeselect={false}
         />
 
-        <Switch
-          mt="xs"
-          size="sm"
-          label="박스 라벨 표시"
-          checked={cfg.showLabels}
-          onChange={(e) => set('showLabels', e.currentTarget.checked)}
-        />
-        <Text c="dimmed" size="xs">
-          Confidence는 재추론 없이 즉시 필터링됩니다. Device·IoU·Image size 변경 후엔 다시 실행하세요.
+        <Text c="dimmed" size="xs" mt="xs">
+          Confidence·IoU는 추론에 반영됩니다. 영상 주석은 이 설정으로 박스를 그리고, 정밀 분석은 이 임계값으로 정답과 비교합니다.
         </Text>
       </Stack>
     </Card>

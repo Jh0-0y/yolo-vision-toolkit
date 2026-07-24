@@ -21,10 +21,10 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.core.config import settings
 from app.db import get_session
-from app.domain.video import VIDEO_EXTS, extract_scrub_frames
+from app.domain.video import VIDEO_EXTS
 from app.ml.labeling import IMAGE_EXTS
 from app.models import ModelEntry
-from app.schemas.predict import PredictResponse, ResidentModel, TestJobStart, VideoUpload
+from app.schemas.predict import PredictResponse, ResidentModel, TestJobStart
 from app.services.infer_manager import infer_manager
 from app.services.label_manager import read_progress
 from app.services.test_jobs import sweep_old_annotations, test_job_manager
@@ -132,62 +132,6 @@ async def load_resident(
 @router.delete("/residents/{model_id}", status_code=204)
 async def unload_resident(model_id: str):
     await run_in_threadpool(infer_manager.unload, model_id)
-
-
-# ---------- video frame scrubbing ----------
-
-
-def _frame_path(video_id: str, idx: int) -> Path:
-    if not video_id.isalnum():  # uuid4().hex — blocks path traversal
-        raise HTTPException(422, "Invalid video id")
-    p = settings.test_dir / "videos" / video_id / "frames" / f"{idx}.jpg"
-    if not p.exists():
-        raise HTTPException(404, "Frame not found")
-    return p
-
-
-@router.post("/video", response_model=VideoUpload, status_code=201)
-async def upload_video(file: UploadFile):
-    ext = Path(file.filename or "v").suffix.lower()
-    if ext not in VIDEO_EXTS:
-        raise HTTPException(422, f"Unsupported video type: {ext}")
-    video_id = uuid.uuid4().hex
-    vdir = settings.test_dir / "videos" / video_id
-    vdir.mkdir(parents=True, exist_ok=True)
-    src = vdir / f"source{ext}"
-    with open(src, "wb") as f:
-        while chunk := await file.read(1 << 20):
-            f.write(chunk)
-    count = await run_in_threadpool(extract_scrub_frames, src, vdir / "frames")
-    if count == 0:
-        raise HTTPException(422, "No frames could be extracted from the video")
-    return VideoUpload(video_id=video_id, frame_count=count)
-
-
-@router.get("/video/{video_id}/frame/{idx}")
-def video_frame(video_id: str, idx: int):
-    return FileResponse(_frame_path(video_id, idx), media_type="image/jpeg")
-
-
-@router.post("/video/{video_id}/frame/{idx}", response_model=PredictResponse)
-async def predict_video_frame(
-    video_id: str,
-    idx: int,
-    model_ids: str = Form(...),
-    conf: float = Form(0.4),
-    iou_wbf: float = Form(0.55),
-    imgsz: int = Form(640),
-    device: str | None = Form(None),
-    project_id: str | None = Form(None),
-    session: Session = Depends(get_session),
-):
-    ids = [m.strip() for m in model_ids.split(",") if m.strip()]
-    if not ids:
-        raise HTTPException(422, "Select at least one model")
-    specs = [(mid, _model_pt(session, mid, project_id)) for mid in ids]
-    frame = str(_frame_path(video_id, idx))
-    cfg = {"conf": conf, "iou_wbf": iou_wbf, "imgsz": imgsz, "device": device}
-    return await run_in_threadpool(infer_manager.predict, specs, frame, cfg)
 
 
 # ---------- video annotation (batch: draw boxes onto the whole clip) ----------
