@@ -1,4 +1,4 @@
-const BASE = '/api'
+const BASE = '/api/v1'
 
 export class ApiError extends Error {
   status: number
@@ -14,6 +14,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const body = await res.text()
     throw new ApiError(res.status, body || res.statusText)
   }
+  // 204 No Content (e.g. DELETE) has an empty body — nothing to parse
+  if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
 }
 
@@ -37,7 +39,12 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
-  delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  delete: <T>(path: string, body?: unknown) =>
+    request<T>(path, {
+      method: 'DELETE',
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    }),
   upload: <T>(path: string, form: FormData) =>
     request<T>(path, { method: 'POST', body: form }),
 }
@@ -159,7 +166,7 @@ export const listImageNames = (projectId: string, query: ImageQuery) =>
   )
 
 export const deleteImages = (projectId: string, names: string[]) =>
-  api.post<{ deleted: number }>(`/projects/${projectId}/images/delete`, { names })
+  api.delete<{ deleted: number }>(`/projects/${projectId}/images`, { names })
 
 export const putReviewed = (projectId: string, stem: string, reviewed: boolean) =>
   api.put<{ ok: boolean; reviewed: boolean }>(
@@ -291,7 +298,7 @@ export const renameExport = (projectId: string, exportId: string, name: string) 
   api.patch<ExportOut>(`/projects/${projectId}/exports/${exportId}`, { name })
 
 export const deleteExport = (projectId: string, exportId: string) =>
-  api.delete<{ ok: boolean }>(`/projects/${projectId}/exports/${exportId}`)
+  api.delete<void>(`/projects/${projectId}/exports/${exportId}`)
 
 export const exportDownloadUrl = (projectId: string, exportId: string) =>
   `${BASE}/projects/${projectId}/exports/${exportId}/download`
@@ -311,7 +318,7 @@ export interface TrainDataset {
 export const uploadTrainDataset = (file: File) => {
   const form = new FormData()
   form.append('file', file)
-  return api.upload<TrainDataset & { id: string }>('/train/datasets/upload', form)
+  return api.upload<TrainDataset & { id: string }>('/training/datasets', form)
 }
 
 export interface TrainParams {
@@ -358,7 +365,7 @@ export function subscribeTrainEvents(
   runId: string,
   onEvent: (ev: TrainEpochEvent) => void,
 ): () => void {
-  const source = new EventSource(`${BASE}/train/runs/${runId}/events`)
+  const source = new EventSource(`${BASE}/training/runs/${runId}/events`)
   source.addEventListener('progress', (e) => {
     const ev = JSON.parse((e as MessageEvent).data) as TrainEpochEvent
     onEvent(ev)
@@ -373,7 +380,7 @@ export function subscribeTrainEvents(
 export type TrainResultRow = Record<string, number | string>
 
 export const getRunResults = (runId: string) =>
-  api.get<TrainResultRow[]>(`/train/runs/${runId}/results`)
+  api.get<TrainResultRow[]>(`/training/runs/${runId}/results`)
 
 export interface PerClassRow {
   cls: number
@@ -386,7 +393,7 @@ export interface PerClassRow {
 }
 
 export const getRunPerClass = (runId: string) =>
-  api.get<PerClassRow[]>(`/train/runs/${runId}/per-class`)
+  api.get<PerClassRow[]>(`/training/runs/${runId}/per-class`)
 
 export interface PerClassEpoch {
   epoch: number
@@ -394,7 +401,7 @@ export interface PerClassEpoch {
 }
 
 export const getRunPerClassHistory = (runId: string) =>
-  api.get<PerClassEpoch[]>(`/train/runs/${runId}/per-class-history`)
+  api.get<PerClassEpoch[]>(`/training/runs/${runId}/per-class-history`)
 
 // ---------- videos ----------
 

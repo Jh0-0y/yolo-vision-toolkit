@@ -1,4 +1,4 @@
-from app.core.class_registry import ClassRegistry
+from app.domain.class_registry import ClassRegistry
 
 
 def test_union_by_normalized_name():

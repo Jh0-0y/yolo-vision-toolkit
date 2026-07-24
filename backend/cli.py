@@ -11,7 +11,7 @@ import argparse
 import json
 from pathlib import Path
 
-from app.core.inference import LabelJobConfig, run_labeling
+from app.ml.labeling import LabelJobConfig, run_labeling
 
 
 def main() -> None:

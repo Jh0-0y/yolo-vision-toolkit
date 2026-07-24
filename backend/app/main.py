@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.config import settings
+from app.core.config import settings
 from app.db import init_db
 
 
@@ -11,7 +11,7 @@ from app.db import init_db
 async def lifespan(app: FastAPI):
     settings.ensure_dirs()
     init_db()
-    from app.jobs.train_manager import train_manager
+    from app.services.train_manager import train_manager
 
     train_manager.reconcile_on_boot()
     yield
@@ -28,33 +28,14 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # unversioned infra health check (docker/uptime probes hit this)
     @app.get("/api/health")
     def health():
         return {"status": "ok", "data_dir": str(settings.data_dir)}
 
-    from app.api import (
-        classes,
-        datasets,
-        files,
-        jobs,
-        labels,
-        models,
-        projects,
-        system,
-        training,
-        videos,
-    )
+    from app.api.v1.router import api_router
 
-    app.include_router(models.router)
-    app.include_router(projects.router)
-    app.include_router(jobs.router)
-    app.include_router(datasets.router)
-    app.include_router(training.router)
-    app.include_router(files.router)
-    app.include_router(system.router)
-    app.include_router(videos.router)
-    app.include_router(labels.router)
-    app.include_router(classes.router)
+    app.include_router(api_router)
 
     return app
 

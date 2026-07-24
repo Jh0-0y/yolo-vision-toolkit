@@ -147,7 +147,7 @@ export default function TrainRunDetailPage() {
 
   const run = useQuery({
     queryKey: ['train-run', runId],
-    queryFn: () => api.get<TrainRunOut>(`/train/runs/${runId}`),
+    queryFn: () => api.get<TrainRunOut>(`/training/runs/${runId}`),
   })
   const r = run.data
   const running = r?.status === 'running'
@@ -162,7 +162,7 @@ export default function TrainRunDetailPage() {
     queryKey: ['train-artifacts', runId],
     queryFn: () =>
       api.get<{ files: { name: string; url: string }[]; weights: { name: string; url: string }[] }>(
-        `/train/runs/${runId}/artifacts`,
+        `/training/runs/${runId}/artifacts`,
       ),
   })
 
@@ -207,7 +207,7 @@ export default function TrainRunDetailPage() {
   const [showResults, setShowResults] = useState(false)
 
   const stop = useMutation({
-    mutationFn: () => api.post<TrainRunOut>(`/train/runs/${runId}/stop`),
+    mutationFn: () => api.post<TrainRunOut>(`/training/runs/${runId}/stop`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['train-run', runId] })
       queryClient.invalidateQueries({ queryKey: ['train-runs', projectId] })
@@ -215,7 +215,7 @@ export default function TrainRunDetailPage() {
   })
 
   const register = useMutation({
-    mutationFn: (which: string) => api.post<ModelOut>(`/train/runs/${runId}/register`, { which }),
+    mutationFn: (which: string) => api.post<ModelOut>(`/training/runs/${runId}/register`, { which }),
     onSuccess: (m) => {
       notifications.show({ message: `Added to models: ${m.name}`, color: 'green' })
       queryClient.invalidateQueries({ queryKey: ['models', projectId] })

@@ -44,7 +44,7 @@ export default function TrainPage() {
 
   const datasets = useQuery({
     queryKey: ['train-datasets', projectId],
-    queryFn: () => api.get<TrainDataset[]>(`/train/datasets?project_id=${projectId}`),
+    queryFn: () => api.get<TrainDataset[]>(`/training/datasets?project_id=${projectId}`),
   })
   const models = useQuery({
     queryKey: ['models', projectId],
@@ -66,7 +66,7 @@ export default function TrainPage() {
 
   const launch = useMutation({
     mutationFn: () =>
-      api.post<TrainRunOut>('/train/runs', {
+      api.post<TrainRunOut>('/training/runs', {
         name: runName.trim() || null,
         project_id: projectId,
         dataset: datasetToken,

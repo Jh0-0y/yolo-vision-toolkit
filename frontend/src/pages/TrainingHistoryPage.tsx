@@ -21,12 +21,12 @@ export default function TrainingHistoryPage() {
   const qc = useQueryClient()
   const runs = useQuery({
     queryKey: ['train-runs', projectId],
-    queryFn: () => api.get<TrainRunOut[]>(`/train/runs?project_id=${projectId}`),
+    queryFn: () => api.get<TrainRunOut[]>(`/training/runs?project_id=${projectId}`),
     refetchInterval: 15_000,
   })
 
   const remove = useMutation({
-    mutationFn: (id: string) => api.delete(`/train/runs/${id}`),
+    mutationFn: (id: string) => api.delete(`/training/runs/${id}`),
     onSuccess: () => {
       notifications.show({ message: 'Training run deleted', color: 'green' })
       qc.invalidateQueries({ queryKey: ['train-runs', projectId] })
