@@ -7,8 +7,9 @@ import { api, getResources, type ModelOut } from '../api/client'
 import TestControls, { type TestConfig } from '../components/test/TestControls'
 import SingleMode from '../components/test/SingleMode'
 import BatchMode from '../components/test/BatchMode'
+import ABMode from '../components/test/ABMode'
 
-type Mode = 'single' | 'batch'
+type Mode = 'single' | 'batch' | 'ab'
 
 export default function TestPage() {
   const { projectId = '' } = useParams()
@@ -80,6 +81,7 @@ export default function TestPage() {
         data={[
           { label: '단일 이미지', value: 'single' },
           { label: '배치 그리드', value: 'batch' },
+          { label: 'A/B 비교', value: 'ab' },
         ]}
       />
 
@@ -91,14 +93,13 @@ export default function TestPage() {
             cfg={cfg}
             set={set}
             deviceOptions={deviceOptions}
+            hideModelSelect={mode === 'ab'}
           />
         </Grid.Col>
         <Grid.Col span={{ base: 12, md: 9 }}>
-          {mode === 'single' ? (
-            <SingleMode projectId={projectId} cfg={cfg} />
-          ) : (
-            <BatchMode projectId={projectId} cfg={cfg} />
-          )}
+          {mode === 'single' && <SingleMode projectId={projectId} cfg={cfg} />}
+          {mode === 'batch' && <BatchMode projectId={projectId} cfg={cfg} />}
+          {mode === 'ab' && <ABMode projectId={projectId} cfg={cfg} models={models} />}
         </Grid.Col>
       </Grid>
     </Stack>
