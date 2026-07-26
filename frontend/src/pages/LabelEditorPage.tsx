@@ -29,6 +29,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   addClass,
+  deleteImages,
   getLabels,
   listImageNames,
   putLabels,
@@ -170,6 +171,28 @@ export default function LabelEditorPage() {
     onError: (e) => notifications.show({ message: String(e), color: 'red' }),
   })
 
+  const removeImage = useMutation({
+    mutationFn: () => deleteImages(projectId, [detail.data?.name ?? '']),
+    onSuccess: () => {
+      // the deleted stem's autosave must not recreate its label file
+      useEditorStore.getState().markSaved()
+      notifications.show({ message: `Deleted ${detail.data?.name ?? stem}`, color: 'green' })
+      queryClient.invalidateQueries({ queryKey: ['images', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['image-names', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['stats', projectId] })
+      queryClient.removeQueries({ queryKey: ['labels', projectId, stem] })
+      // jump to a neighbour to keep the flow going, else back to the gallery
+      const target = nextStem ?? prevStem
+      navigate(
+        target
+          ? `/projects/${projectId}/dataset/label/${encodeURIComponent(target)}?${searchParams.toString()}`
+          : `/projects/${projectId}/dataset?${searchParams.toString()}`,
+        { replace: true },
+      )
+    },
+    onError: (e) => notifications.show({ message: String(e), color: 'red' }),
+  })
+
   const createClass = useMutation({
     mutationFn: (name: string) => addClass(projectId, name),
     onSuccess: (cls) => {
@@ -278,6 +301,22 @@ export default function LabelEditorPage() {
             onChange={(e) => toggleReviewed.mutate(e.currentTarget.checked)}
             disabled={toggleReviewed.isPending}
           />
+          <Tooltip label="Delete this image (and its labels)">
+            <ActionIcon
+              color="red"
+              variant="light"
+              disabled={!detail.data || removeImage.isPending}
+              loading={removeImage.isPending}
+              onClick={() => {
+                const name = detail.data?.name
+                if (!name) return
+                if (confirm(`Delete "${name}"?\nThe image and its labels will be removed.`))
+                  removeImage.mutate()
+              }}
+            >
+              <IconTrash size={16} />
+            </ActionIcon>
+          </Tooltip>
         </Group>
       </Group>
 
