@@ -35,6 +35,7 @@ def run_label_job(job_id: str, cfg_dict: dict, jobs_dir: str) -> dict:
         batch_size=cfg_dict.get("batch_size", 16),
         imgsz=cfg_dict.get("imgsz", 640),
         image_names=cfg_dict.get("image_names"),
+        max_boxes_per_class=cfg_dict.get("max_boxes_per_class"),
         job_id=job_id,
     )
 

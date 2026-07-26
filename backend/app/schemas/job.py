@@ -10,6 +10,8 @@ class JobCreate(BaseModel):
     imgsz: int = 640
     batch_size: int = 16
     names: list[str] | None = None
+    # class name -> max boxes per image (unspecified classes are uncapped/300)
+    max_boxes_per_class: dict[str, int] | None = None
 
 
 class JobOut(BaseModel):

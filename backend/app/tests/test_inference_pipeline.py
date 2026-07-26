@@ -148,6 +148,106 @@ def test_registry_seeded_from_existing_classes(tmp_path, fake_ultralytics):
     assert label.startswith("2 ")
 
 
+class _BallYOLO:
+    """One model owning a single class 'ball' with five descending-conf boxes."""
+
+    def __init__(self, path):
+        self.names = {0: "ball"}
+
+    def predict(self, paths, **kwargs):
+        dets = [
+            (0, (0.10, 0.10, 0.20, 0.20), 0.90),
+            (0, (0.30, 0.30, 0.40, 0.40), 0.70),
+            (0, (0.50, 0.50, 0.60, 0.60), 0.50),
+            (0, (0.70, 0.70, 0.80, 0.80), 0.30),
+            (0, (0.05, 0.05, 0.09, 0.09), 0.10),
+        ]
+        return [_Result(dets) for _ in paths]
+
+
+@pytest.fixture
+def fake_ball(monkeypatch):
+    mod = types.ModuleType("ultralytics")
+    mod.YOLO = _BallYOLO
+    monkeypatch.setitem(sys.modules, "ultralytics", mod)
+
+
+def _read_label(out, stem):
+    from app.domain.yolo_io import read_box_meta
+
+    label = out / "labels" / f"{stem}.txt"
+    lines = [ln for ln in label.read_text().splitlines() if ln.strip()]
+    return lines, read_box_meta(label)
+
+
+def test_conf_is_a_hard_filter(tmp_path, fake_ball):
+    images = tmp_path / "raw"
+    images.mkdir()
+    Image.new("RGB", (200, 100)).save(images / "img.jpg")
+    out = tmp_path / "out"
+
+    run_labeling(
+        LabelJobConfig(
+            model_paths=[tmp_path / "m.pt"],
+            images_dir=images,
+            out_dir=out,
+            conf=0.4,
+            device="cpu",
+        )
+    )
+
+    lines, meta = _read_label(out, "img")
+    # only the three boxes with conf >= 0.4 survive
+    assert len(lines) == 3
+    assert all(m["score"] >= 0.4 for m in meta)
+    # review status is never set by auto-labeling
+    assert all(m["status"] is None for m in meta)
+
+
+def test_max_boxes_per_class_keeps_top_n(tmp_path, fake_ball):
+    images = tmp_path / "raw"
+    images.mkdir()
+    Image.new("RGB", (200, 100)).save(images / "img.jpg")
+    out = tmp_path / "out"
+
+    run_labeling(
+        LabelJobConfig(
+            model_paths=[tmp_path / "m.pt"],
+            images_dir=images,
+            out_dir=out,
+            conf=0.05,  # keep everything, then cap
+            max_boxes_per_class={"ball": 2},
+            device="cpu",
+        )
+    )
+
+    lines, meta = _read_label(out, "img")
+    # capped to the 2 highest-confidence ball boxes
+    assert len(lines) == 2
+    assert sorted((m["score"] for m in meta), reverse=True) == [0.9, 0.7]
+
+
+def test_max_boxes_matches_class_name_case_insensitively(tmp_path, fake_ball):
+    images = tmp_path / "raw"
+    images.mkdir()
+    Image.new("RGB", (200, 100)).save(images / "img.jpg")
+    out = tmp_path / "out"
+
+    run_labeling(
+        LabelJobConfig(
+            model_paths=[tmp_path / "m.pt"],
+            images_dir=images,
+            out_dir=out,
+            conf=0.05,
+            max_boxes_per_class={"BALL": 1},  # normalized to match "ball"
+            device="cpu",
+        )
+    )
+
+    lines, _ = _read_label(out, "img")
+    assert len(lines) == 1
+
+
 def test_image_names_filter(tmp_path, fake_ultralytics):
     images = tmp_path / "raw"
     images.mkdir()

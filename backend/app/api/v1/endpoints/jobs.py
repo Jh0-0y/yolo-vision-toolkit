@@ -68,6 +68,7 @@ def create_job(project_id: str, req: JobCreate, session: Session = Depends(get_s
         "imgsz": req.imgsz,
         "batch_size": req.batch_size,
         "image_names": req.names,
+        "max_boxes_per_class": req.max_boxes_per_class,
         "device": settings.device,
     }
     job = Job(project_id=project_id, kind="label", config_json=json.dumps(req.model_dump()))

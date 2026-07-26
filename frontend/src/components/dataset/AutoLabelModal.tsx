@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Button,
   Collapse,
@@ -35,6 +35,7 @@ export default function AutoLabelModal({ projectId, opened, onClose, names }: Pr
   const [conf, setConf] = useState<number | string>(0.4)
   const [iouWbf, setIouWbf] = useState<number | string>(0.55)
   const [imgsz, setImgsz] = useState<number | string>(640)
+  const [maxBoxes, setMaxBoxes] = useState<Record<string, number>>({})
   const [advanced, setAdvanced] = useState(false)
   const [progress, setProgress] = useState<JobProgressEvent | null>(null)
   const [runningJobId, setRunningJobId] = useState<string | null>(null)
@@ -44,6 +45,20 @@ export default function AutoLabelModal({ projectId, opened, onClose, names }: Pr
     queryKey: ['models', projectId],
     queryFn: () => api.get<ModelOut[]>(`/models?project_id=${projectId}`),
   })
+
+  // Union of class names across the selected models (classes merge by name).
+  const classNames = useMemo(() => {
+    const selected = new Set(modelIds)
+    const names = new Set<string>()
+    for (const m of models.data ?? []) {
+      if (selected.has(m.id)) {
+        for (const n of Object.values(m.classes)) names.add(n)
+      }
+    }
+    return [...names].sort((a, b) => a.localeCompare(b))
+  }, [models.data, modelIds])
+
+  const DEFAULT_MAX = 300
 
   useEffect(() => () => unsubscribe.current?.(), [])
 
@@ -55,6 +70,10 @@ export default function AutoLabelModal({ projectId, opened, onClose, names }: Pr
         iou_wbf: Number(iouWbf),
         imgsz: Number(imgsz),
         names,
+        // only send classes the user capped below the default
+        max_boxes_per_class: Object.fromEntries(
+          Object.entries(maxBoxes).filter(([, v]) => v !== DEFAULT_MAX),
+        ),
       }),
     onSuccess: (job) => {
       setRunningJobId(job.id)
@@ -105,8 +124,7 @@ export default function AutoLabelModal({ projectId, opened, onClose, names }: Pr
     >
       <Stack>
         <Text size="sm" c="dimmed">
-          Target: {names ? `${names.length} selected images` : 'all images in the project'} —
-          results will be marked as needing review.
+          Target: {names ? `${names.length} selected images` : 'all images in the project'}.
         </Text>
 
         <MultiSelect
@@ -122,8 +140,8 @@ export default function AutoLabelModal({ projectId, opened, onClose, names }: Pr
           disabled={running}
         />
         <NumberInput
-          label="Review threshold (conf)"
-          description="Boxes below this are kept but flagged for review (dashed); above are accepted"
+          label="Confidence threshold (conf)"
+          description="Boxes below this confidence are discarded — not saved to the label file"
           value={conf}
           onChange={setConf}
           min={0.05}
@@ -143,28 +161,55 @@ export default function AutoLabelModal({ projectId, opened, onClose, names }: Pr
           Advanced
         </Button>
         <Collapse expanded={advanced}>
-          <Group grow>
-            <NumberInput
-              label="WBF IoU"
-              description="IoU for merging boxes across models"
-              value={iouWbf}
-              onChange={setIouWbf}
-              min={0.3}
-              max={0.9}
-              step={0.05}
-              decimalScale={2}
-              disabled={running}
-            />
-            <NumberInput
-              label="Image size (imgsz)"
-              value={imgsz}
-              onChange={setImgsz}
-              min={320}
-              max={1920}
-              step={32}
-              disabled={running}
-            />
-          </Group>
+          <Stack>
+            <Group grow>
+              <NumberInput
+                label="WBF IoU"
+                description="IoU for merging boxes across models"
+                value={iouWbf}
+                onChange={setIouWbf}
+                min={0.3}
+                max={0.9}
+                step={0.05}
+                decimalScale={2}
+                disabled={running}
+              />
+              <NumberInput
+                label="Image size (imgsz)"
+                value={imgsz}
+                onChange={setImgsz}
+                min={320}
+                max={1920}
+                step={32}
+                disabled={running}
+              />
+            </Group>
+
+            {classNames.length > 0 && (
+              <Stack gap="xs">
+                <Text size="sm" fw={500}>
+                  Max boxes per class
+                </Text>
+                <Text size="xs" c="dimmed">
+                  Keep only the N highest-confidence boxes of each class per image (e.g. ball = 1).
+                  Leave at {DEFAULT_MAX} for no limit.
+                </Text>
+                {classNames.map((name) => (
+                  <NumberInput
+                    key={name}
+                    label={name}
+                    value={maxBoxes[name] ?? DEFAULT_MAX}
+                    onChange={(v) =>
+                      setMaxBoxes((prev) => ({ ...prev, [name]: Number(v) || 0 }))
+                    }
+                    min={0}
+                    step={1}
+                    disabled={running}
+                  />
+                ))}
+              </Stack>
+            )}
+          </Stack>
         </Collapse>
 
         {running && progress && (
