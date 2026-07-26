@@ -79,7 +79,7 @@ export default function TestPage() {
         ]}
       />
 
-      <Grid gutter="md">
+      <Grid gap="md">
         <Grid.Col span={{ base: 12, md: 3 }}>
           <TestControls
             models={models}
