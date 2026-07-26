@@ -38,5 +38,11 @@ echo "[dev] 프론트엔드 시작 → http://localhost:5173"
 pids+=($!)
 
 echo "[dev] 실행 중 (종료: Ctrl+C)"
-# 어느 하나라도 죽으면 전체 종료
-wait -n
+# 어느 하나라도 죽으면 전체 종료.
+# (`wait -n`은 bash 4.3+ 전용 — macOS 기본 bash 3.2 호환을 위해 폴링으로 대체)
+while true; do
+  for pid in "${pids[@]}"; do
+    kill -0 "$pid" 2>/dev/null || exit 0
+  done
+  sleep 1
+done
