@@ -11,6 +11,14 @@ class TrainParams(BaseModel):
     lr0: float | None = None
     optimizer: str | None = None  # auto | SGD | Adam | AdamW ...
     workers: int = Field(default=2, ge=0, le=16)
+    # augmentation — unset (None) falls back to the ultralytics default
+    fliplr: float | None = Field(default=None, ge=0, le=1)
+    flipud: float | None = Field(default=None, ge=0, le=1)
+    degrees: float | None = Field(default=None, ge=0, le=180)
+    scale: float | None = Field(default=None, ge=0, le=1)
+    mosaic: float | None = Field(default=None, ge=0, le=1)
+    mixup: float | None = Field(default=None, ge=0, le=1)
+    copy_paste: float | None = Field(default=None, ge=0, le=1)
 
 
 class RunCreate(BaseModel):

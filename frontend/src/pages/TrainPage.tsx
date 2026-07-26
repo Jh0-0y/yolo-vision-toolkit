@@ -7,6 +7,7 @@ import {
   Group,
   NumberInput,
   Select,
+  SimpleGrid,
   Stack,
   Text,
   TextInput,
@@ -39,8 +40,17 @@ export default function TrainPage() {
   const [device, setDevice] = useState<string | null>('auto')
   const [advanced, setAdvanced] = useState(false)
   const [patience, setPatience] = useState<number | string>(100)
-  const [lr0, setLr0] = useState<number | string>('')
+  // ultralytics default lr0 is 0.01 — prefill it so the default is visible
+  const [lr0, setLr0] = useState<number | string>(0.01)
   const [optimizer, setOptimizer] = useState<string | null>(null)
+  // augmentation — prefilled with ultralytics defaults so they're visible
+  const [fliplr, setFliplr] = useState<number | string>(0.5)
+  const [flipud, setFlipud] = useState<number | string>(0)
+  const [degrees, setDegrees] = useState<number | string>(0)
+  const [scale, setScale] = useState<number | string>(0.5)
+  const [mosaic, setMosaic] = useState<number | string>(1.0)
+  const [mixup, setMixup] = useState<number | string>(0)
+  const [copyPaste, setCopyPaste] = useState<number | string>(0)
 
   const datasets = useQuery({
     queryKey: ['train-datasets', projectId],
@@ -79,6 +89,13 @@ export default function TrainPage() {
           patience: Number(patience),
           ...(lr0 !== '' ? { lr0: Number(lr0) } : {}),
           ...(optimizer ? { optimizer } : {}),
+          ...(fliplr !== '' ? { fliplr: Number(fliplr) } : {}),
+          ...(flipud !== '' ? { flipud: Number(flipud) } : {}),
+          ...(degrees !== '' ? { degrees: Number(degrees) } : {}),
+          ...(scale !== '' ? { scale: Number(scale) } : {}),
+          ...(mosaic !== '' ? { mosaic: Number(mosaic) } : {}),
+          ...(mixup !== '' ? { mixup: Number(mixup) } : {}),
+          ...(copyPaste !== '' ? { copy_paste: Number(copyPaste) } : {}),
         },
       }),
     onSuccess: (r) => {
@@ -132,6 +149,7 @@ export default function TrainPage() {
                 loading={uploadZip.isPending}
                 radius="md"
                 p="sm"
+                w={420}
               >
                 <Group gap="xs" justify="center" style={{ pointerEvents: 'none' }} py={4}>
                   <IconFileZip size={20} stroke={1.5} />
@@ -178,24 +196,102 @@ export default function TrainPage() {
               {advanced ? 'Hide advanced settings' : 'Show advanced settings'}
             </Anchor>
             {advanced && (
-              <Group grow mt="xs">
-                <NumberInput label="Patience" value={patience} onChange={setPatience} min={0} />
-                <NumberInput
-                  label="Initial LR (lr0)"
-                  value={lr0}
-                  onChange={setLr0}
-                  step={0.001}
-                  decimalScale={4}
-                />
-                <Select
-                  label="Optimizer"
-                  placeholder="auto"
-                  data={['SGD', 'Adam', 'AdamW', 'RMSProp']}
-                  value={optimizer}
-                  onChange={setOptimizer}
-                  clearable
-                />
-              </Group>
+              <Stack gap="md" mt="xs">
+                <Group grow>
+                  <NumberInput label="Patience" value={patience} onChange={setPatience} min={0} />
+                  <NumberInput
+                    label="Initial LR (lr0)"
+                    value={lr0}
+                    onChange={setLr0}
+                    min={0}
+                    step={0.001}
+                    decimalScale={4}
+                  />
+                  <Select
+                    label="Optimizer"
+                    placeholder="auto"
+                    data={['SGD', 'Adam', 'AdamW', 'RMSProp']}
+                    value={optimizer}
+                    onChange={setOptimizer}
+                    clearable
+                  />
+                </Group>
+
+                <div>
+                  <Text fw={600} size="sm">
+                    Augmentation
+                  </Text>
+                  <Text size="xs" c="dimmed" mb="xs">
+                    Values are ultralytics defaults. Higher = stronger; 0 = off. Clear a field to
+                    use the ultralytics default.
+                  </Text>
+                  <SimpleGrid cols={{ base: 2, sm: 3, md: 4 }} spacing="sm">
+                    <NumberInput
+                      label="Flip L/R"
+                      value={fliplr}
+                      onChange={setFliplr}
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      decimalScale={2}
+                    />
+                    <NumberInput
+                      label="Flip U/D"
+                      value={flipud}
+                      onChange={setFlipud}
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      decimalScale={2}
+                    />
+                    <NumberInput
+                      label="Rotation (°)"
+                      value={degrees}
+                      onChange={setDegrees}
+                      min={0}
+                      max={180}
+                      step={5}
+                    />
+                    <NumberInput
+                      label="Scale"
+                      value={scale}
+                      onChange={setScale}
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      decimalScale={2}
+                    />
+                    <NumberInput
+                      label="Mosaic"
+                      value={mosaic}
+                      onChange={setMosaic}
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      decimalScale={2}
+                    />
+                    <NumberInput
+                      label="Mixup"
+                      value={mixup}
+                      onChange={setMixup}
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      decimalScale={2}
+                    />
+                    <NumberInput
+                      label="Copy-paste"
+                      description="Segmentation / recent ultralytics only"
+                      value={copyPaste}
+                      onChange={setCopyPaste}
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      decimalScale={2}
+                    />
+                  </SimpleGrid>
+                </div>
+              </Stack>
             )}
           </div>
 
