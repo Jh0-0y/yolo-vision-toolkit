@@ -384,6 +384,9 @@ export type TrainResultRow = Record<string, number | string>
 export const getRunResults = (runId: string) =>
   api.get<TrainResultRow[]>(`/training/runs/${runId}/results`)
 
+export const getRunLog = (runId: string) =>
+  api.get<{ text: string; truncated: boolean }>(`/training/runs/${runId}/log`)
+
 export interface PerClassRow {
   cls: number
   name: string

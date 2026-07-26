@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import shutil
 import uuid
 import zipfile
@@ -412,6 +413,28 @@ def run_results(run_id: str, session: Session = Depends(get_session)):
                     row[key] = v
             rows.append(row)
     return rows
+
+
+@router.get("/runs/{run_id}/log")
+def run_log(run_id: str, tail_kb: int = 256, session: Session = Depends(get_session)):
+    """The training worker's train.log (stdout+stderr, incl. full tracebacks).
+    Only the last tail_kb KiB are returned so long runs stay cheap to fetch."""
+    run = session.get(TrainRun, run_id)
+    if run is None:
+        raise HTTPException(404, "Training run not found")
+    path = settings.run_dir(run.project_id, run_id) / "train.log"
+    if not path.exists():
+        return {"text": "", "truncated": False}
+    limit = max(1, tail_kb) * 1024
+    size = path.stat().st_size
+    with open(path, "rb") as f:
+        if size > limit:
+            f.seek(size - limit)
+        raw = f.read()
+    text = raw.decode("utf-8", errors="replace")
+    # strip ANSI color/escape codes — a plain code block can't render them
+    text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
+    return {"text": text, "truncated": size > limit}
 
 
 @router.post("/runs/{run_id}/stop", response_model=RunOut)

@@ -4,6 +4,7 @@ import {
   Badge,
   Button,
   Card,
+  Code,
   Collapse,
   Group,
   Image,
@@ -11,7 +12,7 @@ import {
   Modal,
   MultiSelect,
   Progress,
-  RingProgress,
+  ScrollArea,
   SegmentedControl,
   SimpleGrid,
   Stack,
@@ -32,6 +33,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   api,
+  getRunLog,
   getRunPerClass,
   getRunPerClassHistory,
   getRunResults,
@@ -166,6 +168,12 @@ export default function TrainRunDetailPage() {
       ),
   })
 
+  const log = useQuery({
+    queryKey: ['train-log', runId],
+    queryFn: () => getRunLog(runId),
+    refetchInterval: running ? 3000 : false,
+  })
+
   const perClass = useQuery({
     queryKey: ['train-per-class', runId],
     queryFn: () => getRunPerClass(runId),
@@ -205,6 +213,12 @@ export default function TrainRunDetailPage() {
   const [showDetailCharts, setShowDetailCharts] = useState(false)
   const [showClassMetrics, setShowClassMetrics] = useState(false)
   const [showResults, setShowResults] = useState(false)
+  const [showLog, setShowLog] = useState(false)
+
+  // a failed run's cause lives in the log — surface it automatically
+  useEffect(() => {
+    if (r?.status === 'error') setShowLog(true)
+  }, [r?.status])
 
   const stop = useMutation({
     mutationFn: () => api.post<TrainRunOut>(`/training/runs/${runId}/stop`),
@@ -254,14 +268,10 @@ export default function TrainRunDetailPage() {
   const epochNow = epochTotal ? Math.min(rawEpoch, epochTotal) : rawEpoch
   // running but no epoch has begun yet = still loading model / scanning dataset
   const preparing = running && rawEpoch === 0
+  // last epoch finished but the run is still alive = final validation + saving weights
+  const finalizing = running && livePhase === 'epoch' && epochTotal > 0 && epochNow >= epochTotal
   const stageLabel =
     livePhase === 'start' ? 'Starting…' : livePhase === 'preparing' ? 'Preparing…' : 'Initializing…'
-  const progressPct =
-    r?.status === 'done'
-      ? 100
-      : epochTotal
-        ? Math.min(100, Math.round((epochNow / epochTotal) * 100))
-        : 0
 
   const durationSec =
     points[points.length - 1]?.time ??
@@ -355,22 +365,19 @@ export default function TrainRunDetailPage() {
             <>
               <Group justify="space-between" wrap="nowrap">
                 <Group gap="lg">
-                  <RingProgress
-                    size={84}
-                    thickness={8}
-                    roundCaps
-                    sections={[{ value: progressPct, color: 'blue' }]}
-                    label={
-                      <Text size="xs" ta="center" fw={700}>
-                        {progressPct}%
-                      </Text>
-                    }
-                  />
+                  <Loader size="md" />
                   <div>
                     <Text size="sm" fw={600}>
-                      Epoch {epochNow || '–'} / {epochTotal || '–'}
-                      {livePhase === 'epoch_start' ? ' · running…' : ''}
+                      {finalizing
+                        ? 'Finalizing…'
+                        : `Epoch ${epochNow || '–'} / ${epochTotal || '–'}`}
+                      {!finalizing && livePhase === 'epoch_start' ? ' · running…' : ''}
                     </Text>
+                    {finalizing && (
+                      <Text size="xs" c="dimmed">
+                        Last epoch done — running final validation & saving weights.
+                      </Text>
+                    )}
                     <Text size="xs" c="dimmed">
                       {r.base_model_name ?? r.base_model_id} · {r.params.imgsz}px · batch{' '}
                       {r.params.batch}
@@ -390,7 +397,6 @@ export default function TrainRunDetailPage() {
                   Stop
                 </Button>
               </Group>
-              <Progress value={progressPct} animated mt="sm" />
             </>
           )}
         </Card>
@@ -586,6 +592,35 @@ export default function TrainRunDetailPage() {
           </Collapse>
         </div>
       )}
+
+      {/* raw training log (stdout+stderr) — the place to see failure tracebacks */}
+      <div>
+        <Button
+          variant="subtle"
+          size="compact-sm"
+          rightSection={<IconChevronDown size={14} />}
+          onClick={() => setShowLog((v) => !v)}
+        >
+          {showLog ? 'Hide' : 'Show'} training log
+        </Button>
+        <Collapse expanded={showLog}>
+          <Card withBorder radius="md" padding="xs" mt={8}>
+            {log.data?.truncated && (
+              <Text size="xs" c="dimmed" mb={4}>
+                Showing the last 256&nbsp;KB of the log.
+              </Text>
+            )}
+            <ScrollArea.Autosize mah={420} type="auto">
+              <Code
+                block
+                style={{ whiteSpace: 'pre', fontSize: 12, background: 'transparent' }}
+              >
+                {log.data?.text?.trim() || 'No log yet.'}
+              </Code>
+            </ScrollArea.Autosize>
+          </Card>
+        </Collapse>
+      </div>
 
       <Modal
         opened={lightbox !== null}
@@ -886,34 +921,61 @@ function PerClassTable({ rows }: { rows: PerClassRow[] }) {
   )
 }
 
+// primary params stay visible; everything else hides behind the toggle
+const PRIMARY_PARAMS = ['epochs', 'imgsz', 'batch']
+
 function DetailsCard({ run, durationSec }: { run: TrainRunOut; durationSec?: number }) {
-  const rows: [string, React.ReactNode][] = [
+  const [showParams, setShowParams] = useState(false)
+  const metaRows: [string, React.ReactNode][] = [
     ['Base model', run.base_model_name ?? run.base_model_id],
     ['Status', run.status],
     ['Started', new Date(run.created_at).toLocaleString()],
     ['Finished', run.finished_at ? new Date(run.finished_at).toLocaleString() : '–'],
     ['Duration', formatDuration(durationSec)],
-    ...Object.entries(run.params).map(([k, v]) => [k, String(v)] as [string, React.ReactNode]),
+    ...PRIMARY_PARAMS.filter((k) => k in run.params).map(
+      (k) => [k, String(run.params[k])] as [string, React.ReactNode],
+    ),
   ]
+  const paramRows = Object.entries(run.params)
+    .filter(([k]) => !PRIMARY_PARAMS.includes(k))
+    .map(([k, v]) => [k, String(v)] as [string, React.ReactNode])
+  const renderRows = (rows: [string, React.ReactNode][]) =>
+    rows.map(([k, v]) => (
+      <Table.Tr key={k}>
+        <Table.Th w={160} style={{ color: 'var(--mantine-color-dimmed)', fontWeight: 500 }}>
+          {k}
+        </Table.Th>
+        <Table.Td>
+          <Text size="sm">{v}</Text>
+        </Table.Td>
+      </Table.Tr>
+    ))
   return (
     <Card withBorder radius="md" padding="md">
       <Text size="sm" fw={600} mb="xs">
         Run details
       </Text>
       <Table variant="vertical" withRowBorders={false} verticalSpacing={4}>
-        <Table.Tbody>
-          {rows.map(([k, v]) => (
-            <Table.Tr key={k}>
-              <Table.Th w={160} style={{ color: 'var(--mantine-color-dimmed)', fontWeight: 500 }}>
-                {k}
-              </Table.Th>
-              <Table.Td>
-                <Text size="sm">{v}</Text>
-              </Table.Td>
-            </Table.Tr>
-          ))}
-        </Table.Tbody>
+        <Table.Tbody>{renderRows(metaRows)}</Table.Tbody>
       </Table>
+      {paramRows.length > 0 && (
+        <>
+          <Button
+            variant="subtle"
+            size="compact-sm"
+            mt={4}
+            rightSection={<IconChevronDown size={14} />}
+            onClick={() => setShowParams((v) => !v)}
+          >
+            {showParams ? 'Hide' : 'Show'} parameters ({paramRows.length})
+          </Button>
+          <Collapse expanded={showParams}>
+            <Table variant="vertical" withRowBorders={false} verticalSpacing={4}>
+              <Table.Tbody>{renderRows(paramRows)}</Table.Tbody>
+            </Table>
+          </Collapse>
+        </>
+      )}
     </Card>
   )
 }
