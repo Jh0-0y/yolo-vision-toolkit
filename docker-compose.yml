@@ -3,6 +3,9 @@ services:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
+    # PyTorch DataLoader 워커는 /dev/shm으로 텐서를 공유한다. Docker 기본값 64MB로는
+    # 학습 시 "Unexpected bus error ... insufficient shared memory (shm)"가 나므로 키운다.
+    shm_size: "8gb"
     environment:
       YVT_DATA_DIR: /data
       YVT_DEVICE: ${YVT_DEVICE:-auto}
