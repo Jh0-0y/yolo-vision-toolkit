@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import {
+  Alert,
   Anchor,
   Badge,
   Button,
@@ -14,12 +15,13 @@ import {
   Title,
 } from '@mantine/core'
 import { Dropzone } from '@mantine/dropzone'
-import { IconFileZip, IconPlayerPlay } from '@tabler/icons-react'
+import { IconAlertTriangle, IconFileZip, IconPlayerPlay } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   api,
+  getResources,
   uploadTrainDataset,
   type ModelOut,
   type TrainDataset,
@@ -51,6 +53,13 @@ export default function TrainPage() {
   const [mosaic, setMosaic] = useState<number | string>(1.0)
   const [mixup, setMixup] = useState<number | string>(0)
   const [copyPaste, setCopyPaste] = useState<number | string>(0)
+
+  const resources = useQuery({
+    queryKey: ['resources'],
+    queryFn: getResources,
+    refetchInterval: 5000,
+  })
+  const trainingActive = resources.data?.training_active ?? false
 
   const datasets = useQuery({
     queryKey: ['train-datasets', projectId],
@@ -123,6 +132,13 @@ export default function TrainPage() {
           Pick a dataset and base model — starting a run takes you to Training History.
         </Text>
       </div>
+
+      {trainingActive && (
+        <Alert color="orange" icon={<IconAlertTriangle size={18} />} title="학습 진행 중">
+          이미 학습이 진행 중입니다. 새 학습을 시작하면 GPU를 두고 경쟁해 둘 다 느려지거나 실패할 수
+          있습니다.
+        </Alert>
+      )}
 
       <Card withBorder radius="md" padding="lg">
         <Stack gap="md">

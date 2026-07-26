@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Alert,
   Button,
   Collapse,
   Group,
@@ -10,11 +11,12 @@ import {
   Stack,
   Text,
 } from '@mantine/core'
-import { IconSettings } from '@tabler/icons-react'
+import { IconAlertTriangle, IconSettings } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   api,
+  getResources,
   subscribeJobEvents,
   type JobOut,
   type JobProgressEvent,
@@ -45,6 +47,15 @@ export default function AutoLabelModal({ projectId, opened, onClose, names }: Pr
     queryKey: ['models', projectId],
     queryFn: () => api.get<ModelOut[]>(`/models?project_id=${projectId}`),
   })
+
+  // warn about GPU contention while a training run is active
+  const resources = useQuery({
+    queryKey: ['resources'],
+    queryFn: getResources,
+    refetchInterval: opened ? 5000 : false,
+    enabled: opened,
+  })
+  const trainingActive = resources.data?.training_active ?? false
 
   // Union of class names across the selected models (classes merge by name).
   const classNames = useMemo(() => {
@@ -123,6 +134,12 @@ export default function AutoLabelModal({ projectId, opened, onClose, names }: Pr
       closeOnClickOutside={!running}
     >
       <Stack>
+        {trainingActive && (
+          <Alert color="orange" icon={<IconAlertTriangle size={18} />} title="학습 진행 중">
+            학습이 진행 중입니다. 오토라벨링은 같은 GPU를 사용하므로 느려지거나 메모리 부족이 날 수
+            있습니다.
+          </Alert>
+        )}
         <Text size="sm" c="dimmed">
           Target: {names ? `${names.length} selected images` : 'all images in the project'}.
         </Text>
