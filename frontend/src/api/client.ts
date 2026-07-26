@@ -537,7 +537,7 @@ export function subscribeAnnotateEvents(jobId: string, onEvent: (ev: AnnotatePro
 
 export const annotateResultUrl = (jobId: string) => `${BASE}/predict/annotate/${jobId}/result`
 
-// ---------- test: precise analysis (model vs labeled ground truth) ----------
+// ---------- test: model comparison (score models vs labeled ground truth) ----------
 
 export interface ClassMetric {
   cls: number
@@ -552,7 +552,7 @@ export interface ClassMetric {
   f1: number
 }
 
-export interface AnalyzeOverall {
+export interface CompareOverall {
   tp: number
   fp: number
   fn: number
@@ -561,66 +561,71 @@ export interface AnalyzeOverall {
   f1: number
 }
 
-export interface AnalyzeBox {
+export interface CompareBox {
   cls: number
   name: string
   xyxyn: [number, number, number, number]
   score?: number
 }
 
-export interface WorstImage {
+export interface CompareModelResult {
+  model_id: string
+  name: string
+  overall: CompareOverall
+  per_class: ClassMetric[]
+  detections: number
+}
+
+export interface CompareImage {
   stem: string
   name: string
   url: string
-  tp: number
-  fp: number
-  fn: number
-  gt_boxes: AnalyzeBox[]
-  pred_boxes: AnalyzeBox[]
+  gt_boxes: CompareBox[]
+  per_model: { model_id: string; pred_boxes: CompareBox[] }[]
 }
 
-export interface AnalyzeResult {
-  per_class: ClassMetric[]
-  overall: AnalyzeOverall
-  worst: WorstImage[]
-  images: number
+export interface CompareResult {
+  per_model: CompareModelResult[]
+  images: CompareImage[]
+  image_count: number
   conf: number
   iou: number
+  warning?: string | null
 }
 
-export interface AnalyzeProgress {
+export interface CompareProgress {
   phase: 'start' | 'analyze' | 'done' | 'error' | 'cancelled'
   done?: number
   total?: number
   msg?: string
 }
 
-export function startAnalyze(opts: {
+export function startCompare(opts: {
   projectId: string
   modelIds: string[]
+  imageNames: string[]
   params: PredictParams
-  reviewedOnly?: boolean
 }): Promise<TestJobStart> {
   const form = new FormData()
   form.append('project_id', opts.projectId)
   form.append('model_ids', opts.modelIds.join(','))
+  form.append('image_names', opts.imageNames.join(','))
   form.append('conf', String(opts.params.conf))
-  form.append('iou', String(opts.params.iou_wbf))
+  form.append('iou', String(opts.params.iou_wbf)) // reused as pred↔GT match IoU
   form.append('imgsz', String(opts.params.imgsz))
   if (opts.params.device) form.append('device', opts.params.device)
-  form.append('reviewed_only', String(!!opts.reviewedOnly))
-  return api.upload<TestJobStart>('/predict/analyze', form)
+  return api.upload<TestJobStart>('/predict/compare', form)
 }
 
-export function subscribeAnalyzeEvents(jobId: string, onEvent: (ev: AnalyzeProgress) => void): () => void {
-  const source = new EventSource(`${BASE}/predict/analyze/${jobId}/events`)
+export function subscribeCompareEvents(jobId: string, onEvent: (ev: CompareProgress) => void): () => void {
+  const source = new EventSource(`${BASE}/predict/compare/${jobId}/events`)
   source.addEventListener('progress', (e) => {
-    const ev = JSON.parse((e as MessageEvent).data) as AnalyzeProgress
+    const ev = JSON.parse((e as MessageEvent).data) as CompareProgress
     onEvent(ev)
     if (ev.phase === 'done' || ev.phase === 'error' || ev.phase === 'cancelled') source.close()
   })
   return () => source.close()
 }
 
-export const getAnalyzeResult = (jobId: string) =>
-  api.get<AnalyzeResult>(`/predict/analyze/${jobId}/result`)
+export const getCompareResult = (jobId: string) =>
+  api.get<CompareResult>(`/predict/compare/${jobId}/result`)
