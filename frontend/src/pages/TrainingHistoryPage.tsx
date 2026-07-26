@@ -1,4 +1,15 @@
-import { ActionIcon, Badge, Card, Group, Stack, Table, Text, Title, Tooltip } from '@mantine/core'
+import {
+  ActionIcon,
+  Badge,
+  Card,
+  Group,
+  Loader,
+  Stack,
+  Table,
+  Text,
+  Title,
+  Tooltip,
+} from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { IconTrash } from '@tabler/icons-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -22,7 +33,11 @@ export default function TrainingHistoryPage() {
   const runs = useQuery({
     queryKey: ['train-runs', projectId],
     queryFn: () => api.get<TrainRunOut[]>(`/training/runs?project_id=${projectId}`),
-    refetchInterval: 15_000,
+    // poll fast while something is active so the status/spinner updates promptly
+    refetchInterval: (query) => {
+      const data = query.state.data as TrainRunOut[] | undefined
+      return data?.some((r) => !TERMINAL_STATUS.has(r.status)) ? 3_000 : 15_000
+    },
   })
 
   const remove = useMutation({
@@ -60,9 +75,14 @@ export default function TrainingHistoryPage() {
             {runs.data?.map((r) => (
               <Table.Tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => navigate(r.id)}>
                 <Table.Td>
-                  <Text size="sm" fw={600}>
-                    {r.name}
-                  </Text>
+                  <Group gap="xs" wrap="nowrap">
+                    {!TERMINAL_STATUS.has(r.status) && (
+                      <Loader size={14} color={RUN_STATUS_COLOR[r.status] ?? 'gray'} />
+                    )}
+                    <Text size="sm" fw={600}>
+                      {r.name}
+                    </Text>
+                  </Group>
                 </Table.Td>
                 <Table.Td>
                   <Text size="sm">{r.base_model_name ?? '-'}</Text>
