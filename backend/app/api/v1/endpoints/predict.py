@@ -193,13 +193,14 @@ def annotate_result(job_id: str):
     return FileResponse(out, media_type="video/mp4")  # FileResponse handles Range
 
 
-# ---------- precise analysis (model vs labeled ground truth) ----------
+# ---------- model comparison (score models vs labeled ground truth) ----------
 
 
-@router.post("/analyze", response_model=TestJobStart, status_code=201)
-async def start_analyze(
+@router.post("/compare", response_model=TestJobStart, status_code=201)
+async def start_compare(
     project_id: str = Form(...),
     model_ids: str = Form(...),
+    image_names: str | None = Form(None),  # comma-separated filenames; empty = all labeled
     conf: float = Form(0.4),
     iou: float = Form(0.5),  # IoU match threshold (pred↔GT)
     imgsz: int = Form(640),
@@ -210,35 +211,43 @@ async def start_analyze(
     ids = [m.strip() for m in model_ids.split(",") if m.strip()]
     if not ids:
         raise HTTPException(422, "Select at least one model")
-    specs = [(mid, _model_pt(session, mid, project_id)) for mid in ids]
+    specs: list[tuple[str, str]] = []
+    model_names: dict[str, str] = {}
+    for mid in ids:
+        specs.append((mid, _model_pt(session, mid, project_id)))
+        entry = session.get(ModelEntry, mid)
+        model_names[mid] = entry.name if entry else mid
     if not (settings.projects_dir / project_id / "labels").exists():
-        raise HTTPException(422, "No labeled data to analyze in this project")
+        raise HTTPException(422, "No labeled data to compare in this project")
 
+    names_list = [n.strip() for n in image_names.split(",") if n.strip()] if image_names else None
     job_id = uuid.uuid4().hex
     cfg = {
         "project_id": project_id,
         "specs": specs,
+        "model_names": model_names,
+        "image_names": names_list,
         "conf": conf,
         "iou": iou,
-        "iou_wbf": iou,
+        "iou_wbf": 0.55,
         "imgsz": imgsz,
         "device": device,
         "reviewed_only": reviewed_only,
     }
-    await run_in_threadpool(test_job_manager.submit_analyze, job_id, cfg)
+    await run_in_threadpool(test_job_manager.submit_compare, job_id, cfg)
     return TestJobStart(job_id=job_id)
 
 
-@router.get("/analyze/{job_id}/events")
-async def analyze_events(job_id: str):
+@router.get("/compare/{job_id}/events")
+async def compare_events(job_id: str):
     return await _job_event_stream(job_id)
 
 
-@router.get("/analyze/{job_id}/result")
-def analyze_result(job_id: str):
+@router.get("/compare/{job_id}/result")
+def compare_result(job_id: str):
     if not job_id.isalnum():
         raise HTTPException(422, "Invalid job id")
     path = settings.jobs_dir / job_id / "result.json"
     if not path.exists():
-        raise HTTPException(404, "Analysis result not ready")
+        raise HTTPException(404, "Comparison result not ready")
     return json.loads(path.read_text())

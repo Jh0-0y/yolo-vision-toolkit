@@ -38,18 +38,22 @@ def sweep_old_annotations() -> None:
 
 
 class TestJobManager:
+    """Owns two single-worker pools so a long video-tracking job and a
+    model-comparison/analysis job don't block each other (they used to share one
+    worker). Each pool is spawn-based, has no idle reaper, and does no DB work."""
+
     def __init__(self) -> None:
-        self._executor: ProcessPoolExecutor | None = None
+        self._executors: dict[str, ProcessPoolExecutor] = {}
         self._lock = threading.Lock()
         self._futures: dict[str, Future] = {}
 
-    def _get_executor(self) -> ProcessPoolExecutor:
+    def _get_executor(self, kind: str) -> ProcessPoolExecutor:
         with self._lock:
-            if self._executor is None:
-                self._executor = ProcessPoolExecutor(
+            if kind not in self._executors:
+                self._executors[kind] = ProcessPoolExecutor(
                     max_workers=1, mp_context=multiprocessing.get_context("spawn")
                 )
-            return self._executor
+            return self._executors[kind]
 
     def _prepare(self, job_id: str):
         job_dir = settings.jobs_dir / job_id
@@ -62,17 +66,17 @@ class TestJobManager:
         from app.workers import annotate_worker
 
         self._prepare(job_id)
-        future = self._get_executor().submit(
+        future = self._get_executor("video").submit(
             annotate_worker.run_annotate, job_id, cfg, str(settings.jobs_dir)
         )
         self._futures[job_id] = future
 
-    def submit_analyze(self, job_id: str, cfg: dict) -> None:
-        from app.workers import analyze_worker
+    def submit_compare(self, job_id: str, cfg: dict) -> None:
+        from app.workers import compare_worker
 
         self._prepare(job_id)
-        future = self._get_executor().submit(
-            analyze_worker.run_analyze, job_id, cfg, str(settings.jobs_dir)
+        future = self._get_executor("eval").submit(
+            compare_worker.run_compare, job_id, cfg, str(settings.jobs_dir)
         )
         self._futures[job_id] = future
 
@@ -85,9 +89,9 @@ class TestJobManager:
 
     def shutdown(self) -> None:
         with self._lock:
-            if self._executor is not None:
-                self._executor.shutdown(wait=False, cancel_futures=True)
-                self._executor = None
+            for ex in self._executors.values():
+                ex.shutdown(wait=False, cancel_futures=True)
+            self._executors = {}
 
 
 test_job_manager = TestJobManager()

@@ -1,9 +1,12 @@
-"""Video annotation worker: draw a model's detections onto every frame and
-write a browser-playable (H.264) annotated mp4. Runs in a child process
-(torch/ultralytics + cv2). Progress → jobs_dir/{job_id}/progress.jsonl.
+"""Video tracking worker: run a model's object tracker (ByteTrack) over a video,
+draw per-object boxes with stable track IDs (and a short motion trail), and write
+a browser-playable (H.264) mp4. Runs in a child process (torch/ultralytics + cv2).
+Progress → jobs_dir/{job_id}/progress.jsonl.
 
 cv2.VideoWriter H.264 support is unreliable across OpenCV builds, so we always
-write an mp4v intermediate then transcode to H.264 with ffmpeg (verified present).
+write an mp4v intermediate then transcode to H.264 with ffmpeg. ffmpeg is REQUIRED
+(shipped in the Docker image); if it's missing the job fails loudly rather than
+writing an unplayable mp4v file.
 """
 
 from __future__ import annotations
@@ -12,6 +15,7 @@ import json
 import shutil
 import subprocess
 import time
+from collections import defaultdict, deque
 from pathlib import Path
 
 # BGR palette (matches the frontend BoxOverlay hue order closely enough).
@@ -20,9 +24,11 @@ _PALETTE = [
     (151, 201, 32), (43, 146, 255), (172, 131, 247), (252, 143, 116), (75, 227, 169),
 ]
 
+_TRAIL_LEN = 30  # frames of motion history to draw per track
 
-def _color(cls: int) -> tuple[int, int, int]:
-    return _PALETTE[cls % len(_PALETTE)]
+
+def _color(key: int) -> tuple[int, int, int]:
+    return _PALETTE[key % len(_PALETTE)]
 
 
 def _emit(progress_path: Path, event: dict) -> None:
@@ -34,7 +40,6 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
     import cv2
 
     from app.core.config import resolve_device
-    from app.ml.predict import PredictConfig, predict_image
 
     job_dir = Path(jobs_dir) / job_id
     progress = job_dir / "progress.jsonl"
@@ -47,63 +52,89 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
 
     device = resolve_device(cfg.get("device"))
     conf_thr = float(cfg.get("conf", 0.4))
+    iou_thr = float(cfg.get("iou", cfg.get("iou_wbf", 0.7)))
+    imgsz = int(cfg.get("imgsz", 640))
 
     try:
+        # fail early if we can't produce a browser-playable file
+        if shutil.which("ffmpeg") is None:
+            raise RuntimeError(
+                "ffmpeg is required to encode a browser-playable video but was not "
+                "found. Install it (Docker image ships it; locally: `brew install ffmpeg`)."
+            )
+
         from ultralytics import YOLO
 
-        models = []
-        for model_id, pt in cfg["specs"]:
-            model = YOLO(pt)
-            try:
-                model.to(device)
-            except Exception:
-                pass
-            models.append((model_id, model))
+        # tracking is single-model by nature — use the first selected model
+        _, pt = cfg["specs"][0]
+        model = YOLO(pt)
 
+        # probe geometry / length for the writer + progress total
         cap = cv2.VideoCapture(str(src))
         fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
         writer = cv2.VideoWriter(str(tmp), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
 
-        pcfg = PredictConfig(
-            conf=conf_thr,
-            iou_wbf=float(cfg.get("iou_wbf", 0.55)),
-            imgsz=int(cfg.get("imgsz", 640)),
-            device=device,
-        )
         _emit(progress, {"phase": "start", "total": total})
 
+        trails: dict[int, deque] = defaultdict(lambda: deque(maxlen=_TRAIL_LEN))
         idx = 0
         cancelled = False
-        while True:
+        results = model.track(
+            source=str(src),
+            stream=True,
+            persist=True,
+            tracker="bytetrack.yaml",
+            conf=conf_thr,
+            iou=iou_thr,
+            imgsz=imgsz,
+            device=device,
+            verbose=False,
+        )
+        for r in results:
             if cancel.exists():
                 cancelled = True
                 break
-            ok, frame = cap.read()
-            if not ok:
-                break
-            res = predict_image(models, frame, pcfg)
-            for b in res["boxes"]:
-                if b["score"] < conf_thr:
-                    continue
-                x1, y1, x2, y2 = b["xyxyn"]
-                p1 = (int(x1 * w), int(y1 * h))
-                p2 = (int(x2 * w), int(y2 * h))
-                color = _color(b["cls"])
-                cv2.rectangle(frame, p1, p2, color, 2)
-                label = f'{b["name"]} {b["score"] * 100:.0f}%'
-                cv2.putText(
-                    frame, label, (p1[0], max(12, p1[1] - 5)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA,
+            frame = r.orig_img
+            boxes = getattr(r, "boxes", None)
+            if boxes is not None and boxes.xyxy is not None:
+                xyxy = boxes.xyxy.cpu().numpy()
+                clss = boxes.cls.cpu().numpy().astype(int)
+                confs = boxes.conf.cpu().numpy()
+                ids = (
+                    boxes.id.cpu().numpy().astype(int)
+                    if boxes.id is not None
+                    else [None] * len(xyxy)
                 )
+                names = r.names
+                for k in range(len(xyxy)):
+                    x1, y1, x2, y2 = (int(v) for v in xyxy[k])
+                    tid = int(ids[k]) if ids[k] is not None else None
+                    color = _color(tid if tid is not None else int(clss[k]))
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                    cls_name = names.get(int(clss[k]), str(clss[k]))
+                    label = (
+                        f"#{tid} {cls_name} {confs[k] * 100:.0f}%"
+                        if tid is not None
+                        else f"{cls_name} {confs[k] * 100:.0f}%"
+                    )
+                    cv2.putText(
+                        frame, label, (x1, max(12, y1 - 5)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA,
+                    )
+                    if tid is not None:
+                        trails[tid].append(((x1 + x2) // 2, (y1 + y2) // 2))
+                        pts = trails[tid]
+                        for j in range(1, len(pts)):
+                            cv2.line(frame, pts[j - 1], pts[j], color, 2, cv2.LINE_AA)
             writer.write(frame)
             idx += 1
             if idx % 5 == 0 or idx == total:
                 _emit(progress, {"phase": "annotate", "done": idx, "total": total})
 
-        cap.release()
         writer.release()
 
         if cancelled:
@@ -127,11 +158,8 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
 
 
 def _to_h264(src: Path, dst: Path) -> None:
-    """Transcode to H.264/yuv420p mp4 (browser-safe). Falls back to a copy if
-    ffmpeg is unavailable."""
-    if shutil.which("ffmpeg") is None:
-        shutil.copyfile(src, dst)
-        return
+    """Transcode to H.264/yuv420p mp4 (browser-safe). ffmpeg is required — the
+    caller checks for it up front and fails the job if it's missing."""
     subprocess.run(
         ["ffmpeg", "-y", "-i", str(src), "-c:v", "libx264", "-pix_fmt", "yuv420p",
          "-movflags", "+faststart", "-an", str(dst)],

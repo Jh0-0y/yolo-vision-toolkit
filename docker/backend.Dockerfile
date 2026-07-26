@@ -2,9 +2,10 @@
 # Torch/CUDA already included; uv only adds the remaining deps.
 FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
 
-# OpenCV runtime libs required by ultralytics
+# OpenCV runtime libs required by ultralytics + ffmpeg for H.264 video encoding
+# (the Test page's object-tracking output is transcoded to browser-playable H.264)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1 libglib2.0-0 \
+    libgl1 libglib2.0-0 ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
