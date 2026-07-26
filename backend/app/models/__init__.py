@@ -8,6 +8,20 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def iso_utc(dt: datetime | None) -> str | None:
+    """Serialize a stored datetime as UTC ISO for the client.
+
+    SQLite drops tzinfo on round-trip, so timestamps read back from the DB are
+    naive even though _now() always writes UTC. We label them UTC (append the
+    offset) so the frontend's `new Date(...)` converts to local time correctly
+    instead of misreading a UTC value as local."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
+
 def _uid(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:10]}"
 

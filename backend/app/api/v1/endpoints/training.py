@@ -26,7 +26,7 @@ from app.domain.yolo_io import atomic_write_text
 from app.db import get_session, session_scope
 from app.services.label_manager import read_progress
 from app.services.train_manager import train_manager
-from app.models import ModelEntry, Project, TrainRun
+from app.models import ModelEntry, Project, TrainRun, iso_utc
 
 router = APIRouter(prefix="/training", tags=["training"])
 
@@ -61,8 +61,8 @@ def _to_out(run: TrainRun, session: Session) -> RunOut:
         params=json.loads(run.params_json),
         metrics=json.loads(run.metrics_json) if run.metrics_json else None,
         error=run.error,
-        created_at=run.created_at.isoformat(),
-        finished_at=run.finished_at.isoformat() if run.finished_at else None,
+        created_at=iso_utc(run.created_at),
+        finished_at=iso_utc(run.finished_at),
     )
 
 

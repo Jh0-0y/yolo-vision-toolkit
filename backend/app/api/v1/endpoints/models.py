@@ -15,7 +15,7 @@ from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.db import get_session
-from app.models import ModelEntry
+from app.models import ModelEntry, iso_utc
 
 router = APIRouter(prefix="/models", tags=["models"])
 
@@ -35,7 +35,7 @@ def _to_out(entry: ModelEntry) -> ModelOut:
         name=entry.name,
         classes={int(k): v for k, v in json.loads(entry.classes_json).items()},
         task=entry.task,
-        created_at=entry.created_at.isoformat(),
+        created_at=iso_utc(entry.created_at),
         source=source,
     )
 

@@ -13,7 +13,7 @@ from sqlmodel import Session, select
 from app.core.config import settings
 from app.db import get_session, session_scope
 from app.services.label_manager import job_manager, read_progress
-from app.models import Job, ModelEntry, Project
+from app.models import Job, ModelEntry, Project, iso_utc
 
 router = APIRouter(prefix="", tags=["jobs"])
 
@@ -29,7 +29,7 @@ def _to_out(job: Job) -> JobOut:
         config=json.loads(job.config_json),
         result=json.loads(job.result_json) if job.result_json else None,
         error=job.error,
-        created_at=job.created_at.isoformat(),
+        created_at=iso_utc(job.created_at),
     )
 
 

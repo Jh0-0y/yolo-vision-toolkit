@@ -34,7 +34,7 @@ from app.domain.labels import (
 )
 from app.domain.yolo_io import atomic_write_text
 from app.db import get_session
-from app.models import ModelEntry, Project, TrainRun
+from app.models import ModelEntry, Project, TrainRun, iso_utc
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -69,7 +69,7 @@ def _labeled_stems(pdir: Path) -> set[str]:
 @router.get("", response_model=list[ProjectOut])
 def list_projects(session: Session = Depends(get_session)):
     projects = session.exec(select(Project).order_by(Project.created_at.desc())).all()
-    return [ProjectOut(id=p.id, name=p.name, created_at=p.created_at.isoformat()) for p in projects]
+    return [ProjectOut(id=p.id, name=p.name, created_at=iso_utc(p.created_at)) for p in projects]
 
 
 @router.post("", response_model=ProjectOut, status_code=201)
@@ -83,7 +83,7 @@ def create_project(req: ProjectCreate, session: Session = Depends(get_session)):
     )
     session.add(project)
     session.commit()
-    return ProjectOut(id=project.id, name=project.name, created_at=project.created_at.isoformat())
+    return ProjectOut(id=project.id, name=project.name, created_at=iso_utc(project.created_at))
 
 
 @router.delete("/{project_id}", status_code=204)
