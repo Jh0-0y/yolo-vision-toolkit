@@ -5,6 +5,7 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   Group,
   NumberInput,
   Progress,
@@ -16,6 +17,7 @@ import {
 import { Dropzone } from '@mantine/dropzone'
 import { IconAlertTriangle, IconMovie, IconX } from '@tabler/icons-react'
 import {
+  annotateCropUrl,
   annotateResultUrl,
   startAnnotate,
   subscribeAnnotateEvents,
@@ -32,7 +34,8 @@ interface Props {
 
 const PHASE_LABEL: Record<string, string> = {
   start: 'Preparing…',
-  annotate: 'Tracking objects…',
+  crop_analyze: 'Analyzing crop trajectory…',
+  annotate: 'Rendering video…',
   encoding: 'Encoding video…',
   done: 'Done',
 }
@@ -43,6 +46,8 @@ export default function TrackMode({ projectId, models }: Props) {
   const [modelId, setModelId] = useState<string | null>(null)
   const [conf, setConf] = useState(0.4)
   const [imgsz, setImgsz] = useState<number | string>(640)
+  const [objectTracking, setObjectTracking] = useState(true)
+  const [cropTracking, setCropTracking] = useState(true)
   const [fileName, setFileName] = useState<string | null>(null)
   const [jobId, setJobId] = useState<string | null>(null)
   const [progress, setProgress] = useState<AnnotateProgress | null>(null)
@@ -50,6 +55,7 @@ export default function TrackMode({ projectId, models }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
   const [videoFailed, setVideoFailed] = useState(false)
+  const [ranCrop, setRanCrop] = useState(false) // crop tracking used by the finished job
   const unsub = useRef<(() => void) | null>(null)
 
   useEffect(() => {
@@ -60,13 +66,14 @@ export default function TrackMode({ projectId, models }: Props) {
 
   async function onDrop(files: File[]) {
     const file = files[0]
-    if (!file || !modelId) return
+    if (!file || !modelId || (!objectTracking && !cropTracking)) return
     unsub.current?.()
     setFileName(file.name)
     setError(null)
     setDone(false)
     setVideoFailed(false)
     setJobId(null)
+    setRanCrop(cropTracking)
     setProgress({ phase: 'start' })
     setRunning(true)
     try {
@@ -75,6 +82,8 @@ export default function TrackMode({ projectId, models }: Props) {
         modelIds: [modelId],
         projectId,
         params: { conf, iou_wbf: 0.7, imgsz: Number(imgsz), device: null },
+        objectTracking,
+        cropTracking,
       })
       setJobId(job_id)
       unsub.current = subscribeAnnotateEvents(job_id, (ev) => {
@@ -104,6 +113,7 @@ export default function TrackMode({ projectId, models }: Props) {
     setError(null)
     setDone(false)
     setVideoFailed(false)
+    setRanCrop(false)
   }
 
   const pct =
@@ -141,6 +151,33 @@ export default function TrackMode({ projectId, models }: Props) {
               disabled={running}
             />
           </Group>
+          <Stack gap={4}>
+            <Text size="sm" fw={600}>
+              Overlays
+            </Text>
+            <Checkbox
+              label="Object tracking — boxes, IDs & motion trails"
+              checked={objectTracking}
+              onChange={(e) => setObjectTracking(e.currentTarget.checked)}
+              disabled={running}
+            />
+            <Checkbox
+              label="Crop tracking — moving vertical 9:16 crop frame"
+              checked={cropTracking}
+              onChange={(e) => setCropTracking(e.currentTarget.checked)}
+              disabled={running}
+            />
+            {!objectTracking && !cropTracking && (
+              <Text size="xs" c="red">
+                Enable at least one overlay.
+              </Text>
+            )}
+            {cropTracking && (
+              <Text size="xs" c="dimmed">
+                Crop tracking needs a model with a ball class (e.g. sports footage).
+              </Text>
+            )}
+          </Stack>
         </Stack>
       </Card>
 
@@ -153,7 +190,12 @@ export default function TrackMode({ projectId, models }: Props) {
           )}
 
           {!fileName ? (
-            <Dropzone onDrop={onDrop} accept={VIDEO_MIME} multiple={false} disabled={!modelId}>
+            <Dropzone
+              onDrop={onDrop}
+              accept={VIDEO_MIME}
+              multiple={false}
+              disabled={!modelId || (!objectTracking && !cropTracking)}
+            >
               <Stack align="center" gap="xs" py="xl">
                 <Dropzone.Idle>
                   <IconMovie size={40} stroke={1.2} />
@@ -163,7 +205,8 @@ export default function TrackMode({ projectId, models }: Props) {
                 </Dropzone.Reject>
                 <Text size="sm">Drop a video (mp4, mov, …) or click to upload</Text>
                 <Text size="xs" c="dimmed">
-                  The model tracks objects across frames and returns an annotated video with IDs.
+                  The model runs over the clip and returns an annotated video with the overlays you
+                  selected above.
                 </Text>
               </Stack>
             </Dropzone>
@@ -210,6 +253,11 @@ export default function TrackMode({ projectId, models }: Props) {
                     <Anchor href={annotateResultUrl(jobId)} download={`tracked_${fileName}`} size="sm">
                       Download result
                     </Anchor>
+                    {ranCrop && (
+                      <Anchor href={annotateCropUrl(jobId)} download={`crop_${fileName}.json`} size="sm">
+                        Download crop coordinates (JSON)
+                      </Anchor>
+                    )}
                     <Text c="dimmed" size="xs">
                       Stored temporarily; auto-deleted after 1 hour.
                     </Text>

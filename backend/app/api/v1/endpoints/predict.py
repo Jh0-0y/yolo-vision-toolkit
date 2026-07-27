@@ -145,12 +145,16 @@ async def start_annotate(
     imgsz: int = Form(640),
     device: str | None = Form(None),
     project_id: str | None = Form(None),
+    object_tracking: bool = Form(True),  # ByteTrack boxes + IDs + trails
+    crop_tracking: bool = Form(True),  # trackcrop vertical crop-window overlay
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
 ):
     ext = Path(file.filename or "v").suffix.lower()
     if ext not in VIDEO_EXTS:
         raise HTTPException(422, f"Unsupported video type: {ext}")
+    if not object_tracking and not crop_tracking:
+        raise HTTPException(422, "Enable object tracking, crop tracking, or both")
     ids = [m.strip() for m in model_ids.split(",") if m.strip()]
     if not ids:
         raise HTTPException(422, "Select at least one model")
@@ -173,6 +177,8 @@ async def start_annotate(
         "iou_wbf": iou_wbf,
         "imgsz": imgsz,
         "device": device,
+        "object_tracking": object_tracking,
+        "crop_tracking": crop_tracking,
     }
     await run_in_threadpool(test_job_manager.submit_annotate, job_id, cfg)
     return TestJobStart(job_id=job_id)
@@ -191,6 +197,18 @@ def annotate_result(job_id: str):
     if not out.exists():
         raise HTTPException(404, "Annotated video not ready")
     return FileResponse(out, media_type="video/mp4")  # FileResponse handles Range
+
+
+@router.get("/annotate/{job_id}/crop")
+def annotate_crop(job_id: str):
+    """trackcrop's computed crop-X coordinates (keyframes + 100ms samples) as JSON.
+    Present only when the job ran with crop tracking enabled."""
+    if not job_id.isalnum():  # uuid4().hex — blocks path traversal
+        raise HTTPException(422, "Invalid job id")
+    crop = settings.test_dir / "annotate" / job_id / "crop.json"
+    if not crop.exists():
+        raise HTTPException(404, "Crop coordinates not available")
+    return FileResponse(crop, media_type="application/json", filename="crop.json")
 
 
 # ---------- model comparison (score models vs labeled ground truth) ----------

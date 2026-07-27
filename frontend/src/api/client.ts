@@ -611,7 +611,7 @@ export interface TestJobStart {
 }
 
 export interface AnnotateProgress {
-  phase: 'start' | 'annotate' | 'encoding' | 'done' | 'error' | 'cancelled'
+  phase: 'start' | 'crop_analyze' | 'annotate' | 'encoding' | 'done' | 'error' | 'cancelled'
   done?: number
   total?: number
   msg?: string
@@ -622,6 +622,8 @@ export function startAnnotate(opts: {
   modelIds: string[]
   projectId: string
   params: PredictParams
+  objectTracking: boolean
+  cropTracking: boolean
 }): Promise<TestJobStart> {
   const form = new FormData()
   form.append('file', opts.file)
@@ -631,6 +633,8 @@ export function startAnnotate(opts: {
   form.append('iou_wbf', String(opts.params.iou_wbf))
   form.append('imgsz', String(opts.params.imgsz))
   if (opts.params.device) form.append('device', opts.params.device)
+  form.append('object_tracking', String(opts.objectTracking))
+  form.append('crop_tracking', String(opts.cropTracking))
   return api.upload<TestJobStart>('/predict/annotate', form)
 }
 
@@ -645,6 +649,8 @@ export function subscribeAnnotateEvents(jobId: string, onEvent: (ev: AnnotatePro
 }
 
 export const annotateResultUrl = (jobId: string) => `${BASE}/predict/annotate/${jobId}/result`
+
+export const annotateCropUrl = (jobId: string) => `${BASE}/predict/annotate/${jobId}/crop`
 
 // ---------- test: model comparison (score models vs labeled ground truth) ----------
 
