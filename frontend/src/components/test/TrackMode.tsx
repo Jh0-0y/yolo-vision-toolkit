@@ -6,6 +6,7 @@ import {
   Button,
   Card,
   Group,
+  NumberInput,
   Progress,
   Select,
   Slider,
@@ -23,7 +24,6 @@ import {
 } from '../../api/client'
 
 const VIDEO_MIME = ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska', 'video/x-msvideo']
-const IMGSZ = ['320', '480', '640', '960', '1280']
 
 interface Props {
   projectId: string
@@ -42,7 +42,7 @@ const PHASE_LABEL: Record<string, string> = {
 export default function TrackMode({ projectId, models }: Props) {
   const [modelId, setModelId] = useState<string | null>(null)
   const [conf, setConf] = useState(0.4)
-  const [imgsz, setImgsz] = useState('640')
+  const [imgsz, setImgsz] = useState<number | string>(640)
   const [fileName, setFileName] = useState<string | null>(null)
   const [jobId, setJobId] = useState<string | null>(null)
   const [progress, setProgress] = useState<AnnotateProgress | null>(null)
@@ -132,12 +132,12 @@ export default function TrackMode({ projectId, models }: Props) {
               </Text>
               <Slider min={0.05} max={0.95} step={0.05} value={conf} onChange={setConf} disabled={running} />
             </div>
-            <Select
+            <NumberInput
               label="Image size"
-              data={IMGSZ}
               value={imgsz}
-              onChange={(v) => v && setImgsz(v)}
-              allowDeselect={false}
+              onChange={setImgsz}
+              min={64}
+              step={32}
               disabled={running}
             />
           </Group>
@@ -183,7 +183,6 @@ export default function TrackMode({ projectId, models }: Props) {
                   <Group justify="space-between">
                     <Text size="sm">
                       {PHASE_LABEL[progress?.phase ?? 'start'] ?? 'Working…'}
-                      {progress?.phase === 'annotate' && ` ${progress?.done ?? 0}/${progress?.total ?? '?'}`}
                     </Text>
                     {progress?.phase === 'annotate' && <Badge variant="light">{pct}%</Badge>}
                   </Group>

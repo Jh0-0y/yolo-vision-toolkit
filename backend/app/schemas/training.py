@@ -18,7 +18,6 @@ class TrainParams(BaseModel):
     scale: float | None = Field(default=None, ge=0, le=1)
     mosaic: float | None = Field(default=None, ge=0, le=1)
     mixup: float | None = Field(default=None, ge=0, le=1)
-    copy_paste: float | None = Field(default=None, ge=0, le=1)
 
 
 class RunCreate(BaseModel):

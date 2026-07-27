@@ -56,7 +56,6 @@ export default function TrainPage() {
   const [scale, setScale] = useState<number | string>(0.5)
   const [mosaic, setMosaic] = useState<number | string>(1.0)
   const [mixup, setMixup] = useState<number | string>(0)
-  const [copyPaste, setCopyPaste] = useState<number | string>(0)
 
   const resources = useQuery({
     queryKey: ['resources'],
@@ -134,7 +133,6 @@ export default function TrainPage() {
           ...(scale !== '' ? { scale: Number(scale) } : {}),
           ...(mosaic !== '' ? { mosaic: Number(mosaic) } : {}),
           ...(mixup !== '' ? { mixup: Number(mixup) } : {}),
-          ...(copyPaste !== '' ? { copy_paste: Number(copyPaste) } : {}),
         },
       }),
     onSuccess: (r) => {
@@ -358,16 +356,6 @@ export default function TrainPage() {
                       label="Mixup"
                       value={mixup}
                       onChange={setMixup}
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      decimalScale={2}
-                    />
-                    <NumberInput
-                      label="Copy-paste"
-                      description="Segmentation / recent ultralytics only"
-                      value={copyPaste}
-                      onChange={setCopyPaste}
                       min={0}
                       max={1}
                       step={0.05}

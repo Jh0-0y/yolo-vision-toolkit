@@ -8,9 +8,9 @@ import {
   Group,
   Modal,
   MultiSelect,
+  NumberInput,
   Progress,
   ScrollArea,
-  Select,
   SimpleGrid,
   Slider,
   Stack,
@@ -35,7 +35,6 @@ import StatTile from '../StatTile'
 
 const MIN = 9
 const MAX = 27
-const IMGSZ = ['320', '480', '640', '960', '1280']
 const GT_COLOR = '#51cf66' // ground truth = green (dashed)
 const MODEL_COLORS = ['#4dabf7', '#f783ac', '#ffa94d', '#845ef7', '#38d9a9', '#ff8787']
 
@@ -83,7 +82,7 @@ export default function CompareMode({ projectId, models }: Props) {
   const [modelIds, setModelIds] = useState<string[]>([])
   const [conf, setConf] = useState(0.4)
   const [iou, setIou] = useState(0.5)
-  const [imgsz, setImgsz] = useState('640')
+  const [imgsz, setImgsz] = useState<number | string>(640)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState<CompareProgress | null>(null)
@@ -191,12 +190,12 @@ export default function CompareMode({ projectId, models }: Props) {
               </Text>
               <Slider min={0.3} max={0.9} step={0.05} value={iou} onChange={setIou} disabled={running} />
             </div>
-            <Select
+            <NumberInput
               label="Image size"
-              data={IMGSZ}
               value={imgsz}
-              onChange={(v) => v && setImgsz(v)}
-              allowDeselect={false}
+              onChange={setImgsz}
+              min={64}
+              step={32}
               disabled={running}
             />
           </Group>
