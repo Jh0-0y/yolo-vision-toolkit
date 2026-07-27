@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { CloseButton, Group, Paper, Progress, Text } from '@mantine/core'
-import { IconFileZip, IconMovie } from '@tabler/icons-react'
+import { IconFileExport, IconFileZip, IconMovie, IconWand } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { useQueryClient } from '@tanstack/react-query'
 import { useJobStore, type Job } from '../stores/jobStore'
@@ -33,10 +33,19 @@ export default function JobIndicator() {
         if (j.kind === 'dataset') {
           queryClient.invalidateQueries({ queryKey: ['train-datasets'] })
           notifications.show({ message: `Dataset uploaded: ${j.title}`, color: 'green' })
-        } else {
+        } else if (j.kind === 'video') {
           queryClient.invalidateQueries({ queryKey: ['images', j.projectId] })
           queryClient.invalidateQueries({ queryKey: ['stats', j.projectId] })
           notifications.show({ message: `Frames extracted: ${j.title}`, color: 'green' })
+        } else if (j.kind === 'autolabel') {
+          queryClient.invalidateQueries({ queryKey: ['images', j.projectId] })
+          queryClient.invalidateQueries({ queryKey: ['stats', j.projectId] })
+          notifications.show({ message: `Auto-labeling done: ${j.title}`, color: 'green' })
+        } else {
+          // export: finished export now appears in the list; download on the Exports page
+          queryClient.invalidateQueries({ queryKey: ['exports', j.projectId] })
+          queryClient.invalidateQueries({ queryKey: ['train-datasets'] })
+          notifications.show({ message: `Export ready: ${j.title} — download on the Exports page`, color: 'green' })
         }
         setTimeout(() => dismiss(id), 4000)
       } else if (j.status === 'error') {
@@ -49,12 +58,10 @@ export default function JobIndicator() {
     }
   }, [jobs, order, dismiss, queryClient])
 
-  // block full-page reload / tab close only while a client upload is in flight
-  // (server extract phases are reconnectable, so they need no guard)
-  const blocking = order.some((id) => {
-    const j = jobs[id]
-    return j && j.status === 'running' && j.phases[j.phaseIndex]?.key === 'upload'
-  })
+  // block full-page reload / tab close while ANY job is running — reload would
+  // drop the progress UI (server jobs do reconnect via SSE, but a refresh still
+  // makes the bar flash out), so guarding outright is the better UX.
+  const blocking = order.some((id) => jobs[id]?.status === 'running')
   useEffect(() => {
     if (!blocking) return
     const handler = (e: BeforeUnloadEvent) => {
@@ -101,6 +108,10 @@ function JobCard({ job, onDismiss }: { job: Job; onDismiss: () => void }) {
         <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
           {job.kind === 'video' ? (
             <IconMovie size={16} stroke={1.5} />
+          ) : job.kind === 'autolabel' ? (
+            <IconWand size={16} stroke={1.5} />
+          ) : job.kind === 'export' ? (
+            <IconFileExport size={16} stroke={1.5} />
           ) : (
             <IconFileZip size={16} stroke={1.5} />
           )}

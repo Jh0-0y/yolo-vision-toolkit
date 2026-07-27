@@ -252,6 +252,7 @@ export interface JobProgressEvent {
 export function subscribeJobEvents(
   jobId: string,
   onEvent: (ev: JobProgressEvent) => void,
+  onError?: () => void,
 ): () => void {
   const source = new EventSource(`${BASE}/jobs/${jobId}/events`)
   source.addEventListener('progress', (e) => {
@@ -262,7 +263,9 @@ export function subscribeJobEvents(
     }
   })
   source.onerror = () => {
-    // EventSource auto-reconnects; nothing to do
+    // transient drops auto-reconnect (CONNECTING); a terminal failure (job gone
+    // after a reload) reaches CLOSED
+    if (source.readyState === EventSource.CLOSED) onError?.()
   }
   return () => source.close()
 }
@@ -290,8 +293,39 @@ export interface ExportOut {
   size_bytes: number
 }
 
+// export now runs as a background job; POST returns the id + running status and
+// per-image progress streams via subscribeExportEvents. The finished export
+// shows up in listExports once its job reaches 'done'.
 export const createExport = (projectId: string, body: ExportCreate) =>
-  api.post<ExportOut>(`/projects/${projectId}/exports`, body)
+  api.post<{ export_id: string; status: string }>(`/projects/${projectId}/exports`, body)
+
+export interface ExportProgressEvent {
+  phase: 'start' | 'copy' | 'zip' | 'done' | 'error'
+  total?: number
+  copied?: number
+  count?: number
+  train?: number
+  val?: number
+  msg?: string
+}
+
+export function subscribeExportEvents(
+  projectId: string,
+  exportId: string,
+  onEvent: (ev: ExportProgressEvent) => void,
+  onError?: () => void,
+): () => void {
+  const source = new EventSource(`${BASE}/projects/${projectId}/exports/${exportId}/events`)
+  source.addEventListener('progress', (e) => {
+    const ev = JSON.parse((e as MessageEvent).data) as ExportProgressEvent
+    onEvent(ev)
+    if (ev.phase === 'done' || ev.phase === 'error') source.close()
+  })
+  source.onerror = () => {
+    if (source.readyState === EventSource.CLOSED) onError?.()
+  }
+  return () => source.close()
+}
 
 export const listExports = (projectId: string) =>
   api.get<ExportOut[]>(`/projects/${projectId}/exports`)

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Alert,
   Button,
@@ -7,21 +7,14 @@ import {
   Modal,
   MultiSelect,
   NumberInput,
-  Progress,
   Stack,
   Text,
 } from '@mantine/core'
 import { IconAlertTriangle, IconSettings } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  api,
-  getResources,
-  subscribeJobEvents,
-  type JobOut,
-  type JobProgressEvent,
-  type ModelOut,
-} from '../../api/client'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { api, getResources, type JobOut, type ModelOut } from '../../api/client'
+import { useJobStore } from '../../stores/jobStore'
 
 interface Props {
   projectId: string
@@ -32,16 +25,13 @@ interface Props {
 }
 
 export default function AutoLabelModal({ projectId, opened, onClose, names }: Props) {
-  const queryClient = useQueryClient()
+  const startAutoLabel = useJobStore((s) => s.trackAutoLabel)
   const [modelIds, setModelIds] = useState<string[]>([])
   const [conf, setConf] = useState<number | string>(0.4)
   const [iouWbf, setIouWbf] = useState<number | string>(0.55)
   const [imgsz, setImgsz] = useState<number | string>(640)
   const [maxBoxes, setMaxBoxes] = useState<Record<string, number>>({})
   const [advanced, setAdvanced] = useState(false)
-  const [progress, setProgress] = useState<JobProgressEvent | null>(null)
-  const [runningJobId, setRunningJobId] = useState<string | null>(null)
-  const unsubscribe = useRef<(() => void) | null>(null)
 
   const models = useQuery({
     queryKey: ['models', projectId],
@@ -71,8 +61,6 @@ export default function AutoLabelModal({ projectId, opened, onClose, names }: Pr
 
   const DEFAULT_MAX = 300
 
-  useEffect(() => () => unsubscribe.current?.(), [])
-
   const launch = useMutation({
     mutationFn: () =>
       api.post<JobOut>(`/projects/${projectId}/jobs`, {
@@ -87,43 +75,19 @@ export default function AutoLabelModal({ projectId, opened, onClose, names }: Pr
         ),
       }),
     onSuccess: (job) => {
-      setRunningJobId(job.id)
-      setProgress({ phase: 'inference', done: 0 })
-      unsubscribe.current = subscribeJobEvents(job.id, (ev) => {
-        setProgress(ev)
-        if (ev.phase === 'done') {
-          notifications.show({
-            message: `Auto labeling done — ${ev.labeled ?? ev.done ?? '-'} images labeled`,
-            color: 'green',
-          })
-          finish()
-        } else if (ev.phase === 'error') {
-          notifications.show({ message: `Job failed: ${ev.msg ?? 'unknown error'}`, color: 'red' })
-          finish()
-        } else if (ev.phase === 'cancelled') {
-          notifications.show({ message: 'Job cancelled', color: 'yellow' })
-          finish()
-        }
-      })
+      // hand off to the global job indicator — progress survives closing this
+      // modal, navigating away, and a full reload (SSE reconnect).
+      startAutoLabel(
+        projectId,
+        job.id,
+        names ? `Auto-label · ${names.length} imgs` : 'Auto-label · all',
+      )
+      onClose()
     },
     onError: (e) => notifications.show({ message: String(e), color: 'red' }),
   })
 
-  const finish = () => {
-    queryClient.invalidateQueries({ queryKey: ['stats', projectId] })
-    queryClient.invalidateQueries({ queryKey: ['images', projectId] })
-    setRunningJobId(null)
-  }
-
-  const cancel = () => {
-    if (runningJobId) api.post(`/jobs/${runningJobId}/cancel`)
-  }
-
-  const running = runningJobId !== null
-  const pct =
-    progress?.total && progress.done !== undefined
-      ? Math.round((progress.done / progress.total) * 100)
-      : 0
+  const running = launch.isPending
 
   return (
     <Modal
@@ -229,29 +193,14 @@ export default function AutoLabelModal({ projectId, opened, onClose, names }: Pr
           </Stack>
         </Collapse>
 
-        {running && progress && (
-          <Stack gap="xs">
-            <Progress value={pct} animated />
-            <Text size="sm" c="dimmed">
-              {progress.done ?? 0}/{progress.total ?? '?'} — {progress.boxes ?? 0} boxes
-            </Text>
-          </Stack>
-        )}
-
         <Group justify="flex-end">
-          {running ? (
-            <Button color="red" variant="light" onClick={cancel}>
-              Cancel
-            </Button>
-          ) : (
-            <Button
-              onClick={() => launch.mutate()}
-              disabled={modelIds.length === 0}
-              loading={launch.isPending}
-            >
-              Run
-            </Button>
-          )}
+          <Button
+            onClick={() => launch.mutate()}
+            disabled={modelIds.length === 0}
+            loading={launch.isPending}
+          >
+            Run
+          </Button>
         </Group>
       </Stack>
     </Modal>

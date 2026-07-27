@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import {
-  Alert,
   Button,
   Group,
   Modal,
@@ -9,14 +8,10 @@ import {
   Stack,
   Text,
 } from '@mantine/core'
-import { IconDownload } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  createExport,
-  exportDownloadUrl,
-  type ExportOut,
-} from '../../api/client'
+import { useMutation } from '@tanstack/react-query'
+import { createExport } from '../../api/client'
+import { useJobStore } from '../../stores/jobStore'
 
 interface Props {
   projectId: string
@@ -27,11 +22,10 @@ interface Props {
 }
 
 export default function ExportModal({ projectId, opened, onClose, names }: Props) {
-  const queryClient = useQueryClient()
+  const startExport = useJobStore((s) => s.trackExport)
   const [kind, setKind] = useState<'yolo' | 'images'>('yolo')
   const [valSplit, setValSplit] = useState<number | string>(0.2)
   const [seed, setSeed] = useState<number | string>(42)
-  const [result, setResult] = useState<ExportOut | null>(null)
 
   const create = useMutation({
     mutationFn: () =>
@@ -41,21 +35,21 @@ export default function ExportModal({ projectId, opened, onClose, names }: Props
         seed: Number(seed),
         names,
       }),
-    onSuccess: (out) => {
-      setResult(out)
-      queryClient.invalidateQueries({ queryKey: ['exports', projectId] })
-      queryClient.invalidateQueries({ queryKey: ['train-datasets'] })
+    onSuccess: ({ export_id }) => {
+      // hand off to the global job indicator; the finished export appears on the
+      // Exports page where it can be downloaded.
+      startExport(projectId, export_id, `Export · ${kind === 'yolo' ? 'YOLO' : 'images'}`)
+      notifications.show({
+        message: 'Export started — progress shows bottom-right; download it on the Exports page when done.',
+        color: 'blue',
+      })
+      onClose()
     },
     onError: (e) => notifications.show({ message: String(e), color: 'red' }),
   })
 
-  const close = () => {
-    setResult(null)
-    onClose()
-  }
-
   return (
-    <Modal opened={opened} onClose={close} title="Export" size="md">
+    <Modal opened={opened} onClose={onClose} title="Export" size="md">
       <Stack>
         <Text size="sm" c="dimmed">
           Target: {names ? `${names.length} selected images` : 'all images'}
@@ -64,10 +58,7 @@ export default function ExportModal({ projectId, opened, onClose, names }: Props
         <SegmentedControl
           fullWidth
           value={kind}
-          onChange={(v) => {
-            setKind(v as 'yolo' | 'images')
-            setResult(null)
-          }}
+          onChange={(v) => setKind(v as 'yolo' | 'images')}
           data={[
             { value: 'yolo', label: 'Label dataset (YOLO)' },
             { value: 'images', label: 'Original images only' },
@@ -94,31 +85,8 @@ export default function ExportModal({ projectId, opened, onClose, names }: Props
           </Text>
         )}
 
-        {result && (
-          <Alert color="green" title="Export ready">
-            <Stack gap="xs">
-              <Text size="sm">
-                {result.kind === 'yolo'
-                  ? `train ${result.train} · val ${result.val} · ${result.classes} classes`
-                  : `${result.count} images`}
-                {' · '}
-                {(result.size_bytes / 1024 / 1024).toFixed(1)} MB
-              </Text>
-              <Button
-                component="a"
-                href={exportDownloadUrl(projectId, result.id)}
-                download
-                leftSection={<IconDownload size={16} />}
-                variant="light"
-              >
-                Download zip
-              </Button>
-            </Stack>
-          </Alert>
-        )}
-
         <Group justify="flex-end">
-          <Button variant="default" onClick={close}>
+          <Button variant="default" onClick={onClose}>
             Close
           </Button>
           <Button onClick={() => create.mutate()} loading={create.isPending}>
