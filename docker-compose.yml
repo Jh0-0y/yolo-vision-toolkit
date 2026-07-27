@@ -18,12 +18,12 @@ services:
     environment:
       # 컨테이너 내부의 고정 경로(별명). 실제 위치는 아래 volumes 가 결정한다.
       YVT_DATA_DIR: /data            # 벌크 저장소(HDD) — 데이터셋·모델·runs·DB
-      YVT_SSD_CACHE_DIR: /ssd-cache  # 학습 스테이징(SSD) — 런 시작 시 복제, 종료 시 삭제
+      YVT_SSD_CACHE_DIR: /cache  # 학습 스테이징(SSD) — 런 시작 시 복제, 종료 시 삭제
       YVT_DEVICE: ${YVT_DEVICE:-0}   # 0 (cuda 0번) | cpu
     volumes:
       # 왼쪽 = 호스트 실제 경로(.env 에서 지정) / 오른쪽 = 컨테이너 내부 별명
       - ${DATA_DIR:-./data}:/data         # HDD (영구 저장)
-      - ${CACHE_DIR:-./cache}:/ssd-cache  # SSD 캐시 (학습 시 복사→종료 시 삭제, :ro 금지)
+      - ${CACHE_DIR:-./cache}:/cache  # SSD 캐시 (학습 시 복사→종료 시 삭제, :ro 금지)
     deploy:
       resources:
         reservations:
