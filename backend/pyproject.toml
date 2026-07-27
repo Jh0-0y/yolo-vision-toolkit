@@ -1,6 +1,6 @@
 [project]
 name = "yolo-vision-toolkit-backend"
-version = "0.1.0"
+version = "0.0.1-rc1-20260727"
 description = "YOLO auto-labeling + training toolkit backend"
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -14,6 +14,7 @@ dependencies = [
     "numpy>=1.26",
     "pyyaml>=6.0",
     "ultralytics>=8.3",
+    "lap>=0.5.12",
 ]
 
 [dependency-groups]

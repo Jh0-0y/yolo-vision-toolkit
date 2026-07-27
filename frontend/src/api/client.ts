@@ -315,13 +315,62 @@ export interface TrainDataset {
   val: number
   classes: number
   created_at: string
+  auto_delete?: boolean // uploads only: self-delete after a successful run
 }
 
-export const uploadTrainDataset = (file: File) => {
+export interface UploadHandlers {
+  onProgress?: (percent: number) => void // 0-100 network upload
+  onUploaded?: () => void // request body fully sent; server now processing
+}
+
+// XHR-based upload (fetch can't report upload %). Resolves with the parsed JSON
+// body; rejects with ApiError on non-2xx or network failure.
+export function xhrUpload<T>(
+  path: string,
+  form: FormData,
+  handlers: UploadHandlers = {},
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${BASE}${path}`)
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) handlers.onProgress?.(Math.round((e.loaded / e.total) * 100))
+    }
+    xhr.upload.onload = () => handlers.onUploaded?.()
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(xhr.responseText ? JSON.parse(xhr.responseText) : (undefined as T))
+        } catch {
+          reject(new ApiError(xhr.status, 'Invalid server response'))
+        }
+      } else {
+        reject(new ApiError(xhr.status, xhr.responseText || xhr.statusText))
+      }
+    }
+    xhr.onerror = () => reject(new ApiError(0, 'Network error during upload'))
+    xhr.send(form)
+  })
+}
+
+export function uploadTrainDataset(
+  file: File,
+  handlers: UploadHandlers = {},
+): Promise<TrainDataset & { id: string }> {
   const form = new FormData()
   form.append('file', file)
-  return api.upload<TrainDataset & { id: string }>('/training/datasets', form)
+  return xhrUpload<TrainDataset & { id: string }>('/training/datasets', form, handlers)
 }
+
+// dataset_id is the "{uid}" part of an "upload:{uid}" token
+export const deleteTrainDataset = (datasetId: string) =>
+  api.delete<void>(`/training/datasets/${datasetId}`)
+
+// toggle self-delete-after-training on an uploaded dataset
+export const patchTrainDataset = (datasetId: string, autoDelete: boolean) =>
+  api.patch<{ dataset: string; auto_delete: boolean }>(`/training/datasets/${datasetId}`, {
+    auto_delete: autoDelete,
+  })
 
 export interface TrainParams {
   epochs: number
@@ -430,7 +479,12 @@ export interface VideoProgressEvent {
   msg?: string
 }
 
-export function uploadVideo(projectId: string, file: File, params: VideoUploadParams) {
+export function uploadVideo(
+  projectId: string,
+  file: File,
+  params: VideoUploadParams,
+  handlers: UploadHandlers = {},
+) {
   const form = new FormData()
   form.append('file', file)
   form.append('target_fps', String(params.target_fps))
@@ -439,9 +493,10 @@ export function uploadVideo(projectId: string, file: File, params: VideoUploadPa
   if (params.end_sec != null) form.append('end_sec', String(params.end_sec))
   form.append('dedup', String(params.dedup))
   form.append('dedup_threshold', String(params.dedup_threshold))
-  return api.upload<{ video_id: string; filename: string; status: string }>(
+  return xhrUpload<{ video_id: string; filename: string; status: string }>(
     `/projects/${projectId}/videos`,
     form,
+    handlers,
   )
 }
 
@@ -449,6 +504,7 @@ export function subscribeVideoEvents(
   projectId: string,
   videoId: string,
   onEvent: (ev: VideoProgressEvent) => void,
+  onError?: () => void,
 ): () => void {
   const source = new EventSource(`${BASE}/projects/${projectId}/videos/${videoId}/events`)
   source.addEventListener('progress', (e) => {
@@ -458,6 +514,11 @@ export function subscribeVideoEvents(
       source.close()
     }
   })
+  source.onerror = () => {
+    // EventSource auto-retries transient drops (readyState CONNECTING); only a
+    // terminal failure (e.g. 404 — task gone after a reload) reaches CLOSED.
+    if (source.readyState === EventSource.CLOSED) onError?.()
+  }
   return () => source.close()
 }
 

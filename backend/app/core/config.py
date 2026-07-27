@@ -11,6 +11,12 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="YVT_", env_file=".env", extra="ignore")
 
     data_dir: Path = _REPO_ROOT / "data"
+    # optional fast scratch (e.g. an SSD mount) to stage the active dataset onto
+    # before training — copied in when a run starts, removed when it ends. None
+    # disables staging entirely: training reads straight from datasets_dir,
+    # wherever data_dir lives. Set YVT_SSD_CACHE_DIR to enable on servers whose
+    # bulk storage is a slow HDD.
+    ssd_cache_dir: Path | None = None
     # "auto" resolves to cuda > mps > cpu at inference time
     device: str = "auto"
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]

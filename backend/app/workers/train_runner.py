@@ -9,6 +9,7 @@ jobs/<run_id>/progress.jsonl (same tail contract as labeling jobs).
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -47,6 +48,9 @@ def main(run_dir_arg: str) -> int:
     run_dir = Path(run_dir_arg)
     run_id = run_dir.name
     cfg = json.loads((run_dir / "config.json").read_text())
+    # the service may have staged the dataset onto fast scratch (SSD) and points
+    # us at the copy; fall back to the canonical path recorded in config.json.
+    dataset_path = os.environ.get("YVT_DATASET_PATH_OVERRIDE") or cfg["dataset_path"]
 
     job_dir = settings.jobs_dir / run_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -119,7 +123,7 @@ def main(run_dir_arg: str) -> int:
 
     try:
         results = model.train(
-            data=str(Path(cfg["dataset_path"]) / "data.yaml"),
+            data=str(Path(dataset_path) / "data.yaml"),
             project=str(run_dir.parent),
             name=run_id,
             exist_ok=True,

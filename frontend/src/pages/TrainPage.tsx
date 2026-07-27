@@ -1,10 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
+  ActionIcon,
   Alert,
   Anchor,
   Badge,
   Button,
   Card,
+  Checkbox,
   Group,
   NumberInput,
   Select,
@@ -15,18 +17,20 @@ import {
   Title,
 } from '@mantine/core'
 import { Dropzone } from '@mantine/dropzone'
-import { IconAlertTriangle, IconFileZip, IconPlayerPlay } from '@tabler/icons-react'
+import { IconAlertTriangle, IconFileZip, IconPlayerPlay, IconTrash } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   api,
+  deleteTrainDataset,
   getResources,
-  uploadTrainDataset,
+  patchTrainDataset,
   type ModelOut,
   type TrainDataset,
   type TrainRunOut,
 } from '../api/client'
+import { useJobStore } from '../stores/jobStore'
 
 export default function TrainPage() {
   const { projectId } = useParams()
@@ -70,16 +74,42 @@ export default function TrainPage() {
     queryFn: () => api.get<ModelOut[]>(`/models?project_id=${projectId}`),
   })
 
-  const uploadZip = useMutation({
-    mutationFn: (file: File) => uploadTrainDataset(file),
-    onSuccess: (d) => {
-      notifications.show({
-        message: `Dataset registered: ${d.name} (train ${d.train} · val ${d.val})`,
-        color: 'green',
-      })
+  // dataset upload runs in a global job store so its progress survives page
+  // navigation; the global JobIndicator renders the % bar and handles the toast.
+  const startDatasetUpload = useJobStore((s) => s.startDatasetUpload)
+  const jobsMap = useJobStore((s) => s.jobs)
+  const datasetJobs = useMemo(
+    () => Object.values(jobsMap).filter((j) => j.kind === 'dataset'),
+    [jobsMap],
+  )
+  const uploadBusy = datasetJobs.some((j) => j.status === 'running')
+
+  // auto-select a freshly uploaded dataset when its upload completes
+  const pickedToken = useRef<string | null>(null)
+  useEffect(() => {
+    const doneJob = datasetJobs.find(
+      (j) => j.status === 'done' && j.resultToken && j.resultToken !== pickedToken.current,
+    )
+    if (doneJob?.resultToken) {
+      pickedToken.current = doneJob.resultToken
+      setDatasetToken(doneJob.resultToken)
+    }
+  }, [datasetJobs])
+
+  const removeDataset = useMutation({
+    mutationFn: (datasetId: string) => deleteTrainDataset(datasetId),
+    onSuccess: () => {
+      notifications.show({ message: 'Dataset deleted', color: 'green' })
       queryClient.invalidateQueries({ queryKey: ['train-datasets', projectId] })
-      setDatasetToken(d.dataset)
+      setDatasetToken(null)
     },
+    onError: (e) => notifications.show({ message: String(e), color: 'red' }),
+  })
+
+  const toggleAutoDelete = useMutation({
+    mutationFn: ({ id, value }: { id: string; value: boolean }) =>
+      patchTrainDataset(id, value),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['train-datasets', projectId] }),
     onError: (e) => notifications.show({ message: String(e), color: 'red' }),
   })
 
@@ -119,10 +149,12 @@ export default function TrainPage() {
     () =>
       datasets.data?.map((d) => ({
         value: d.dataset,
-        label: `${d.source === 'upload' ? '📦 ' : ''}${d.name} (train ${d.train} · val ${d.val} · ${d.classes}cls)`,
+        label: `${d.source === 'upload' ? '📦 ' : ''}${d.name} (train ${d.train} · val ${d.val} · ${d.classes}cls)${d.auto_delete ? ' · 🗑 auto' : ''}`,
       })) ?? [],
     [datasets.data],
   )
+
+  const selectedDataset = datasets.data?.find((d) => d.dataset === datasetToken)
 
   return (
     <Stack gap="lg">
@@ -147,22 +179,58 @@ export default function TrainPage() {
               1. Dataset
             </Text>
             <Stack gap="xs">
-              <Select
-                w={420}
-                placeholder={
-                  datasetOptions.length
-                    ? 'Select a dataset'
-                    : 'Upload a zip or create an export in Dataset'
-                }
-                data={datasetOptions}
-                value={datasetToken}
-                onChange={setDatasetToken}
-              />
+              <Group gap="xs" align="center">
+                <Select
+                  w={420}
+                  placeholder={
+                    datasetOptions.length
+                      ? 'Select a dataset'
+                      : 'Upload a zip or create an export in Dataset'
+                  }
+                  data={datasetOptions}
+                  value={datasetToken}
+                  onChange={setDatasetToken}
+                />
+                {selectedDataset?.source === 'upload' && (
+                  <ActionIcon
+                    color="red"
+                    variant="light"
+                    size="lg"
+                    title="Delete this uploaded dataset"
+                    loading={removeDataset.isPending}
+                    onClick={() => {
+                      if (
+                        window.confirm(`Delete uploaded dataset "${selectedDataset.name}"? This removes it from disk.`)
+                      ) {
+                        removeDataset.mutate(selectedDataset.dataset.split(':')[1])
+                      }
+                    }}
+                  >
+                    <IconTrash size={18} />
+                  </ActionIcon>
+                )}
+              </Group>
+              {/* auto-delete applies only to uploaded (external) datasets */}
+              {selectedDataset?.source === 'upload' && (
+                <Checkbox
+                  w={420}
+                  checked={!!selectedDataset.auto_delete}
+                  disabled={toggleAutoDelete.isPending}
+                  onChange={(e) =>
+                    toggleAutoDelete.mutate({
+                      id: selectedDataset.dataset.split(':')[1],
+                      value: e.currentTarget.checked,
+                    })
+                  }
+                  label="Delete this dataset after a successful run"
+                  description="For one-shot external zips — the original stays on your machine."
+                />
+              )}
               <Dropzone
-                onDrop={(files) => files[0] && uploadZip.mutate(files[0])}
+                onDrop={(files) => files[0] && startDatasetUpload(files[0])}
                 accept={['application/zip', 'application/x-zip-compressed']}
                 multiple={false}
-                loading={uploadZip.isPending}
+                loading={uploadBusy}
                 radius="md"
                 p="sm"
                 w={420}

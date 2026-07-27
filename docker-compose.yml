@@ -1,5 +1,9 @@
 services:
   backend:
+    image: ghcr.io/jh0-0y/yvt-backend:${TAG:-latest}
+    # 실행 대상은 윈도우(WSL2, amd64). 맥(arm64)에서 빌드해도 amd64 이미지가
+    # 나오도록 고정한다 — 안 하면 arm64로 굽혀 윈도우에서 실행되지 않는다.
+    platform: linux/amd64
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
@@ -7,18 +11,31 @@ services:
     # 학습 시 "Unexpected bus error ... insufficient shared memory (shm)"가 나므로 키운다.
     shm_size: "8gb"
     environment:
-      YVT_DATA_DIR: /data
+      # 컨테이너 내부의 고정 경로(별명). 실제 위치는 아래 volumes 가 결정한다.
+      YVT_DATA_DIR: /data           # 벌크 저장소(데이터셋·모델·runs·DB)
+      YVT_SSD_CACHE_DIR: /ssd-cache # 학습 직전 데이터셋을 복사해 둘 빠른 임시저장소(SSD)
       YVT_DEVICE: ${YVT_DEVICE:-auto}
     volumes:
-      - ./data:/data
-      # 대규모 데이터 폴더 링크용: .env의 EXTRA_DATA_DIR 경로를 /extra 로 마운트
-      - ${EXTRA_DATA_DIR:-./data}:/extra:ro
+      # 왼쪽 = 호스트 실제 경로(.env 에서 지정) / 오른쪽 = 컨테이너 내부 별명
+      - ${DATA_DIR:-./data}:/data          # HDD (영구 저장)
+      - ${CACHE_DIR:-./cache}:/ssd-cache   # SSD 캐시 (학습 시 복사→종료 시 삭제, :ro 금지)
     ports:
       # 호스트 로컬 전용 (디버깅용). 외부에는 frontend(nginx)만 열면 됩니다 —
       # /api 요청은 nginx가 backend로 프록시합니다.
       - "127.0.0.1:8000:8000"
+    # 이 Docker 구성은 윈도우(WSL2) + NVIDIA GPU 전용이다. GPU를 무조건 붙이므로
+    # GPU 없는 호스트에선 컨테이너가 뜨지 않는다(의도된 것 — 맥/CPU는 dev.sh 로컬 실행).
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
   frontend:
+    image: ghcr.io/jh0-0y/yvt-frontend:${TAG:-latest}
+    platform: linux/amd64
     build:
       context: .
       dockerfile: docker/frontend.Dockerfile

@@ -13,10 +13,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
-from app.schemas.training import RegisterIn, RunCreate, RunOut
+from app.schemas.training import DatasetPatch, RegisterIn, RunCreate, RunOut
 from sqlalchemy import or_
 from sse_starlette.sse import EventSourceResponse
 from sqlmodel import Session, select
@@ -116,6 +116,7 @@ def list_datasets(project_id: str | None = None, session: Session = Depends(get_
                     "val": meta.get("val", 0),
                     "classes": meta.get("classes", 0),
                     "created_at": meta.get("created_at", ""),
+                    "auto_delete": meta.get("auto_delete", False),
                 }
             )
     out.sort(key=lambda d: d["created_at"], reverse=True)
@@ -178,7 +179,7 @@ def _normalize_data_yaml(yaml_path: Path) -> dict:
     }
 
 
-def _extract_dataset(tmp_zip: Path, name: str) -> dict:
+def _extract_dataset(tmp_zip: Path, name: str, auto_delete: bool = False) -> dict:
     dataset_id = f"u_{uuid.uuid4().hex[:10]}"
     dest = settings.datasets_dir / dataset_id
     dest.mkdir(parents=True, exist_ok=True)
@@ -217,6 +218,9 @@ def _extract_dataset(tmp_zip: Path, name: str) -> dict:
             "name": name,
             "yaml_dir": yaml_path.parent.relative_to(dest).as_posix(),
             "created_at": datetime.now(timezone.utc).isoformat(),
+            # when True the run that consumes this dataset deletes it on success
+            # (train_manager._watch) — for one-shot external zips
+            "auto_delete": auto_delete,
             **counts,
         }
         atomic_write_text(dest / "dataset.json", json.dumps(meta, ensure_ascii=False))
@@ -227,7 +231,11 @@ def _extract_dataset(tmp_zip: Path, name: str) -> dict:
 
 
 @router.post("/datasets", status_code=201)
-async def upload_dataset(file: UploadFile, session: Session = Depends(get_session)):
+async def upload_dataset(
+    file: UploadFile,
+    auto_delete: bool = Form(False),
+    session: Session = Depends(get_session),
+):
     if not file.filename or not file.filename.lower().endswith(".zip"):
         raise HTTPException(422, "Only zip files can be uploaded")
     settings.datasets_dir.mkdir(parents=True, exist_ok=True)
@@ -237,10 +245,50 @@ async def upload_dataset(file: UploadFile, session: Session = Depends(get_sessio
             while chunk := await file.read(1 << 20):
                 f.write(chunk)
         name = file.filename.rsplit("/", 1)[-1].removesuffix(".zip")
-        meta = await run_in_threadpool(_extract_dataset, tmp, name)
+        meta = await run_in_threadpool(_extract_dataset, tmp, name, auto_delete)
     finally:
         tmp.unlink(missing_ok=True)
     return {**meta, "dataset": f"upload:{meta['id']}", "source": "upload"}
+
+
+@router.patch("/datasets/{dataset_id}")
+def patch_dataset(dataset_id: str, req: DatasetPatch):
+    """Toggle the auto-delete flag on an uploaded dataset (uploads only)."""
+    if any(c in dataset_id for c in "/\\.."):
+        raise HTTPException(422, "Invalid dataset id")
+    meta_path = settings.datasets_dir / dataset_id / "dataset.json"
+    if not meta_path.exists():
+        raise HTTPException(404, "Dataset not found")
+    try:
+        meta = json.loads(meta_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        raise HTTPException(422, "Corrupted dataset metadata")
+    meta["auto_delete"] = req.auto_delete
+    atomic_write_text(meta_path, json.dumps(meta, ensure_ascii=False))
+    return {"dataset": f"upload:{dataset_id}", "auto_delete": req.auto_delete}
+
+
+@router.delete("/datasets/{dataset_id}", status_code=204)
+def delete_dataset(dataset_id: str, session: Session = Depends(get_session)):
+    """Delete an uploaded dataset (the extracted folder on disk). Only uploads
+    are deletable here — project exports have their own lifecycle."""
+    if any(c in dataset_id for c in "/\\.."):
+        raise HTTPException(422, "Invalid dataset id")
+    base = settings.datasets_dir / dataset_id
+    if not (base / "dataset.json").exists():
+        raise HTTPException(404, "Dataset not found")
+    # block deletion while a non-finished run is still bound to this dataset
+    # (its files may be mid-staging onto fast scratch)
+    base_prefix = str(base.resolve())
+    in_use = session.exec(
+        select(TrainRun).where(
+            TrainRun.dataset_path.startswith(base_prefix),
+            ~TrainRun.status.in_(list(TERMINAL)),
+        )
+    ).first()
+    if in_use is not None:
+        raise HTTPException(409, "Dataset is in use by a running training run")
+    shutil.rmtree(base, ignore_errors=True)
 
 
 def _resolve_dataset_dir(token: str) -> Path:

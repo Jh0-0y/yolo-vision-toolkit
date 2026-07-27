@@ -7,7 +7,6 @@ import {
   Group,
   Input,
   NumberInput,
-  Progress,
   Slider,
   Stack,
   Switch,
@@ -16,18 +15,16 @@ import {
 } from '@mantine/core'
 import { Dropzone } from '@mantine/dropzone'
 import { IconMovie, IconSettings, IconX } from '@tabler/icons-react'
-import { notifications } from '@mantine/notifications'
-import { useQueryClient } from '@tanstack/react-query'
-import {
-  subscribeVideoEvents,
-  uploadVideo,
-  type VideoProgressEvent,
-} from '../../api/client'
+import { useJobStore } from '../../stores/jobStore'
 
 const VIDEO_MIME = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/webm']
 
 export default function VideoExtractCard({ projectId }: { projectId: string }) {
-  const queryClient = useQueryClient()
+  const startVideoJob = useJobStore((s) => s.startVideoJob)
+  // one extraction at a time (the server runs a single video worker)
+  const videoBusy = useJobStore((s) =>
+    Object.values(s.jobs).some((j) => j.kind === 'video' && j.status === 'running'),
+  )
   const [file, setFile] = useState<File | null>(null)
   const [targetFps, setTargetFps] = useState<number>(2)
   const [maxFrames, setMaxFrames] = useState<number>(2000)
@@ -36,50 +33,21 @@ export default function VideoExtractCard({ projectId }: { projectId: string }) {
   const [dedup, setDedup] = useState(true)
   const [dedupThreshold, setDedupThreshold] = useState(0.92)
   const [advanced, setAdvanced] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [progress, setProgress] = useState<VideoProgressEvent | null>(null)
 
-  const start = async () => {
+  const start = () => {
     if (!file) return
-    setBusy(true)
-    setProgress(null)
-    try {
-      const { video_id } = await uploadVideo(projectId, file, {
-        target_fps: targetFps,
-        max_frames: maxFrames,
-        start_sec: startSec,
-        end_sec: endSec === '' ? null : Number(endSec),
-        dedup,
-        dedup_threshold: dedupThreshold,
-      })
-      subscribeVideoEvents(projectId, video_id, (ev) => {
-        setProgress(ev)
-        if (ev.phase === 'done') {
-          notifications.show({
-            message: `${ev.saved} frames extracted${ev.skipped_dup ? `, ${ev.skipped_dup} duplicates skipped` : ''}`,
-            color: 'green',
-          })
-          queryClient.invalidateQueries({ queryKey: ['images', projectId] })
-          queryClient.invalidateQueries({ queryKey: ['stats', projectId] })
-          setBusy(false)
-          setFile(null)
-        } else if (ev.phase === 'error' || ev.phase === 'cancelled') {
-          notifications.show({ message: ev.msg || 'Extraction stopped', color: 'red' })
-          setBusy(false)
-        }
-      })
-    } catch (e) {
-      notifications.show({ message: String(e), color: 'red' })
-      setBusy(false)
-    }
+    // hand off to the global job store — upload % + server extraction progress
+    // are shown by the app-wide JobIndicator and survive navigation.
+    startVideoJob(projectId, file, {
+      target_fps: targetFps,
+      max_frames: maxFrames,
+      start_sec: startSec,
+      end_sec: endSec === '' ? null : Number(endSec),
+      dedup,
+      dedup_threshold: dedupThreshold,
+    })
+    setFile(null)
   }
-
-  const pct =
-    progress?.total_frames && progress.scanned
-      ? Math.min(100, Math.round((progress.scanned / progress.total_frames) * 100))
-      : progress?.phase === 'done'
-        ? 100
-        : 0
 
   return (
     <Card withBorder radius="md" padding="lg">
@@ -101,7 +69,7 @@ export default function VideoExtractCard({ projectId }: { projectId: string }) {
             onDrop={(files) => setFile(files[0] ?? null)}
             accept={VIDEO_MIME}
             multiple={false}
-            disabled={busy}
+            disabled={videoBusy}
             radius="md"
           >
             <Stack align="center" gap={6} py="lg" style={{ pointerEvents: 'none' }}>
@@ -125,7 +93,6 @@ export default function VideoExtractCard({ projectId }: { projectId: string }) {
               size="compact-sm"
               leftSection={<IconX size={14} />}
               onClick={() => setFile(null)}
-              disabled={busy}
             >
               Remove
             </Button>
@@ -140,7 +107,7 @@ export default function VideoExtractCard({ projectId }: { projectId: string }) {
             onChange={(v) => setTargetFps(Number(v) || 1)}
             min={0.1}
             step={0.5}
-            disabled={busy}
+            disabled={videoBusy}
           />
           <NumberInput
             label="Max frames"
@@ -148,7 +115,7 @@ export default function VideoExtractCard({ projectId }: { projectId: string }) {
             value={maxFrames}
             onChange={(v) => setMaxFrames(Number(v) || 1)}
             min={1}
-            disabled={busy}
+            disabled={videoBusy}
           />
         </Group>
 
@@ -157,7 +124,7 @@ export default function VideoExtractCard({ projectId }: { projectId: string }) {
           description="Skips adjacent, nearly identical frames"
           checked={dedup}
           onChange={(e) => setDedup(e.currentTarget.checked)}
-          disabled={busy}
+          disabled={videoBusy}
         />
 
         <Stack gap="sm">
@@ -179,7 +146,7 @@ export default function VideoExtractCard({ projectId }: { projectId: string }) {
                   value={startSec}
                   onChange={(v) => setStartSec(Number(v) || 0)}
                   min={0}
-                  disabled={busy}
+                  disabled={videoBusy}
                 />
                 <NumberInput
                   label="End (sec)"
@@ -187,7 +154,7 @@ export default function VideoExtractCard({ projectId }: { projectId: string }) {
                   value={endSec}
                   onChange={(v) => setEndSec(v === '' ? '' : Number(v))}
                   min={0}
-                  disabled={busy}
+                  disabled={videoBusy}
                 />
               </Group>
               {dedup && (
@@ -202,7 +169,7 @@ export default function VideoExtractCard({ projectId }: { projectId: string }) {
                     min={0.8}
                     max={1}
                     step={0.01}
-                    disabled={busy}
+                    disabled={videoBusy}
                     label={(v) => v.toFixed(2)}
                   />
                 </Input.Wrapper>
@@ -211,20 +178,13 @@ export default function VideoExtractCard({ projectId }: { projectId: string }) {
           </Collapse>
         </Stack>
 
-        {progress && (
-          <Stack gap={4}>
-            <Progress value={pct} animated={busy} />
-            <Text size="xs" c="dimmed">
-              {progress.phase === 'done'
-                ? `Done — ${progress.saved} frames extracted`
-                : progress.phase === 'start'
-                  ? `Analyzing… (source ${progress.src_fps}fps, ${progress.total_frames} frames)`
-                  : `Extracting… ${progress.saved ?? 0} saved (scanned ${progress.scanned ?? 0}/${progress.total_frames ?? '?'})`}
-            </Text>
-          </Stack>
+        {videoBusy && (
+          <Text size="xs" c="dimmed">
+            Extraction in progress — see the progress panel (bottom-right). You can leave this page.
+          </Text>
         )}
 
-        <Button onClick={start} disabled={!file || busy} loading={busy}>
+        <Button onClick={start} disabled={!file || videoBusy}>
           Start extraction
         </Button>
       </Stack>

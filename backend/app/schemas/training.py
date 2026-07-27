@@ -45,6 +45,11 @@ class RunOut(BaseModel):
     finished_at: str | None
 
 
+class DatasetPatch(BaseModel):
+    # toggle self-delete-after-training on an uploaded dataset
+    auto_delete: bool
+
+
 class RegisterIn(BaseModel):
     which: str = "best"
     name: str | None = None

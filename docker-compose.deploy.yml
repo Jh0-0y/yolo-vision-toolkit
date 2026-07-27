@@ -1,0 +1,41 @@
+# 배포 환경 전용 — 소스 빌드 없이 GHCR 이미지를 pull해서 실행한다.
+# 모든 환경별 값은 toolkit.env 에서 받는다. 실행:
+#
+#   docker compose --env-file toolkit.env -f docker-compose.deploy.yml up -d
+#
+# ※ compose는 이름이 정확히 ".env"인 파일만 자동으로 읽는다.
+#    toolkit.env 는 이름이 다르므로 반드시 --env-file 로 넘겨야 값이 적용된다.
+#    (안 넘기면 아래 ${VAR:-기본값}의 "기본값"으로 동작)
+services:
+  backend:
+    image: ghcr.io/jh0-0y/yolo-vision-toolkit/backend:${IMAGE_TAG:-latest}
+    pull_policy: always # up 할 때마다 최신 이미지 확인·갱신
+    restart: unless-stopped
+    # PyTorch DataLoader 워커의 /dev/shm 공유. RAM 넉넉하면 8gb, 16GB PC면 4gb 권장
+    shm_size: "${SHM_SIZE:-8gb}"
+    environment:
+      YVT_DATA_DIR: /data # 영구 저장소(HDD) — 원본 데이터셋·모델·학습결과
+      YVT_SSD_CACHE_DIR: /ssd-cache # 학습 스테이징용(SSD) — 런 시작 시 복제, 종료 시 삭제
+      YVT_DEVICE: ${YVT_DEVICE:-0} # GPU 0번 / CPU면 cpu
+    volumes:
+      # 콜론 왼쪽 = 호스트(내 PC) 경로, 오른쪽 = 컨테이너 내부 경로(고정).
+      # [HDD] 읽기·쓰기 영구 저장소.
+      - ${HDD_DIR:-./data}:/data
+      # [SSD] 학습 중 데이터셋을 복제해 읽고 끝나면 지우는 빠른 캐시.
+      - ${SSD_CACHE_DIR:-./ssd-cache}:/ssd-cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  frontend:
+    image: ghcr.io/jh0-0y/yolo-vision-toolkit/frontend:${IMAGE_TAG:-latest}
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"

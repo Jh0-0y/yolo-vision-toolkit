@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
+import JobIndicator from './components/JobIndicator'
 import ProjectLayout from './layouts/ProjectLayout'
 import ClassesPage from './pages/ClassesPage'
 import DatasetPage from './pages/DatasetPage'
@@ -14,8 +15,10 @@ import UploadPage from './pages/UploadPage'
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/" element={<HomePage />} />
+    <>
+      <JobIndicator />
+      <Routes>
+        <Route path="/" element={<HomePage />} />
       <Route path="/projects/:projectId" element={<ProjectLayout />}>
         <Route index element={<Navigate to="dataset" replace />} />
         <Route path="upload" element={<UploadPage />} />
@@ -28,8 +31,9 @@ export default function App() {
         <Route path="history/:runId" element={<TrainRunDetailPage />} />
         <Route path="models" element={<ModelsPage />} />
         <Route path="test" element={<TestPage />} />
-      </Route>
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+        </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </>
   )
 }
