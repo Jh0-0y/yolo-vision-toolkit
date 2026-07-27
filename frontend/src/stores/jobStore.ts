@@ -1,5 +1,8 @@
 import { create } from 'zustand'
 import {
+  cancelAutoLabel,
+  cancelExport,
+  cancelVideo,
   subscribeExportEvents,
   subscribeJobEvents,
   subscribeVideoEvents,
@@ -53,9 +56,13 @@ interface JobStore {
   startVideoJob: (projectId: string, file: File, params: VideoUploadParams) => string
   trackAutoLabel: (projectId: string, jobId: string, title: string) => string
   trackExport: (projectId: string, exportId: string, title: string) => string
+  cancel: (id: string) => void
   dismiss: (id: string) => void
   hydrate: () => void
 }
+
+// abort handles for in-flight client uploads (not part of serializable state)
+const aborters = new Map<string, () => void>()
 
 // ---- id generation (Math.random is fine in the browser) ----
 let seqCounter = 0
@@ -158,7 +165,8 @@ function mapExport(ev: ExportProgressEvent): Mapped {
     phase = { key: 'export', label: 'Exporting', indeterminate: true, value: 0, detail: 'Preparing…' }
   }
   if (ev.phase === 'done') return { phase, status: 'done' }
-  if (ev.phase === 'error') return { phase, status: 'error', error: ev.msg || 'Export failed' }
+  if (ev.phase === 'error' || ev.phase === 'cancelled')
+    return { phase, status: 'error', error: ev.msg || 'Cancelled' }
   return { phase, status: 'running' }
 }
 
@@ -213,6 +221,8 @@ export const useJobStore = create<JobStore>((set, get) => {
 
     startDatasetUpload: (file) => {
       const id = newId()
+      const controller = new AbortController()
+      aborters.set(id, () => controller.abort())
       addJob({
         id,
         kind: 'dataset',
@@ -226,6 +236,7 @@ export const useJobStore = create<JobStore>((set, get) => {
         seq: 0,
       })
       uploadTrainDataset(file, {
+        signal: controller.signal,
         onProgress: (pct) =>
           patch(id, (j) => ({ ...j, phaseIndex: 0, phases: [{ ...j.phases[0], value: pct }, j.phases[1]] })),
         onUploaded: () => patch(id, (j) => ({ ...j, phaseIndex: 1 })),
@@ -246,6 +257,8 @@ export const useJobStore = create<JobStore>((set, get) => {
 
     startVideoJob: (projectId, file, params) => {
       const id = newId()
+      const controller = new AbortController()
+      aborters.set(id, () => controller.abort())
       addJob({
         id,
         kind: 'video',
@@ -260,6 +273,7 @@ export const useJobStore = create<JobStore>((set, get) => {
         seq: 0,
       })
       uploadVideo(projectId, file, params, {
+        signal: controller.signal,
         onProgress: (pct) =>
           patch(id, (j) => ({ ...j, phaseIndex: 0, phases: [{ ...j.phases[0], value: pct }, j.phases[1]] })),
         onUploaded: () =>
@@ -330,8 +344,23 @@ export const useJobStore = create<JobStore>((set, get) => {
       return id
     },
 
+    cancel: (id) => {
+      const j = get().jobs[id]
+      if (!j || j.status !== 'running') return
+      aborters.get(id)?.() // abort an in-flight client upload (no-op if finished)
+      if (j.refId && j.projectId) {
+        if (j.kind === 'video') cancelVideo(j.projectId, j.refId).catch(() => {})
+        else if (j.kind === 'autolabel') cancelAutoLabel(j.refId).catch(() => {})
+        else if (j.kind === 'export') cancelExport(j.projectId, j.refId).catch(() => {})
+      }
+      // reflect immediately; the SSE / upload rejection will also settle it
+      patch(id, (jj) => ({ ...jj, status: 'error', error: 'Cancelled' }))
+      persistRemove(id)
+    },
+
     dismiss: (id) =>
       set((s) => {
+        aborters.delete(id)
         const jobs = { ...s.jobs }
         delete jobs[id]
         persistRemove(id)

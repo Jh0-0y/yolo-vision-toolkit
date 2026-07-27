@@ -12,6 +12,7 @@ export default function JobIndicator() {
   const jobs = useJobStore((s) => s.jobs)
   const order = useJobStore((s) => s.order)
   const dismiss = useJobStore((s) => s.dismiss)
+  const cancel = useJobStore((s) => s.cancel)
   const hydrate = useJobStore((s) => s.hydrate)
   const queryClient = useQueryClient()
   const handled = useRef<Set<string>>(new Set())
@@ -79,7 +80,7 @@ export default function JobIndicator() {
     <div
       style={{
         position: 'fixed',
-        bottom: 16,
+        top: 72,
         right: 16,
         zIndex: 1000,
         display: 'flex',
@@ -89,13 +90,26 @@ export default function JobIndicator() {
       }}
     >
       {visible.map((job) => (
-        <JobCard key={job.id} job={job} onDismiss={() => dismiss(job.id)} />
+        <JobCard
+          key={job.id}
+          job={job}
+          onDismiss={() => dismiss(job.id)}
+          onCancel={() => cancel(job.id)}
+        />
       ))}
     </div>
   )
 }
 
-function JobCard({ job, onDismiss }: { job: Job; onDismiss: () => void }) {
+function JobCard({
+  job,
+  onDismiss,
+  onCancel,
+}: {
+  job: Job
+  onDismiss: () => void
+  onCancel: () => void
+}) {
   const cur = job.phases[job.phaseIndex]
   const done = job.status === 'done'
   const error = job.status === 'error'
@@ -119,7 +133,11 @@ function JobCard({ job, onDismiss }: { job: Job; onDismiss: () => void }) {
             {job.title}
           </Text>
         </Group>
-        {(done || error) && <CloseButton size="sm" onClick={onDismiss} />}
+        {running ? (
+          <CloseButton size="sm" title="Cancel" aria-label="Cancel" onClick={onCancel} />
+        ) : (
+          <CloseButton size="sm" title="Dismiss" aria-label="Dismiss" onClick={onDismiss} />
+        )}
       </Group>
       <Progress
         value={done ? 100 : spinning ? 100 : (cur?.value ?? 0)}

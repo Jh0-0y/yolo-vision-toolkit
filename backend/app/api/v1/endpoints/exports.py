@@ -94,6 +94,13 @@ async def export_events(
     return EventSourceResponse(stream())
 
 
+@router.post("/{export_id}/cancel")
+def cancel_export(project_id: str, export_id: str, session: Session = Depends(get_session)):
+    _require_project(session, project_id)
+    ok = export_manager.cancel(export_id)
+    return {"cancelled": ok}
+
+
 @router.get("", response_model=list[ExportOut])
 def list_exports(project_id: str, session: Session = Depends(get_session)):
     _require_project(session, project_id)

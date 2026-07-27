@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.core.config import settings
-from app.domain.export_build import build_export
+from app.domain.export_build import ExportCancelled, build_export
 
 
 def task_dir(export_id: str) -> Path:
@@ -36,7 +36,8 @@ def _run(
     val_split: float,
     seed: int,
 ) -> None:
-    progress_path = task_dir(export_id) / "progress.jsonl"
+    tdir = task_dir(export_id)
+    progress_path = tdir / "progress.jsonl"
     try:
         meta = build_export(
             pdir=pdir,
@@ -48,8 +49,11 @@ def _run(
             export_id=export_id,
             now=datetime.now(timezone.utc),
             emit=lambda ev: _emit(progress_path, ev),
+            cancel_path=tdir / "CANCEL",
         )
         _emit(progress_path, {"phase": "done", **meta})
+    except ExportCancelled:
+        _emit(progress_path, {"phase": "cancelled", "msg": "Cancelled"})
     except Exception as e:  # noqa: BLE001 — surface any failure to the stream
         _emit(progress_path, {"phase": "error", "msg": str(e)})
 
@@ -79,12 +83,20 @@ class ExportManager:
         tdir = task_dir(export_id)
         tdir.mkdir(parents=True, exist_ok=True)
         (tdir / "progress.jsonl").touch()
+        (tdir / "CANCEL").unlink(missing_ok=True)  # clear any stale cancel
 
         future = self._get_executor().submit(
             _run, export_id, pdir, project_name, kind, names, val_split, seed
         )
         self._futures[export_id] = future
         future.add_done_callback(lambda _f: self._futures.pop(export_id, None))
+
+    def cancel(self, export_id: str) -> bool:
+        future = self._futures.get(export_id)
+        if future is not None and future.cancel():  # still queued — never started
+            return True
+        (task_dir(export_id) / "CANCEL").touch()  # running: signal the build loop
+        return True
 
     def is_active(self, export_id: str) -> bool:
         future = self._futures.get(export_id)

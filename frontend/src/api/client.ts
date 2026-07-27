@@ -300,7 +300,7 @@ export const createExport = (projectId: string, body: ExportCreate) =>
   api.post<{ export_id: string; status: string }>(`/projects/${projectId}/exports`, body)
 
 export interface ExportProgressEvent {
-  phase: 'start' | 'copy' | 'zip' | 'done' | 'error'
+  phase: 'start' | 'copy' | 'zip' | 'done' | 'error' | 'cancelled'
   total?: number
   copied?: number
   count?: number
@@ -319,13 +319,22 @@ export function subscribeExportEvents(
   source.addEventListener('progress', (e) => {
     const ev = JSON.parse((e as MessageEvent).data) as ExportProgressEvent
     onEvent(ev)
-    if (ev.phase === 'done' || ev.phase === 'error') source.close()
+    if (ev.phase === 'done' || ev.phase === 'error' || ev.phase === 'cancelled') source.close()
   })
   source.onerror = () => {
     if (source.readyState === EventSource.CLOSED) onError?.()
   }
   return () => source.close()
 }
+
+// ---------- job cancellation ----------
+export const cancelVideo = (projectId: string, videoId: string) =>
+  api.post(`/projects/${projectId}/videos/${videoId}/cancel`)
+
+export const cancelAutoLabel = (jobId: string) => api.post(`/jobs/${jobId}/cancel`)
+
+export const cancelExport = (projectId: string, exportId: string) =>
+  api.post(`/projects/${projectId}/exports/${exportId}/cancel`)
 
 export const listExports = (projectId: string) =>
   api.get<ExportOut[]>(`/projects/${projectId}/exports`)
@@ -355,10 +364,11 @@ export interface TrainDataset {
 export interface UploadHandlers {
   onProgress?: (percent: number) => void // 0-100 network upload
   onUploaded?: () => void // request body fully sent; server now processing
+  signal?: AbortSignal // abort the in-flight upload (cancel)
 }
 
 // XHR-based upload (fetch can't report upload %). Resolves with the parsed JSON
-// body; rejects with ApiError on non-2xx or network failure.
+// body; rejects with ApiError on non-2xx, abort, or network failure.
 export function xhrUpload<T>(
   path: string,
   form: FormData,
@@ -367,6 +377,10 @@ export function xhrUpload<T>(
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('POST', `${BASE}${path}`)
+    if (handlers.signal) {
+      handlers.signal.addEventListener('abort', () => xhr.abort(), { once: true })
+    }
+    xhr.onabort = () => reject(new ApiError(0, 'Cancelled'))
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) handlers.onProgress?.(Math.round((e.loaded / e.total) * 100))
     }

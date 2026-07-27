@@ -52,6 +52,11 @@ def target_images(pdir: Path, names: list[str] | None, kind: str) -> list[Path]:
     return images
 
 
+class ExportCancelled(Exception):
+    """Raised when a CANCEL sentinel appears mid-build; the caller emits it as a
+    terminal 'cancelled' event."""
+
+
 def build_export(
     *,
     pdir: Path,
@@ -63,11 +68,18 @@ def build_export(
     export_id: str,
     now: datetime,
     emit: Emit,
+    cancel_path: Path | None = None,
 ) -> dict:
     """Build the export on disk and return its meta. Assumes the caller has
     already verified there is at least one eligible image. ``emit`` receives
     ``{phase: 'start'|'copy'|'zip', ...}`` events for streaming; the caller is
-    responsible for the terminal 'done'/'error' event."""
+    responsible for the terminal 'done'/'error'/'cancelled' event. Raises
+    ``ExportCancelled`` if ``cancel_path`` appears during the copy loop."""
+
+    def _check_cancel() -> None:
+        if cancel_path is not None and cancel_path.exists():
+            raise ExportCancelled()
+
     labels_dir = pdir / "labels"
     images = target_images(pdir, names, kind)
     out = pdir / "exports" / export_id
@@ -90,6 +102,7 @@ def build_export(
     if kind == "images":
         (out / "images").mkdir(parents=True, exist_ok=True)
         for i, img in enumerate(images, 1):
+            _check_cancel()
             shutil.copy2(img, out / "images" / img.name)
             emit({"phase": "copy", "copied": i, "total": total})
         meta["count"] = total
@@ -104,6 +117,7 @@ def build_export(
 
         counts = {"train": 0, "val": 0}
         for i, img in enumerate(images, 1):
+            _check_cancel()
             split = "val" if img in val_set else "train"
             (out / "images" / split).mkdir(parents=True, exist_ok=True)
             (out / "labels" / split).mkdir(parents=True, exist_ok=True)
