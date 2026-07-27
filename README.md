@@ -207,6 +207,7 @@ TAG=v1.2.3 scripts/build.sh   # 버전 태그 지정 (생략 시 latest)
 - 플랫폼은 `build.sh` 안에서 `--platform linux/amd64`로 **고정**됩니다 — 맥(arm64)에서 빌드해도 윈도우용 이미지가 나옵니다. *(맥 등 non-amd64 호스트의 첫 빌드는 에뮬레이션이라 다소 느림)*
 - 만들어지는 이미지: `ghcr.io/jh0-0y/yvt-backend:${TAG}` 와 `ghcr.io/jh0-0y/yvt-frontend:${TAG}`.
 - 완료되면 GitHub 저장소의 **Packages** 에서 올라간 이미지를 확인할 수 있습니다.
+- **패키지 공개 설정(최초 1회)**: GHCR 패키지는 처음엔 비공개(private)로 생성됩니다. 이 프로젝트는 **공개(public)로 운영**하므로, 각 패키지(yvt-backend, yvt-frontend)의 GitHub *Package settings → Change visibility → Public* 에서 한 번 공개로 바꿔두면 됩니다. 공개로 두면 **서버에서 `docker login` 없이 바로 pull** 할 수 있습니다.
 
 <details>
 <summary>build.sh 없이 수동으로 빌드·푸시하려면 (⚠️ --platform 필수)</summary>
@@ -221,16 +222,13 @@ docker buildx build --platform linux/amd64 -f docker/frontend.Dockerfile -t ghcr
 
 #### ② 배포 환경에서 그 이미지로 실행 — 서버(윈도우 GPU PC)에서
 
-서버에는 **소스가 필요 없습니다.** `docker-compose.yml` 과 `.env` 두 파일만 있으면 GHCR에서 이미지를 받아 실행합니다(compose에 `build:`가 없는 배포 전용 구성).
+서버에는 **소스가 필요 없습니다.** `docker-compose.yml` 과 `.env` 두 파일만 있으면 GHCR에서 이미지를 받아 실행합니다(compose에 `build:`가 없는 배포 전용 구성). 이미지가 **공개(public)** 라서 **로그인도 필요 없습니다.**
 
 ```bash
 # 1) 실행에 필요한 두 파일만 서버에 둔다: docker-compose.yml, example.env
 cp example.env .env   # DATA_DIR·CACHE_DIR 경로 + TAG(실행할 버전) 를 환경에 맞게 수정
 
-# 2) GHCR 로그인 (이미지가 비공개 패키지일 때만 필요)
-docker login ghcr.io -u jh0-0y --password-stdin
-
-# 3) 이미지 받아서 실행
+# 2) 이미지 받아서 실행 (공개 이미지라 docker login 불필요)
 docker compose up -d   # pull_policy: always 라 .env 의 TAG 에 맞는 최신 이미지를 받아 뜬다
 ```
 - **어떤 버전이 뜨는지는 `.env`의 `TAG`가 결정합니다** — ①에서 푸시한 태그(예: `v1.2.3`)를 여기에 적으면 그 버전이 실행됩니다.
