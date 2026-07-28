@@ -17,8 +17,19 @@ interface DragRect {
   y2: number
 }
 
+/** Nearest scrollable ancestor, or the document scroller (window) as fallback. */
+function getScrollParent(el: HTMLElement): HTMLElement {
+  let n: HTMLElement | null = el.parentElement
+  while (n) {
+    const oy = getComputedStyle(n).overflowY
+    if (/(auto|scroll|overlay)/.test(oy) && n.scrollHeight > n.clientHeight) return n
+    n = n.parentElement
+  }
+  return (document.scrollingElement as HTMLElement | null) ?? document.documentElement
+}
+
 /** Thumbnail grid with checkbox selection, shift-click range select and
- *  rubber-band drag selection. */
+ *  rubber-band drag selection (with edge auto-scroll). */
 export default function ImageGrid({ items, selected, onSelectedChange, onOpen }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cardRefs = useRef(new Map<string, HTMLDivElement>())
@@ -45,7 +56,10 @@ export default function ImageGrid({ items, selected, onSelectedChange, onOpen }:
   }
 
   // rubber-band selection can start anywhere on the page background (including
-  // the margins outside the 1200px column) — not just inside the grid
+  // the margins outside the 1200px column) — not just inside the grid. Dragging
+  // the pointer to the top/bottom edge auto-scrolls so the selection can extend
+  // past the visible area. All geometry is in the container's content space
+  // (clientXY − live container rect), which stays fixed as the page scrolls.
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
       if (e.button !== 0) return
@@ -55,21 +69,27 @@ export default function ImageGrid({ items, selected, onSelectedChange, onOpen }:
         return
       const container = containerRef.current
       if (!container) return
-      const rect = container.getBoundingClientRect()
-      const startX = e.clientX - rect.left
-      const startY = e.clientY - rect.top
+      const scroller = getScrollParent(container)
+      const down = container.getBoundingClientRect()
+      const startX = e.clientX - down.left
+      const startY = e.clientY - down.top // content-space anchor (scroll-invariant)
       didDrag.current = false
       const additive = e.ctrlKey || e.metaKey || e.shiftKey
       const base = additive ? new Set(selected) : selected
       const prevUserSelect = document.body.style.userSelect
-      document.body.style.userSelect = 'none'
+      let last = { x: e.clientX, y: e.clientY }
+      let edgeSpeed = 0 // px/frame; sign = scroll direction
+      let raf = 0
 
-      const onMove = (me: MouseEvent) => {
-        const x = me.clientX - rect.left
-        const y = me.clientY - rect.top
-        if (!didDrag.current && Math.abs(x - startX) < 5 && Math.abs(y - startY) < 5) return
+      // recompute the marquee + selection from the current pointer + scroll
+      const apply = () => {
+        const rect = container.getBoundingClientRect()
+        const curX = last.x - rect.left
+        const curY = last.y - rect.top
+        if (!didDrag.current && Math.abs(curX - startX) < 5 && Math.abs(curY - startY) < 5) return
         didDrag.current = true
-        const dr = { x1: startX, y1: startY, x2: x, y2: y }
+        document.body.style.userSelect = 'none'
+        const dr = { x1: startX, y1: startY, x2: curX, y2: curY }
         setDrag(dr)
 
         const [lx, rx] = [Math.min(dr.x1, dr.x2), Math.max(dr.x1, dr.x2)]
@@ -79,13 +99,43 @@ export default function ImageGrid({ items, selected, onSelectedChange, onOpen }:
           const r = el.getBoundingClientRect()
           const ex1 = r.left - rect.left
           const ey1 = r.top - rect.top
-          const ex2 = ex1 + r.width
-          const ey2 = ey1 + r.height
-          if (ex1 < rx && ex2 > lx && ey1 < by && ey2 > ty) next.add(name)
+          if (ex1 < rx && ex1 + r.width > lx && ey1 < by && ey1 + r.height > ty) next.add(name)
         }
         onSelectedChange(next)
       }
+
+      // viewport band that triggers auto-scroll (window vs a scrollable ancestor)
+      const edges = () => {
+        if (scroller === document.scrollingElement) return { top: 0, bottom: window.innerHeight }
+        const r = (scroller as HTMLElement).getBoundingClientRect()
+        return { top: r.top, bottom: r.bottom }
+      }
+
+      const loop = () => {
+        if (edgeSpeed !== 0) {
+          scroller.scrollTop += edgeSpeed // browser clamps at the ends
+          apply()
+        }
+        raf = requestAnimationFrame(loop)
+      }
+      raf = requestAnimationFrame(loop)
+
+      const onMove = (me: MouseEvent) => {
+        last = { x: me.clientX, y: me.clientY }
+        apply()
+        const EDGE = 64 // px band near each edge
+        const MAX = 22 // px/frame at the very edge
+        const { top, bottom } = edges()
+        if (me.clientY < top + EDGE) {
+          edgeSpeed = -Math.ceil(((top + EDGE - me.clientY) / EDGE) * MAX)
+        } else if (me.clientY > bottom - EDGE) {
+          edgeSpeed = Math.ceil(((me.clientY - (bottom - EDGE)) / EDGE) * MAX)
+        } else {
+          edgeSpeed = 0
+        }
+      }
       const onUp = () => {
+        cancelAnimationFrame(raf)
         window.removeEventListener('mousemove', onMove)
         window.removeEventListener('mouseup', onUp)
         document.body.style.userSelect = prevUserSelect
