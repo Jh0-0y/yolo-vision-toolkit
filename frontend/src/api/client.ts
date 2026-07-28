@@ -481,6 +481,12 @@ export type TrainResultRow = Record<string, number | string>
 export const getRunResults = (runId: string) =>
   api.get<TrainResultRow[]>(`/training/runs/${runId}/results`)
 
+// direct-download URL for the raw results.csv (per-epoch training metrics)
+export const runResultsCsvUrl = (runId: string) => `${BASE}/training/runs/${runId}/results.csv`
+
+// direct-download URL for ultralytics args.yaml (fully-resolved training config)
+export const runArgsYamlUrl = (runId: string) => `${BASE}/training/runs/${runId}/args.yaml`
+
 export const getRunLog = (runId: string) =>
   api.get<{ text: string; truncated: boolean }>(`/training/runs/${runId}/log`)
 

@@ -463,6 +463,42 @@ def run_results(run_id: str, session: Session = Depends(get_session)):
     return rows
 
 
+@router.get("/runs/{run_id}/results.csv")
+def download_results_csv(run_id: str, session: Session = Depends(get_session)):
+    """Download the raw ultralytics results.csv (per-epoch train/val loss, P/R,
+    mAP50, mAP50-95, lr, time) as a CSV file named after the run."""
+    run = session.get(TrainRun, run_id)
+    if run is None:
+        raise HTTPException(404, "Training run not found")
+    rdir = settings.run_dir(run.project_id, run_id)
+    csv_path = rdir / "results.csv"
+    if not csv_path.exists():  # some ultralytics versions nest it one level down
+        found = sorted(rdir.glob("*/results.csv"))
+        csv_path = found[0] if found else csv_path
+    if not csv_path.exists():
+        raise HTTPException(404, "results.csv is not available for this run yet")
+    filename = f"{_safe_part(run.name or run_id)}_results.csv"
+    return FileResponse(csv_path, media_type="text/csv", filename=filename)
+
+
+@router.get("/runs/{run_id}/args.yaml")
+def download_args_yaml(run_id: str, session: Session = Depends(get_session)):
+    """Download ultralytics args.yaml — the fully-resolved training config for this
+    run (every hyperparameter actually applied, including all augmentation values)."""
+    run = session.get(TrainRun, run_id)
+    if run is None:
+        raise HTTPException(404, "Training run not found")
+    rdir = settings.run_dir(run.project_id, run_id)
+    path = rdir / "args.yaml"
+    if not path.exists():  # some ultralytics versions nest it one level down
+        found = sorted(rdir.glob("*/args.yaml"))
+        path = found[0] if found else path
+    if not path.exists():
+        raise HTTPException(404, "args.yaml is not available for this run yet")
+    filename = f"{_safe_part(run.name or run_id)}_args.yaml"
+    return FileResponse(path, media_type="text/yaml", filename=filename)
+
+
 @router.get("/runs/{run_id}/log")
 def run_log(run_id: str, tail_kb: int = 256, session: Session = Depends(get_session)):
     """The training worker's train.log (stdout+stderr, incl. full tracebacks).

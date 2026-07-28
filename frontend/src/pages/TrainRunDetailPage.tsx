@@ -37,6 +37,8 @@ import {
   getRunPerClass,
   getRunPerClassHistory,
   getRunResults,
+  runArgsYamlUrl,
+  runResultsCsvUrl,
   subscribeTrainEvents,
   type ModelOut,
   type PerClassEpoch,
@@ -308,6 +310,30 @@ export default function TrainRunDetailPage() {
           )}
         </Group>
         <Group gap="xs">
+          {!!results.data?.length && (
+            <Button
+              component="a"
+              href={runResultsCsvUrl(runId)}
+              download
+              size="xs"
+              variant="default"
+              leftSection={<IconDownload size={14} />}
+            >
+              CSV
+            </Button>
+          )}
+          {r && ['running', 'done', 'stopped'].includes(r.status) && (
+            <Button
+              component="a"
+              href={runArgsYamlUrl(runId)}
+              download
+              size="xs"
+              variant="default"
+              leftSection={<IconDownload size={14} />}
+            >
+              args.yaml
+            </Button>
+          )}
           {artifacts.data?.weights.map((w) => (
             <Button
               key={w.name}
