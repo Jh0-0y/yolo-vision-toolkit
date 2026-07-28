@@ -9,6 +9,7 @@ import {
   Group,
   NumberInput,
   Progress,
+  Radio,
   Select,
   Slider,
   Stack,
@@ -22,6 +23,7 @@ import {
   startAnnotate,
   subscribeAnnotateEvents,
   type AnnotateProgress,
+  type CropOutput,
   type ModelOut,
 } from '../../api/client'
 
@@ -48,6 +50,7 @@ export default function TrackMode({ projectId, models }: Props) {
   const [imgsz, setImgsz] = useState<number | string>(640)
   const [objectTracking, setObjectTracking] = useState(true)
   const [cropTracking, setCropTracking] = useState(true)
+  const [cropOutput, setCropOutput] = useState<CropOutput>('label')
   const [fileName, setFileName] = useState<string | null>(null)
   const [jobId, setJobId] = useState<string | null>(null)
   const [progress, setProgress] = useState<AnnotateProgress | null>(null)
@@ -84,6 +87,7 @@ export default function TrackMode({ projectId, models }: Props) {
         params: { conf, iou_wbf: 0.7, imgsz: Number(imgsz), device: null },
         objectTracking,
         cropTracking,
+        cropOutput,
       })
       setJobId(job_id)
       unsub.current = subscribeAnnotateEvents(job_id, (ev) => {
@@ -116,6 +120,7 @@ export default function TrackMode({ projectId, models }: Props) {
     setRanCrop(false)
   }
 
+  const croppedVideo = cropTracking && cropOutput === 'video'
   const pct =
     progress?.total && progress.done != null ? Math.round((progress.done / progress.total) * 100) : 0
 
@@ -159,7 +164,7 @@ export default function TrackMode({ projectId, models }: Props) {
               label="Object tracking — boxes, IDs & motion trails"
               checked={objectTracking}
               onChange={(e) => setObjectTracking(e.currentTarget.checked)}
-              disabled={running}
+              disabled={running || croppedVideo}
             />
             <Checkbox
               label="Crop tracking — moving vertical 9:16 crop frame"
@@ -167,9 +172,35 @@ export default function TrackMode({ projectId, models }: Props) {
               onChange={(e) => setCropTracking(e.currentTarget.checked)}
               disabled={running}
             />
+            {cropTracking && (
+              <Radio.Group
+                value={cropOutput}
+                onChange={(v) => setCropOutput(v as CropOutput)}
+                pl="lg"
+              >
+                <Stack gap={4} mt={4}>
+                  <Radio
+                    value="label"
+                    label="Draw crop frame — rectangle overlay on the full video"
+                    disabled={running}
+                  />
+                  <Radio
+                    value="video"
+                    label="Output cropped video — cut to the vertical 9:16 clip"
+                    disabled={running}
+                  />
+                </Stack>
+              </Radio.Group>
+            )}
             {!objectTracking && !cropTracking && (
               <Text size="xs" c="red">
                 Enable at least one overlay.
+              </Text>
+            )}
+            {croppedVideo && (
+              <Text size="xs" c="dimmed">
+                Cropped-video mode outputs a clean vertical clip — object tracking is not
+                applied.
               </Text>
             )}
             {cropTracking && (
@@ -246,7 +277,13 @@ export default function TrackMode({ projectId, models }: Props) {
                       src={annotateResultUrl(jobId)}
                       controls
                       onError={() => setVideoFailed(true)}
-                      style={{ width: '100%', borderRadius: 8 }}
+                      style={{
+                        display: 'block',
+                        margin: '0 auto',
+                        maxWidth: '100%',
+                        maxHeight: '70vh',
+                        borderRadius: 8,
+                      }}
                     />
                   )}
                   <Group>

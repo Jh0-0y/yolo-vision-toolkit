@@ -623,6 +623,8 @@ export interface AnnotateProgress {
   msg?: string
 }
 
+export type CropOutput = 'label' | 'video'
+
 export function startAnnotate(opts: {
   file: File
   modelIds: string[]
@@ -630,6 +632,7 @@ export function startAnnotate(opts: {
   params: PredictParams
   objectTracking: boolean
   cropTracking: boolean
+  cropOutput: CropOutput
 }): Promise<TestJobStart> {
   const form = new FormData()
   form.append('file', opts.file)
@@ -641,6 +644,7 @@ export function startAnnotate(opts: {
   if (opts.params.device) form.append('device', opts.params.device)
   form.append('object_tracking', String(opts.objectTracking))
   form.append('crop_tracking', String(opts.cropTracking))
+  form.append('crop_output', opts.cropOutput)
   return api.upload<TestJobStart>('/predict/annotate', form)
 }
 

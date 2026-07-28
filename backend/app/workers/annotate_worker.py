@@ -1,15 +1,21 @@
 """Video tracking worker: run a model's object tracker (ByteTrack) over a video,
 draw per-object boxes with stable track IDs (and a short motion trail), and/or
-overlay a moving vertical (9:16) crop window computed by the trackcrop pipeline,
+apply a moving vertical (9:16) crop window computed by the trackcrop pipeline,
 then write a browser-playable (H.264) mp4. Runs in a child process (torch/
 ultralytics + cv2). Progress → jobs_dir/{job_id}/progress.jsonl.
 
 Two independent overlays, each toggled by cfg:
   - object_tracking: ByteTrack boxes + IDs + motion trails (per-frame model.track).
   - crop_tracking:   the trackcrop pipeline (100ms predict pass, separate from
-                     ByteTrack by design) yields a target-center trajectory; we
-                     draw a vertical 9:16 crop frame that follows it. Its crop X
-                     coordinates are also written to crop.json for download.
+                     ByteTrack by design) yields a target-center trajectory. Its
+                     crop X coordinates are always written to crop.json. What we do
+                     with that trajectory depends on cfg["crop_output"]:
+                       "label" — draw the 9:16 crop rectangle onto the full frame
+                                 (default; composes with object_tracking boxes).
+                       "video" — actually cut each frame down to the vertical 9:16
+                                 window and output that clean crop clip (no boxes,
+                                 no rectangle; object_tracking is ignored).
+    The cut/draw geometry lives in app.domain.crop_render.
 
 cv2.VideoWriter H.264 support is unreliable across OpenCV builds, so we always
 write an mp4v intermediate then transcode to H.264 with ffmpeg. ffmpeg is REQUIRED
@@ -19,7 +25,6 @@ writing an unplayable mp4v file.
 
 from __future__ import annotations
 
-import bisect
 import json
 import shutil
 import subprocess
@@ -34,7 +39,6 @@ _PALETTE = [
 ]
 
 _TRAIL_LEN = 30  # frames of motion history to draw per track
-_CROP_COLOR = (0, 255, 255)  # BGR yellow — distinct, always the crop window
 
 
 def _color(key: int) -> tuple[int, int, int]:
@@ -44,58 +48,6 @@ def _color(key: int) -> tuple[int, int, int]:
 def _emit(progress_path: Path, event: dict) -> None:
     with open(progress_path, "a") as f:
         f.write(json.dumps({"ts": time.time(), **event}) + "\n")
-
-
-def _build_crop_traj(samples: list, width: int) -> tuple[list[int], list[float]]:
-    """trackcrop samples → (ms_list, center_x_list) for per-frame interpolation.
-
-    The 'center' fallback stores 1920/2=960 (trackcrop's fixed source width); remap
-    it to the actual frame centre so the overlay is correct at any resolution.
-    """
-    ms_list: list[int] = []
-    cx_list: list[float] = []
-    half = width / 2
-    for s in samples:
-        ms_list.append(s.video_offset_ms)
-        cx_list.append(half if s.target_type == "center" else s.target_center_x)
-    return ms_list, cx_list
-
-
-def _crop_center_at(ms: float, traj: tuple[list[int], list[float]]) -> float | None:
-    """Linear-interpolate the target centre X at time `ms` from the 100ms grid."""
-    ms_list, cx_list = traj
-    if not ms_list:
-        return None
-    if ms <= ms_list[0]:
-        return cx_list[0]
-    if ms >= ms_list[-1]:
-        return cx_list[-1]
-    i = bisect.bisect_right(ms_list, ms)  # ms_list[i-1] <= ms < ms_list[i]
-    t0, t1 = ms_list[i - 1], ms_list[i]
-    x0, x1 = cx_list[i - 1], cx_list[i]
-    if t1 == t0:
-        return x0
-    r = (ms - t0) / (t1 - t0)
-    return x0 + (x1 - x0) * r
-
-
-def _draw_crop_window(
-    frame, ms: float, traj: tuple[list[int], list[float]], crop_w: int, width: int, height: int
-) -> None:
-    """Draw the full-height vertical crop frame centred on the interpolated target."""
-    import cv2
-
-    cx = _crop_center_at(ms, traj)
-    if cx is None:
-        return
-    left = int(round(cx - crop_w / 2))
-    left = max(0, min(left, width - crop_w))
-    right = left + crop_w
-    cv2.rectangle(frame, (left, 0), (right - 1, height - 1), _CROP_COLOR, 3)
-    cv2.putText(
-        frame, "CROP", (left + 6, 26),
-        cv2.FONT_HERSHEY_SIMPLEX, 0.7, _CROP_COLOR, 2, cv2.LINE_AA,
-    )
 
 
 def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
@@ -118,6 +70,11 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
     imgsz = int(cfg.get("imgsz", 640))
     object_tracking = bool(cfg.get("object_tracking", True))
     crop_tracking = bool(cfg.get("crop_tracking", True))
+    # crop output form: "label" = draw 9:16 rectangle overlay (default),
+    # "video" = cut the frame to the vertical window and output that clean clip.
+    crop_cut = crop_tracking and cfg.get("crop_output") == "video"
+
+    from app.domain import crop_render  # cv2-only geometry (no torch) — safe here
 
     # tracking/crop are single-model by nature — use the first selected model
     _, pt = cfg["specs"][0]
@@ -137,13 +94,17 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         cap.release()
-        writer = cv2.VideoWriter(str(tmp), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+
+        # crop-cut output is narrower (the vertical 9:16 window); the overlay/box
+        # outputs keep the source size.
+        crop_w = crop_render.crop_width_for(h, w) if crop_tracking else 0
+        out_w, out_h = (crop_w, h) if crop_cut else (w, h)
+        writer = cv2.VideoWriter(str(tmp), cv2.VideoWriter_fourcc(*"mp4v"), fps, (out_w, out_h))
 
         _emit(progress, {"phase": "start", "total": total})
 
         # ---- crop trajectory (separate 100ms predict pass) ----
-        crop_traj: tuple[list[int], list[float]] | None = None
-        crop_w = 0
+        crop_traj: crop_render.Trajectory | None = None
         if crop_tracking:
             _emit(progress, {"phase": "crop_analyze", "total": total})
             # trackcrop pulls in cv2/ultralytics — keep the import lazy (worker only)
@@ -155,14 +116,33 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
             cropres = analyze_video(
                 str(src), model_path=pt, device=device, imgsz=1280, conf=0.10, validate=False
             )
-            crop_traj = _build_crop_traj(cropres.samples, w)
-            crop_w = max(2, round(h * 9 / 16))
+            crop_traj = crop_render.build_trajectory(cropres.samples, w)
             (out.parent / "crop.json").write_text(cropres.to_json(), encoding="utf-8")
 
         idx = 0
         cancelled = False
 
-        if object_tracking:
+        if crop_cut:
+            # crop-cut: output the clean vertical clip — cut each frame to the 9:16
+            # window (no boxes, no rectangle; object_tracking is ignored by design).
+            cap = cv2.VideoCapture(str(src))
+            try:
+                while True:
+                    if cancel.exists():
+                        cancelled = True
+                        break
+                    ok, frame = cap.read()
+                    if not ok:
+                        break
+                    writer.write(
+                        crop_render.cut_window(frame, idx / fps * 1000.0, crop_traj, crop_w, w)
+                    )
+                    idx += 1
+                    if idx % 5 == 0 or idx == total:
+                        _emit(progress, {"phase": "annotate", "done": idx, "total": total})
+            finally:
+                cap.release()
+        elif object_tracking:
             from ultralytics import YOLO
 
             model = YOLO(pt)
@@ -214,14 +194,14 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                             pts = trails[tid]
                             for j in range(1, len(pts)):
                                 cv2.line(frame, pts[j - 1], pts[j], color, 2, cv2.LINE_AA)
-                if crop_tracking and crop_traj is not None:
-                    _draw_crop_window(frame, idx / fps * 1000.0, crop_traj, crop_w, w, h)
+                if crop_traj is not None:
+                    crop_render.draw_window(frame, idx / fps * 1000.0, crop_traj, crop_w, w, h)
                 writer.write(frame)
                 idx += 1
                 if idx % 5 == 0 or idx == total:
                     _emit(progress, {"phase": "annotate", "done": idx, "total": total})
         else:
-            # crop-only: no ByteTrack pass — just read frames and draw the crop window
+            # crop-only overlay: no ByteTrack pass — just read frames and draw the rectangle
             cap = cv2.VideoCapture(str(src))
             try:
                 while True:
@@ -232,7 +212,7 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                     if not ok:
                         break
                     if crop_traj is not None:
-                        _draw_crop_window(frame, idx / fps * 1000.0, crop_traj, crop_w, w, h)
+                        crop_render.draw_window(frame, idx / fps * 1000.0, crop_traj, crop_w, w, h)
                     writer.write(frame)
                     idx += 1
                     if idx % 5 == 0 or idx == total:
@@ -266,7 +246,10 @@ def _to_h264(src: Path, dst: Path) -> None:
     """Transcode to H.264/yuv420p mp4 (browser-safe). ffmpeg is required — the
     caller checks for it up front and fails the job if it's missing."""
     subprocess.run(
-        ["ffmpeg", "-y", "-i", str(src), "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        ["ffmpeg", "-y", "-i", str(src),
+         # yuv420p needs even width/height; pad up by 1px if a crop made a dim odd
+         "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p",
          "-movflags", "+faststart", "-an", str(dst)],
         check=True,
         stdout=subprocess.DEVNULL,

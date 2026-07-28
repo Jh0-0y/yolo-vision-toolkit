@@ -147,7 +147,8 @@ async def start_annotate(
     device: str | None = Form(None),
     project_id: str | None = Form(None),
     object_tracking: bool = Form(True),  # ByteTrack boxes + IDs + trails
-    crop_tracking: bool = Form(True),  # trackcrop vertical crop-window overlay
+    crop_tracking: bool = Form(True),  # trackcrop vertical 9:16 crop window
+    crop_output: str = Form("label"),  # "label" = rectangle overlay | "video" = cut clip
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
 ):
@@ -156,6 +157,8 @@ async def start_annotate(
         raise HTTPException(422, f"Unsupported video type: {ext}")
     if not object_tracking and not crop_tracking:
         raise HTTPException(422, "Enable object tracking, crop tracking, or both")
+    if crop_output not in ("label", "video"):
+        raise HTTPException(422, "crop_output must be 'label' or 'video'")
     ids = [m.strip() for m in model_ids.split(",") if m.strip()]
     if not ids:
         raise HTTPException(422, "Select at least one model")
@@ -180,6 +183,7 @@ async def start_annotate(
         "device": device,
         "object_tracking": object_tracking,
         "crop_tracking": crop_tracking,
+        "crop_output": crop_output,
     }
     await run_in_threadpool(test_job_manager.submit_annotate, job_id, cfg)
     return TestJobStart(job_id=job_id)

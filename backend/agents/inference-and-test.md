@@ -38,7 +38,7 @@ mAP·P/R/F1 평가. **DB에 아무것도 쓰지 않는다**(전부 transient `da
 ## 처리 흐름
 
 - 단일 예측: `predict.py:predict` → `infer_manager.predict`(device 정책·레지던시) → `infer_worker.run_predict`(워엄 모델) → `ml/predict.py:predict_image`(모델별 predict → `ClassRegistry` 매핑 → `ensemble.merge_detections`).
-- 어노테이션: `start_annotate` → `test_job_manager.submit_annotate`(video 풀, ProcessPool spawn) → `annotate_worker.run_annotate`(ByteTrack `model.track` + 별도 `trackcrop.analyze_video` 패스 → mp4v → ffmpeg H.264).
+- 어노테이션: `start_annotate` → `test_job_manager.submit_annotate`(video 풀, ProcessPool spawn) → `annotate_worker.run_annotate`(ByteTrack `model.track` + 별도 `trackcrop.analyze_video` 패스 → mp4v → ffmpeg H.264). 크롭 출력형식은 `crop_output`(Form): `"label"`=풀프레임에 9:16 사각형 오버레이(기본, object_tracking 박스와 합성) / `"video"`=프레임을 세로 9:16으로 실제 컷 → 박스·사각형 없는 깔끔한 세로 클립(object_tracking 무시). 컷/그리기 지오메트리는 `app/domain/crop_render.py`.
 - 비교: `start_compare`(`_extract_compare_dataset` unzip) → `submit_compare`(eval 풀) → `compare_worker.run_compare`(per-image `predict_image` + `evaluate` mAP/P/R/F1).
 
 ## 핵심 파일·함수
@@ -49,7 +49,7 @@ mAP·P/R/F1 평가. **DB에 아무것도 쓰지 않는다**(전부 transient `da
 - `app/ml/ensemble.py:60` `fuse_class`/`merge_detections`
 - `app/ml/evaluate.py:83` `average_precision`/`map_from_accumulated`(101-point COCO), `:15` `match_frame`
 - `app/workers/compare_worker.py:81` `run_compare`
-- `app/workers/annotate_worker.py:101` `run_annotate`, `:265` `_to_h264`
+- `app/workers/annotate_worker.py:53` `run_annotate`, `:245` `_to_h264` — 크롭 컷/오버레이는 `app/domain/crop_render.py`(`crop_width_for`/`build_trajectory`/`center_at`/`draw_window`/`cut_window`)로 분리
 - `app/services/test_jobs.py:56` `TestJobManager`(단일워커 풀 "video"/"eval")
 
 ## 엣지 케이스·주의
