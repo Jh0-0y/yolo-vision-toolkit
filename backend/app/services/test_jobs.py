@@ -15,6 +15,7 @@ import shutil
 import threading
 import time
 from concurrent.futures import Future, ProcessPoolExecutor
+from pathlib import Path
 
 from app.core.config import settings
 
@@ -23,18 +24,28 @@ from app.core.config import settings
 ANNOTATE_TTL_SEC = 3600
 
 
-def sweep_old_annotations() -> None:
-    """Delete annotate work dirs older than the TTL so nothing accumulates."""
-    root = settings.test_dir / "annotate"
+def _sweep_dir(root: Path, ttl_sec: int) -> None:
+    """Delete work dirs older than the TTL so nothing accumulates."""
     if not root.exists():
         return
     now = time.time()
     for d in root.iterdir():
         try:
-            if d.is_dir() and now - d.stat().st_mtime > ANNOTATE_TTL_SEC:
+            if d.is_dir() and now - d.stat().st_mtime > ttl_sec:
                 shutil.rmtree(d, ignore_errors=True)
         except OSError:
             continue
+
+
+def sweep_old_annotations() -> None:
+    """Delete annotate work dirs older than the TTL so nothing accumulates."""
+    _sweep_dir(settings.test_dir / "annotate", ANNOTATE_TTL_SEC)
+
+
+def sweep_old_compare() -> None:
+    """Delete compare upload/dataset dirs older than the TTL (playground = no
+    permanent storage; uploaded test sets can be large)."""
+    _sweep_dir(settings.test_dir / "compare", ANNOTATE_TTL_SEC)
 
 
 class TestJobManager:

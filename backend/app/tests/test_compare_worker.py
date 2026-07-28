@@ -1,7 +1,8 @@
 """compare_worker end-to-end with a stubbed ultralytics.YOLO (no weights/GPU).
 
-Verifies per-model scoring and the class-mismatch fix: a prediction whose class
-isn't in the project is counted as a false positive, not silently dropped."""
+Verifies per-model scoring against an uploaded YOLO dataset (images + labels +
+data.yaml), the class-mismatch fix (a prediction whose class isn't in the dataset
+is a false positive, not dropped), and the mAP metrics."""
 
 import json
 import sys
@@ -9,10 +10,11 @@ import types
 
 import numpy as np
 import pytest
+import yaml
 from PIL import Image
 
 from app.core.config import settings
-from app.domain.labels import write_boxes
+from app.domain.yolo_io import write_label_file
 from app.workers.compare_worker import run_compare
 
 
@@ -44,7 +46,7 @@ class _Result:
 MODEL_NAMES = {"m1": {0: "ball"}, "m2": {0: "cat"}}
 MODEL_PREDS = {
     "m1": [(0, (0.10, 0.10, 0.30, 0.30), 0.90)],  # "ball" over the GT box → TP
-    "m2": [(0, (0.10, 0.10, 0.30, 0.30), 0.90)],  # "cat" (not in project) → FP
+    "m2": [(0, (0.10, 0.10, 0.30, 0.30), 0.90)],  # "cat" (not in dataset) → FP
 }
 
 
@@ -67,35 +69,29 @@ def fake_ultralytics(monkeypatch):
     monkeypatch.setitem(sys.modules, "ultralytics", mod)
 
 
-def _seed_project(tmp_path, with_classes=True):
-    monkeypatch_dir = tmp_path
-    pdir = monkeypatch_dir / "projects" / "p1"
-    (pdir / "raw").mkdir(parents=True)
-    (pdir / "labels").mkdir(parents=True)
-    Image.new("RGB", (200, 100)).save(pdir / "raw" / "img1.jpg")
-    # ground truth: one "ball" (class 0) box
-    write_boxes(pdir, "img1", [{"cls": 0, "xyxy_n": [0.10, 0.10, 0.30, 0.30]}])
-    if with_classes:
-        (pdir / "classes.json").write_text(
-            json.dumps({"classes": [{"id": 0, "name": "ball", "sources": []}]})
-        )
-    return pdir
+def _seed_dataset(tmp_path, names=("ball",)):
+    """A minimal YOLO test set: one image + one 'ball' GT box + data.yaml."""
+    ds = tmp_path / "dataset"
+    (ds / "images").mkdir(parents=True)
+    (ds / "labels").mkdir(parents=True)
+    Image.new("RGB", (200, 100)).save(ds / "images" / "img1.jpg")
+    # ground truth: one class-0 box at xyxy_n [0.10,0.10,0.30,0.30]
+    write_label_file(ds / "labels" / "img1.txt", [(0, (0.10, 0.10, 0.30, 0.30))])
+    (ds / "data.yaml").write_text(
+        yaml.safe_dump({"names": {i: n for i, n in enumerate(names)}, "nc": len(names)})
+    )
+    return ds
 
 
-def test_compare_scores_each_model_and_counts_unknown_class_as_fp(
-    tmp_path, fake_ultralytics, monkeypatch
-):
-    monkeypatch.setattr(settings, "data_dir", tmp_path)
-    _seed_project(tmp_path)
-    (settings.jobs_dir / "job1").mkdir(parents=True, exist_ok=True)
-
+def _run(job, ds, specs, model_names):
+    (settings.jobs_dir / job).mkdir(parents=True, exist_ok=True)
     run_compare(
-        "job1",
+        job,
         {
             "project_id": "p1",
-            "specs": [("m1", "m1.pt"), ("m2", "m2.pt")],
-            "model_names": {"m1": "Model A", "m2": "Model B"},
-            "image_names": ["img1.jpg"],
+            "specs": specs,
+            "model_names": model_names,
+            "dataset_dir": str(ds),
             "conf": 0.4,
             "iou": 0.5,
             "imgsz": 640,
@@ -103,20 +99,37 @@ def test_compare_scores_each_model_and_counts_unknown_class_as_fp(
         },
         str(settings.jobs_dir),
     )
+    return json.loads((settings.jobs_dir / job / "result.json").read_text())
 
-    result = json.loads((settings.jobs_dir / "job1" / "result.json").read_text())
+
+def test_compare_scores_each_model_and_counts_unknown_class_as_fp(
+    tmp_path, fake_ultralytics, monkeypatch
+):
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    # the image route confines served files to test_dir/compare/{job}; the worker
+    # writes absolute image paths into the manifest regardless, so just seed a ds.
+    ds = _seed_dataset(tmp_path)
+
+    result = _run("job1", ds, [("m1", "m1.pt"), ("m2", "m2.pt")], {"m1": "Model A", "m2": "Model B"})
     by_id = {m["model_id"]: m for m in result["per_model"]}
 
-    # m1 predicted "ball" over the GT → true positive, perfect scores
+    # m1 predicted "ball" over the GT → true positive, perfect scores + mAP 1.0
     assert by_id["m1"]["overall"]["tp"] == 1
     assert by_id["m1"]["overall"]["fp"] == 0
     assert by_id["m1"]["overall"]["fn"] == 0
     assert by_id["m1"]["name"] == "Model A"
+    assert by_id["m1"]["map50"] == 1.0
+    assert by_id["m1"]["map"] == 1.0
 
-    # m2 predicted "cat" (not a project class) → counted as FP, GT missed → FN
+    # m2 predicted "cat" (not a dataset class) → FP, GT missed → FN, mAP 0
     assert by_id["m2"]["overall"]["tp"] == 0
     assert by_id["m2"]["overall"]["fp"] == 1
     assert by_id["m2"]["overall"]["fn"] == 1
+    assert by_id["m2"]["map50"] == 0.0
+
+    # per-class rows carry AP; the ball class is present for m1
+    ball = next(c for c in by_id["m1"]["per_class"] if c["name"] == "ball")
+    assert ball["ap50"] == 1.0 and ball["ap"] == 1.0
 
     # per-image structure carries GT + each model's predicted boxes
     img = result["images"][0]
@@ -125,29 +138,18 @@ def test_compare_scores_each_model_and_counts_unknown_class_as_fp(
     assert len(img["per_model"]) == 2
     assert result["warning"] is None
 
+    # manifest maps the image index → an existing file (for the overlay route)
+    manifest = json.loads((settings.jobs_dir / "job1" / "images_manifest.json").read_text())
+    assert "0" in manifest
 
-def test_compare_warns_when_no_classes_defined(tmp_path, fake_ultralytics, monkeypatch):
+
+def test_compare_warns_when_dataset_has_no_class_names(tmp_path, fake_ultralytics, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", tmp_path)
-    _seed_project(tmp_path, with_classes=False)
-    (settings.jobs_dir / "job2").mkdir(parents=True, exist_ok=True)
+    ds = _seed_dataset(tmp_path)
+    (ds / "data.yaml").write_text(yaml.safe_dump({"names": {}, "nc": 0}))  # no names
 
-    run_compare(
-        "job2",
-        {
-            "project_id": "p1",
-            "specs": [("m1", "m1.pt")],
-            "model_names": {"m1": "Model A"},
-            "image_names": ["img1.jpg"],
-            "conf": 0.4,
-            "iou": 0.5,
-            "imgsz": 640,
-            "device": "cpu",
-        },
-        str(settings.jobs_dir),
-    )
-
-    result = json.loads((settings.jobs_dir / "job2" / "result.json").read_text())
+    result = _run("job2", ds, [("m1", "m1.pt")], {"m1": "Model A"})
     assert result["warning"]  # non-empty warning string
-    # with no project classes, the "ball" prediction can't map → FP, GT → FN
+    # with no dataset classes, the "ball" prediction can't map → FP, GT → FN
     overall = result["per_model"][0]["overall"]
     assert overall["fp"] == 1 and overall["fn"] == 1

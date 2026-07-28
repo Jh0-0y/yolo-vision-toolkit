@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import {
   Alert,
   Badge,
@@ -10,31 +9,27 @@ import {
   MultiSelect,
   NumberInput,
   Progress,
-  ScrollArea,
   SimpleGrid,
   Slider,
   Stack,
+  Table,
   Text,
 } from '@mantine/core'
+import { Dropzone } from '@mantine/dropzone'
 import { BarChart } from '@mantine/charts'
-import { IconAlertTriangle } from '@tabler/icons-react'
+import { IconAlertTriangle, IconFileZip, IconX } from '@tabler/icons-react'
 import {
   getCompareResult,
-  listImages,
   startCompare,
   subscribeCompareEvents,
   type CompareBox,
   type CompareImage,
   type CompareProgress,
   type CompareResult,
-  type ImageItem,
   type ModelOut,
 } from '../../api/client'
-import ImageGrid from '../dataset/ImageGrid'
-import StatTile from '../StatTile'
 
-const MIN = 9
-const MAX = 27
+const ZIP_MIME = ['application/zip', 'application/x-zip-compressed', 'application/octet-stream']
 const GT_COLOR = '#51cf66' // ground truth = green (dashed)
 const MODEL_COLORS = ['#4dabf7', '#f783ac', '#ffa94d', '#845ef7', '#38d9a9', '#ff8787']
 
@@ -76,14 +71,16 @@ function BoxOverlay({ src, layers }: { src: string; layers: Layer[] }) {
   )
 }
 
-/** Score 1..N models against ground truth on a chosen set of labeled images
- *  (9–27), then compare per-model metrics and overlay each model's boxes. */
+const fmt = (v: number | undefined) => (v == null ? '—' : v.toFixed(3))
+
+/** Score 1..N models against an uploaded YOLO test set (images + labels +
+ *  data.yaml): per-model mAP + P/R/F1, per-class metrics, and box overlays. */
 export default function CompareMode({ projectId, models }: Props) {
   const [modelIds, setModelIds] = useState<string[]>([])
   const [conf, setConf] = useState(0.4)
   const [iou, setIou] = useState(0.5)
   const [imgsz, setImgsz] = useState<number | string>(640)
-  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [file, setFile] = useState<File | null>(null)
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState<CompareProgress | null>(null)
   const [result, setResult] = useState<CompareResult | null>(null)
@@ -97,20 +94,11 @@ export default function CompareMode({ projectId, models }: Props) {
   }, [models])
   useEffect(() => () => unsub.current?.(), [])
 
-  const imagesQuery = useQuery({
-    queryKey: ['compare-images', projectId],
-    queryFn: () => listImages(projectId, { labeled: true, size: 60, sort: 'created', order: 'desc' }),
-  })
-  const items: ImageItem[] = imagesQuery.data?.items ?? []
-
   const colorOf = (modelId: string) =>
     MODEL_COLORS[modelIds.indexOf(modelId) % MODEL_COLORS.length]
 
-  const onSelect = (next: Set<string>) => {
-    if (next.size <= MAX) setSelected(next)
-  }
-
   async function run() {
+    if (!file || !modelIds.length) return
     unsub.current?.()
     setError(null)
     setResult(null)
@@ -120,7 +108,7 @@ export default function CompareMode({ projectId, models }: Props) {
       const { job_id } = await startCompare({
         projectId,
         modelIds,
-        imageNames: [...selected],
+        file,
         params: { conf, iou_wbf: iou, imgsz: Number(imgsz), device: null },
       })
       unsub.current = subscribeCompareEvents(job_id, async (ev) => {
@@ -135,6 +123,8 @@ export default function CompareMode({ projectId, models }: Props) {
         } else if (ev.phase === 'error') {
           setError(ev.msg || 'Comparison failed')
           setRunning(false)
+        } else if (ev.phase === 'cancelled') {
+          setRunning(false)
         }
       })
     } catch (e) {
@@ -146,12 +136,13 @@ export default function CompareMode({ projectId, models }: Props) {
   const pct =
     progress?.total && progress.done != null ? Math.round((progress.done / progress.total) * 100) : 0
 
+  // "Best" = highest mAP@0.5:0.95 (the headline COCO metric)
   const bestId = useMemo(() => {
     if (!result?.per_model.length) return null
-    return result.per_model.reduce((a, b) => (b.overall.f1 > a.overall.f1 ? b : a)).model_id
+    return result.per_model.reduce((a, b) => (b.map > a.map ? b : a)).model_id
   }, [result])
 
-  const barData = useMemo(() => {
+  const prfData = useMemo(() => {
     if (!result) return []
     return (['precision', 'recall', 'f1'] as const).map((k) => ({
       metric: k[0].toUpperCase() + k.slice(1),
@@ -159,7 +150,15 @@ export default function CompareMode({ projectId, models }: Props) {
     }))
   }, [result])
 
-  const canRun = modelIds.length > 0 && selected.size >= MIN && !running
+  const mapData = useMemo(() => {
+    if (!result) return []
+    return (['map50', 'map'] as const).map((k) => ({
+      metric: k === 'map50' ? 'mAP@0.5' : 'mAP@0.5:0.95',
+      ...Object.fromEntries(result.per_model.map((m) => [m.name, m[k]])),
+    }))
+  }, [result])
+
+  const canRun = modelIds.length > 0 && !!file && !running
 
   return (
     <Stack gap="md">
@@ -202,16 +201,16 @@ export default function CompareMode({ projectId, models }: Props) {
         </Stack>
       </Card>
 
-      {/* image picker */}
+      {/* test-set upload */}
       <Card withBorder radius="md" padding="md">
         <Group justify="space-between" mb="xs">
           <div>
             <Text size="sm" fw={600}>
-              Pick labeled images ({MIN}–{MAX})
+              Test set (YOLO dataset zip)
             </Text>
-            <Text size="xs" c={selected.size >= MIN ? 'dimmed' : 'orange'}>
-              {selected.size} selected{selected.size < MIN ? ` — pick at least ${MIN}` : ''}
-              {selected.size >= MAX ? ' — maximum reached' : ''}
+            <Text size="xs" c="dimmed">
+              A .zip with <code>images/</code>, <code>labels/</code> and <code>data.yaml</code> — same as an
+              Exports download. Ground-truth labels are required to score the models.
             </Text>
           </div>
           <Button onClick={run} disabled={!canRun} loading={running}>
@@ -219,14 +218,38 @@ export default function CompareMode({ projectId, models }: Props) {
           </Button>
         </Group>
 
-        {items.length === 0 ? (
-          <Text c="dimmed" py="lg" ta="center">
-            No labeled images in this project yet. Label some images first.
-          </Text>
+        {!file ? (
+          <Dropzone
+            onDrop={(files) => files[0] && setFile(files[0])}
+            accept={ZIP_MIME}
+            multiple={false}
+            disabled={running || !modelIds.length}
+          >
+            <Stack align="center" gap="xs" py="xl">
+              <Dropzone.Idle>
+                <IconFileZip size={40} stroke={1.2} />
+              </Dropzone.Idle>
+              <Dropzone.Reject>
+                <IconX size={40} />
+              </Dropzone.Reject>
+              <Text size="sm">Drop a YOLO dataset .zip or click to upload</Text>
+              <Text size="xs" c="dimmed">
+                Each model is scored separately so you can compare them.
+              </Text>
+            </Stack>
+          </Dropzone>
         ) : (
-          <ScrollArea.Autosize mah={360}>
-            <ImageGrid items={items} selected={selected} onSelectedChange={onSelect} onOpen={() => {}} />
-          </ScrollArea.Autosize>
+          <Group justify="space-between">
+            <Group gap={8}>
+              <IconFileZip size={20} />
+              <Text size="sm" truncate="end" maw={360}>
+                {file.name}
+              </Text>
+            </Group>
+            <Button size="xs" variant="subtle" onClick={() => setFile(null)} disabled={running}>
+              Choose another
+            </Button>
+          </Group>
         )}
       </Card>
 
@@ -257,7 +280,7 @@ export default function CompareMode({ projectId, models }: Props) {
           <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="sm">
             {result.per_model.map((m) => (
               <Card key={m.model_id} withBorder radius="md" padding="sm">
-                <Group justify="space-between" mb={4}>
+                <Group justify="space-between" mb={6}>
                   <Group gap={6}>
                     <span
                       style={{ width: 10, height: 10, borderRadius: 2, background: colorOf(m.model_id) }}
@@ -268,14 +291,18 @@ export default function CompareMode({ projectId, models }: Props) {
                   </Group>
                   {m.model_id === bestId && (
                     <Badge size="xs" color="teal" variant="light">
-                      Best F1
+                      Best mAP
                     </Badge>
                   )}
                 </Group>
+                <Group grow mb={6}>
+                  <Metric label="mAP@.5" value={m.map50.toFixed(3)} strong />
+                  <Metric label="mAP@.5:.95" value={m.map.toFixed(3)} strong />
+                </Group>
                 <Group grow>
-                  <StatTile label="P" value={m.overall.precision.toFixed(3)} color="indigo.6" />
-                  <StatTile label="R" value={m.overall.recall.toFixed(3)} color="orange.6" />
-                  <StatTile label="F1" value={m.overall.f1.toFixed(3)} color="teal.6" />
+                  <Metric label="P" value={m.overall.precision.toFixed(3)} />
+                  <Metric label="R" value={m.overall.recall.toFixed(3)} />
+                  <Metric label="F1" value={m.overall.f1.toFixed(3)} />
                 </Group>
                 <Text size="xs" c="dimmed" mt={6}>
                   {m.detections} detections · TP {m.overall.tp} · FP {m.overall.fp} · FN {m.overall.fn}
@@ -284,19 +311,92 @@ export default function CompareMode({ projectId, models }: Props) {
             ))}
           </SimpleGrid>
 
-          <Card withBorder radius="md" padding="md">
-            <Text size="sm" fw={600} mb="xs">
-              Precision / Recall / F1 by model
+          <SimpleGrid cols={{ base: 1, md: 2 }} spacing="sm">
+            <Card withBorder radius="md" padding="md">
+              <Text size="sm" fw={600} mb="xs">
+                mAP by model
+              </Text>
+              <BarChart
+                h={240}
+                data={mapData}
+                dataKey="metric"
+                series={result.per_model.map((m) => ({ name: m.name, color: colorOf(m.model_id) }))}
+                yAxisProps={{ domain: [0, 1] }}
+                withLegend
+              />
+            </Card>
+            <Card withBorder radius="md" padding="md">
+              <Text size="sm" fw={600} mb="xs">
+                Precision / Recall / F1 by model
+              </Text>
+              <BarChart
+                h={240}
+                data={prfData}
+                dataKey="metric"
+                series={result.per_model.map((m) => ({ name: m.name, color: colorOf(m.model_id) }))}
+                yAxisProps={{ domain: [0, 1] }}
+                withLegend
+              />
+            </Card>
+          </SimpleGrid>
+
+          {/* per-class metrics, one table per model */}
+          <Stack gap="xs">
+            <Text size="sm" fw={600}>
+              Per-class metrics
             </Text>
-            <BarChart
-              h={240}
-              data={barData}
-              dataKey="metric"
-              series={result.per_model.map((m) => ({ name: m.name, color: colorOf(m.model_id) }))}
-              yAxisProps={{ domain: [0, 1] }}
-              withLegend
-            />
-          </Card>
+            <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="sm">
+              {result.per_model.map((m) => (
+                <Card key={m.model_id} withBorder radius="md" padding="sm">
+                  <Group gap={6} mb={6}>
+                    <span
+                      style={{ width: 10, height: 10, borderRadius: 2, background: colorOf(m.model_id) }}
+                    />
+                    <Text size="sm" fw={600}>
+                      {m.name}
+                    </Text>
+                  </Group>
+                  <Table.ScrollContainer minWidth={420}>
+                    <Table striped highlightOnHover fz="xs" verticalSpacing={4}>
+                      <Table.Thead>
+                        <Table.Tr>
+                          <Table.Th>Class</Table.Th>
+                          <Table.Th ta="right">GT</Table.Th>
+                          <Table.Th ta="right">P</Table.Th>
+                          <Table.Th ta="right">R</Table.Th>
+                          <Table.Th ta="right">F1</Table.Th>
+                          <Table.Th ta="right">AP@.5</Table.Th>
+                          <Table.Th ta="right">AP@.5:.95</Table.Th>
+                        </Table.Tr>
+                      </Table.Thead>
+                      <Table.Tbody>
+                        {m.per_class.map((c) => (
+                          <Table.Tr key={c.cls}>
+                            <Table.Td>{c.name}</Table.Td>
+                            <Table.Td ta="right">{c.gt}</Table.Td>
+                            <Table.Td ta="right">{fmt(c.precision)}</Table.Td>
+                            <Table.Td ta="right">{fmt(c.recall)}</Table.Td>
+                            <Table.Td ta="right">{fmt(c.f1)}</Table.Td>
+                            <Table.Td ta="right">{fmt(c.ap50)}</Table.Td>
+                            <Table.Td ta="right">{fmt(c.ap)}</Table.Td>
+                          </Table.Tr>
+                        ))}
+                        {m.per_class.length === 0 && (
+                          <Table.Tr>
+                            <Table.Td colSpan={7}>
+                              <Text size="xs" c="dimmed" ta="center">
+                                No overlapping classes between this model and the test set.
+                              </Text>
+                            </Table.Td>
+                          </Table.Tr>
+                        )}
+                      </Table.Tbody>
+                    </Table>
+                  </Table.ScrollContainer>
+                </Card>
+              ))}
+            </SimpleGrid>
+          </Stack>
 
           {/* visual comparison */}
           <Stack gap="xs">
@@ -358,6 +458,19 @@ export default function CompareMode({ projectId, models }: Props) {
           />
         )}
       </Modal>
+    </Stack>
+  )
+}
+
+function Metric({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <Stack gap={0} align="center">
+      <Text size="xs" c="dimmed">
+        {label}
+      </Text>
+      <Text size={strong ? 'md' : 'sm'} fw={strong ? 700 : 600}>
+        {value}
+      </Text>
     </Stack>
   )
 }

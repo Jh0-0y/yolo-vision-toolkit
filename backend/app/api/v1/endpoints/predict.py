@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -27,7 +28,7 @@ from app.models import ModelEntry
 from app.schemas.predict import PredictResponse, ResidentModel, TestJobStart
 from app.services.infer_manager import infer_manager
 from app.services.label_manager import read_progress
-from app.services.test_jobs import sweep_old_annotations, test_job_manager
+from app.services.test_jobs import sweep_old_annotations, sweep_old_compare, test_job_manager
 
 router = APIRouter(prefix="/predict", tags=["predict"])
 
@@ -211,21 +212,42 @@ def annotate_crop(job_id: str):
     return FileResponse(crop, media_type="application/json", filename="crop.json")
 
 
-# ---------- model comparison (score models vs labeled ground truth) ----------
+# ---------- model comparison (score models vs an uploaded YOLO test set) ----------
+
+
+def _extract_compare_dataset(zip_path: Path, dest: Path) -> Path:
+    """Unzip a YOLO test set and return the directory holding its data.yaml
+    (root or one level down). Raises 422 on a non-dataset zip."""
+    dest.mkdir(parents=True, exist_ok=True)
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(dest)
+    except zipfile.BadZipFile:
+        raise HTTPException(422, "Corrupted zip file")
+
+    for candidate in ("data.yaml", "data.yml"):
+        if (dest / candidate).exists():
+            return dest
+    found = sorted(list(dest.glob("*/data.yaml")) + list(dest.glob("*/data.yml")))
+    if found:
+        return found[0].parent
+    raise HTTPException(422, "data.yaml not found in the zip (a YOLO-format dataset is required)")
 
 
 @router.post("/compare", response_model=TestJobStart, status_code=201)
 async def start_compare(
     project_id: str = Form(...),
     model_ids: str = Form(...),
-    image_names: str | None = Form(None),  # comma-separated filenames; empty = all labeled
     conf: float = Form(0.4),
     iou: float = Form(0.5),  # IoU match threshold (pred↔GT)
     imgsz: int = Form(640),
     device: str | None = Form(None),
-    reviewed_only: bool = Form(False),
+    file: UploadFile = File(...),  # YOLO test set zip: images/ + labels/ + data.yaml
     session: Session = Depends(get_session),
 ):
+    ext = Path(file.filename or "d").suffix.lower()
+    if ext != ".zip":
+        raise HTTPException(422, "Upload a .zip YOLO dataset (images/ + labels/ + data.yaml)")
     ids = [m.strip() for m in model_ids.split(",") if m.strip()]
     if not ids:
         raise HTTPException(422, "Select at least one model")
@@ -235,22 +257,27 @@ async def start_compare(
         specs.append((mid, _model_pt(session, mid, project_id)))
         entry = session.get(ModelEntry, mid)
         model_names[mid] = entry.name if entry else mid
-    if not (settings.projects_dir / project_id / "labels").exists():
-        raise HTTPException(422, "No labeled data to compare in this project")
 
-    names_list = [n.strip() for n in image_names.split(",") if n.strip()] if image_names else None
+    await run_in_threadpool(sweep_old_compare)  # keep test_dir/compare tidy
     job_id = uuid.uuid4().hex
+    work = settings.test_dir / "compare" / job_id
+    work.mkdir(parents=True, exist_ok=True)
+    zip_path = work / "upload.zip"
+    with open(zip_path, "wb") as f:
+        while chunk := await file.read(1 << 20):
+            f.write(chunk)
+    dataset_dir = await run_in_threadpool(_extract_compare_dataset, zip_path, work / "dataset")
+
     cfg = {
         "project_id": project_id,
         "specs": specs,
         "model_names": model_names,
-        "image_names": names_list,
+        "dataset_dir": str(dataset_dir),
         "conf": conf,
         "iou": iou,
         "iou_wbf": 0.55,
         "imgsz": imgsz,
         "device": device,
-        "reviewed_only": reviewed_only,
     }
     await run_in_threadpool(test_job_manager.submit_compare, job_id, cfg)
     return TestJobStart(job_id=job_id)
@@ -269,3 +296,23 @@ def compare_result(job_id: str):
     if not path.exists():
         raise HTTPException(404, "Comparison result not ready")
     return json.loads(path.read_text())
+
+
+@router.get("/compare/{job_id}/images/{idx}")
+def compare_image(job_id: str, idx: str):
+    """Serve an uploaded test-set image by index for the overlay view. Images are
+    referenced via the worker's images_manifest.json (index → absolute path);
+    the resolved path is confined to this job's upload dir to block traversal."""
+    if not job_id.isalnum() or not idx.isdigit():
+        raise HTTPException(422, "Invalid id")
+    manifest_path = settings.jobs_dir / job_id / "images_manifest.json"
+    if not manifest_path.exists():
+        raise HTTPException(404, "Comparison images not available")
+    target = json.loads(manifest_path.read_text()).get(idx)
+    if not target:
+        raise HTTPException(404, "Image not found")
+    base = (settings.test_dir / "compare" / job_id).resolve()
+    path = Path(target).resolve()
+    if base not in path.parents or not path.exists():
+        raise HTTPException(404, "Image not found")
+    return FileResponse(path)

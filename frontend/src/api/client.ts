@@ -665,6 +665,8 @@ export interface ClassMetric {
   precision: number
   recall: number
   f1: number
+  ap50?: number
+  ap?: number
 }
 
 export interface CompareOverall {
@@ -689,6 +691,8 @@ export interface CompareModelResult {
   overall: CompareOverall
   per_class: ClassMetric[]
   detections: number
+  map50: number
+  map: number
 }
 
 export interface CompareImage {
@@ -718,13 +722,13 @@ export interface CompareProgress {
 export function startCompare(opts: {
   projectId: string
   modelIds: string[]
-  imageNames: string[]
+  file: File // YOLO test-set zip: images/ + labels/ + data.yaml
   params: PredictParams
 }): Promise<TestJobStart> {
   const form = new FormData()
   form.append('project_id', opts.projectId)
   form.append('model_ids', opts.modelIds.join(','))
-  form.append('image_names', opts.imageNames.join(','))
+  form.append('file', opts.file)
   form.append('conf', String(opts.params.conf))
   form.append('iou', String(opts.params.iou_wbf)) // reused as pred↔GT match IoU
   form.append('imgsz', String(opts.params.imgsz))
