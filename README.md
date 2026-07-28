@@ -379,6 +379,7 @@ DATA_DIR/
 
 ## 9. 참고 문서
 
+- [AGENTS.md](AGENTS.md) — 에이전트 진입점·기능→문서 라우팅.
 - [backend/CLAUDE.md](backend/CLAUDE.md) — 백엔드 아키텍처·계층 경계·API 컨벤션·주의할 커플링.
-- [docs/design/](docs/design/) — 설계 노트(영상 인제스트, 데이터셋 업로드 등).
+- [backend/agents/](backend/agents/) — 기능별 요구사항·처리 흐름·엣지케이스 문서.
 - API 문서: 백엔드 실행 후 `http://<host>/docs`(Swagger UI) 또는 `/openapi.json` (FastAPI 자동 생성). 모든 리소스 경로는 `/api/v1/...` 프리픽스를 가집니다.
