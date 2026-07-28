@@ -43,12 +43,13 @@ export default function TrainPage() {
   const [epochs, setEpochs] = useState<number | string>(100)
   const [imgsz, setImgsz] = useState<number | string>(640)
   const [batch, setBatch] = useState<number | string>(16)
-  const [device, setDevice] = useState<string | null>('auto')
   const [advanced, setAdvanced] = useState(false)
   const [patience, setPatience] = useState<number | string>(100)
   // ultralytics default lr0 is 0.01 — prefill it so the default is visible
   const [lr0, setLr0] = useState<number | string>(0.01)
-  const [optimizer, setOptimizer] = useState<string | null>(null)
+  // 'auto' lets ultralytics pick the optimizer AND override lr0 (so lr0 is
+  // disabled then); picking a concrete optimizer prefills its sensible lr0.
+  const [optimizer, setOptimizer] = useState<string>('auto')
   // augmentation — prefilled with ultralytics defaults so they're visible
   const [fliplr, setFliplr] = useState<number | string>(0.5)
   const [flipud, setFlipud] = useState<number | string>(0)
@@ -119,14 +120,17 @@ export default function TrainPage() {
         project_id: projectId,
         dataset: datasetToken,
         base_model_id: baseModel,
-        device: device === 'auto' ? null : device,
+        device: null, // backend resolves the configured device (auto)
         params: {
           epochs: Number(epochs),
           imgsz: Number(imgsz),
           batch: Number(batch),
           patience: Number(patience),
-          ...(lr0 !== '' ? { lr0: Number(lr0) } : {}),
-          ...(optimizer ? { optimizer } : {}),
+          // 'auto' overrides lr0 in ultralytics, so send neither; a concrete
+          // optimizer sends both so the recorded params are truthful.
+          ...(optimizer !== 'auto'
+            ? { optimizer, ...(lr0 !== '' ? { lr0: Number(lr0) } : {}) }
+            : {}),
           ...(fliplr !== '' ? { fliplr: Number(fliplr) } : {}),
           ...(flipud !== '' ? { flipud: Number(flipud) } : {}),
           ...(degrees !== '' ? { degrees: Number(degrees) } : {}),
@@ -267,12 +271,6 @@ export default function TrainPage() {
               <NumberInput label="Epochs" value={epochs} onChange={setEpochs} min={1} />
               <NumberInput label="Image size" value={imgsz} onChange={setImgsz} min={64} step={32} />
               <NumberInput label="Batch" value={batch} onChange={setBatch} min={1} />
-              <Select
-                label="Device"
-                data={['auto', 'cpu', 'mps', '0']}
-                value={device}
-                onChange={setDevice}
-              />
             </Group>
             <Anchor size="sm" onClick={() => setAdvanced(!advanced)} mt="xs" display="inline-block">
               {advanced ? 'Hide advanced settings' : 'Show advanced settings'}
@@ -288,14 +286,19 @@ export default function TrainPage() {
                     min={0}
                     step={0.001}
                     decimalScale={4}
+                    disabled={optimizer === 'auto'}
                   />
                   <Select
                     label="Optimizer"
-                    placeholder="auto"
-                    data={['SGD', 'Adam', 'AdamW', 'RMSProp']}
+                    data={['auto', 'SGD', 'Adam', 'AdamW', 'RMSProp']}
                     value={optimizer}
-                    onChange={setOptimizer}
-                    clearable
+                    onChange={(v) => {
+                      const opt = v ?? 'auto'
+                      setOptimizer(opt)
+                      // prefill each optimizer's sensible lr0 (SGD ~0.01, adaptive ~0.001)
+                      if (opt !== 'auto') setLr0(opt === 'SGD' ? 0.01 : 0.001)
+                    }}
+                    allowDeselect={false}
                   />
                 </Group>
 

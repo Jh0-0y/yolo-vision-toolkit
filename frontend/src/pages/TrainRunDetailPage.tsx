@@ -406,7 +406,8 @@ export default function TrainRunDetailPage() {
                     )}
                     <Text size="xs" c="dimmed">
                       {r.base_model_name ?? r.base_model_id} · {r.params.imgsz}px · batch{' '}
-                      {r.params.batch}
+                      {r.params.batch} · {r.params.optimizer ?? 'auto'}
+                      {r.params.optimizer && r.params.lr0 != null ? ` · lr0 ${r.params.lr0}` : ''}
                     </Text>
                     <Text size="xs" c="dimmed">
                       elapsed {formatDuration(durationSec)}
