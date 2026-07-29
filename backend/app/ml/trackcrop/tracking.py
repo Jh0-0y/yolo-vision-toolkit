@@ -62,22 +62,34 @@ class BallTracker:
     def predicted_x(self) -> float | None:
         return self._x
 
+    @property
+    def velocity(self) -> float:
+        """현재 추정 공 속도 (px/ms) — DET-05의 '공과 함께 이동하는 선수' 판정용."""
+        return self._velocity
+
 
 def select_ball(
     candidates: list[Detection],
     predicted_x: float | None,
     player_centers: list[float],
+    prev_ball_id: int | None = None,
 ) -> Detection | None:
-    """공 후보 판별 — 연속성·Confidence·선수 근접도 점수 합산."""
+    """공 후보 판별 — Track 연속성·Confidence·선수 근접도 점수 합산 (DET-04).
+
+    Track 연속성은 직전 공과 같은 track_id면 최우선, 아니면 예측 위치와의 거리로 본다.
+    """
     if not candidates:
         return None
     if len(candidates) == 1:
         return candidates[0]
 
     def score(det: Detection) -> float:
-        continuity = 1.0
-        if predicted_x is not None:
+        if prev_ball_id is not None and det.track_id == prev_ball_id:
+            continuity = 1.0  # 같은 track_id — 최우선
+        elif predicted_x is not None:
             continuity = 1.0 - min(abs(det.center_x - predicted_x) / SOURCE_WIDTH, 1.0)
+        else:
+            continuity = 1.0
         proximity = 0.0
         if player_centers:
             nearest = min(abs(det.center_x - p) for p in player_centers)

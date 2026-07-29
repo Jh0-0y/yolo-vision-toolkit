@@ -1,10 +1,12 @@
-"""YOLO 객체 탐지 + 자체 track_id 부여.
+"""YOLO 객체 탐지 + ByteTrack 추적.
 
-탐지는 predict로 수행하고 track_id는 프레임 간 최근접 매칭으로 자체 부여한다.
-ByteTrack을 쓰지 않는 이유: 100ms 샘플링(10fps)에서는 빠른 공이 프레임 사이에
-자기 크기보다 멀리 이동해 IoU 연계가 실패하고, 공 검출이 결과에서 통째로
-탈락한다 (실측: track 44% vs predict 57%). 시간적 연속성은 BallTracker
-(tracking.py, 등속 예측)가 담당한다.
+탐지·추적은 ultralytics 내장 ByteTrack(`model.track`)으로 수행하고 track_id는
+`boxes.id`에서 받는다 (스펙 DET-01·DET-05). 공의 시간적 연속성·가림 예측은
+BallTracker(tracking.py, 등속 예측)가 보조한다.
+
+⚠️ 100ms 샘플링(10fps)에서는 빠른 공이 프레임 사이 IoU 연계에 실패해 검출이
+떨어질 수 있다(실측 track 44% vs predict 57%). 그럼에도 원본 스펙이 ByteTrack을
+규정하므로 이를 따른다. 트레이드오프 논의는 프로젝트 문서(trackcrop-considerations) 참고.
 
 클래스 매핑은 model.names에서 자동 인식한다 — COCO(person/sports ball)와
 커스텀 모델(ball/player) 모두 설정 없이 동작한다.
@@ -19,37 +21,6 @@ from .types import Detection
 
 OBJECT_TYPE_BALL = "ball"
 OBJECT_TYPE_PLAYER = "player"
-
-# 프레임 간 동일 객체 판정 최대 이동 거리 (px / 100ms 샘플 간격) — 구현 세부
-_MATCH_MAX_DIST = {OBJECT_TYPE_BALL: 400.0, OBJECT_TYPE_PLAYER: 200.0}
-
-
-class _IdAssigner:
-    """프레임 간 최근접 중심 매칭으로 track_id를 부여한다."""
-
-    def __init__(self) -> None:
-        self._next_id = 1
-        self._previous: list[tuple[int, str, float, float]] = []  # (id, type, cx, cy)
-
-    def assign(self, detections: list[Detection]) -> None:
-        current: list[tuple[int, str, float, float]] = []
-        available = list(self._previous)
-        for det in detections:
-            cx, cy = det.center_x, det.bbox_y + det.bbox_height / 2
-            best_i, best_dist = None, _MATCH_MAX_DIST[det.object_type]
-            for i, (_, prev_type, px, py) in enumerate(available):
-                if prev_type != det.object_type:
-                    continue
-                dist = ((cx - px) ** 2 + (cy - py) ** 2) ** 0.5
-                if dist < best_dist:
-                    best_i, best_dist = i, dist
-            if best_i is not None:
-                det.track_id = available.pop(best_i)[0]
-            else:
-                det.track_id = self._next_id
-                self._next_id += 1
-            current.append((det.track_id, det.object_type, cx, cy))
-        self._previous = current
 
 
 class Detector:
@@ -89,16 +60,31 @@ class Detector:
                 mapping[class_id] = OBJECT_TYPE_PLAYER
         return mapping
 
+    def _reset_tracker(self) -> None:
+        """Detector 재사용(여러 영상 처리) 시 이전 영상의 ByteTrack 상태가
+        다음 영상으로 새지 않도록 track_id·Kalman 상태를 초기화한다."""
+        predictor = getattr(self._model, "predictor", None)
+        trackers = getattr(predictor, "trackers", None) if predictor is not None else None
+        for tracker in trackers or []:
+            reset = getattr(tracker, "reset", None)
+            if callable(reset):
+                reset()
+
     def track(
         self, frames: Iterator[tuple[int, np.ndarray]]
     ) -> Iterator[tuple[int, list[Detection]]]:
-        """(offset_ms, Detection 목록)을 Sample 단위로 생성한다."""
-        assigner = _IdAssigner()
+        """(offset_ms, Detection 목록)을 Sample 단위로 생성한다.
+
+        ByteTrack을 persist=True로 프레임 간 상태를 유지하며, track_id는 boxes.id에서 받는다.
+        """
+        self._reset_tracker()  # 새 영상마다 tracker 상태 초기화
         target_classes = list(self._type_by_class)
         for offset_ms, frame in frames:
             try:
-                result = self._model.predict(
+                result = self._model.track(
                     frame,
+                    persist=True,
+                    tracker="bytetrack.yaml",
                     classes=target_classes,
                     imgsz=self._imgsz,
                     conf=self._conf,
@@ -108,13 +94,11 @@ class Detector:
             except Exception as e:
                 raise TrackCropError(
                     ErrorCode.OBJECT_DETECTION_FAILED,
-                    "객체 탐지 추론 중 오류가 발생했습니다.",
+                    "객체 탐지·추적 추론 중 오류가 발생했습니다.",
                     details={"video_offset_ms": offset_ms, "cause": str(e)[:300]},
                 ) from e
 
-            detections = self._to_detections(result, offset_ms)
-            assigner.assign(detections)
-            yield offset_ms, detections
+            yield offset_ms, self._to_detections(result, offset_ms)
 
     def _to_detections(self, result, offset_ms: int) -> list[Detection]:
         boxes = result.boxes
@@ -124,16 +108,18 @@ class Detector:
         xywh = boxes.xywh.tolist()  # (center_x, center_y, w, h)
         classes = boxes.cls.tolist()
         confs = boxes.conf.tolist()
+        # ByteTrack track_id — 아직 track에 붙지 못한 Detection은 None
+        ids = boxes.id.int().tolist() if boxes.id is not None else [None] * len(xywh)
 
         detections = []
-        for (cx, cy, w, h), cls, conf in zip(xywh, classes, confs, strict=True):
+        for (cx, cy, w, h), cls, conf, tid in zip(xywh, classes, confs, ids, strict=True):
             object_type = self._type_by_class.get(int(cls))
             if object_type is None:
                 continue
             detections.append(
                 Detection(
                     object_type=object_type,
-                    track_id=None,  # _IdAssigner가 부여
+                    track_id=int(tid) if tid is not None else None,  # ByteTrack 부여
                     bbox_x=cx - w / 2,
                     bbox_y=cy - h / 2,
                     bbox_width=w,
