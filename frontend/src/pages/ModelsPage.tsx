@@ -10,12 +10,15 @@ import {
   Select,
   Stack,
   Table,
+  Tabs,
   Text,
   TextInput,
   Title,
   Tooltip,
 } from '@mantine/core'
 import {
+  IconBox,
+  IconChartBar,
   IconCloudDownload,
   IconDotsVertical,
   IconDownload,
@@ -27,6 +30,7 @@ import { notifications } from '@mantine/notifications'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { api, modelDownloadUrl, patchModel, type ModelOut, type OfficialModel } from '../api/client'
+import CompareMode from '../components/test/CompareMode'
 
 const SOURCE_LABEL: Record<string, { label: string; color: string }> = {
   official: { label: 'Official', color: 'blue' },
@@ -102,38 +106,50 @@ export default function ModelsPage() {
 
   return (
     <Stack gap="lg">
-      <Group justify="space-between" align="flex-end">
-        <div>
-          <Title order={3}>Models</Title>
-          <Text c="dimmed" size="sm">
-            Model registry used for auto labeling and training.
-          </Text>
-        </div>
-        <Group gap="xs">
-          <Button
-            leftSection={<IconCloudDownload size={16} />}
-            variant="light"
-            onClick={() => setDownloadOpen(true)}
-          >
-            Download official model
-          </Button>
-          <FileButton onChange={(f) => f && upload.mutate(f)} accept=".pt">
-            {(props) => (
-              <Button
-                {...props}
-                variant="light"
-                color="grape"
-                leftSection={<IconUpload size={16} />}
-                loading={upload.isPending}
-              >
-                Upload .pt
-              </Button>
-            )}
-          </FileButton>
-        </Group>
-      </Group>
+      <div>
+        <Title order={3}>Models</Title>
+        <Text c="dimmed" size="sm">
+          Model registry for auto labeling and training, and accuracy comparison against your
+          labeled data.
+        </Text>
+      </div>
 
-      <Table striped highlightOnHover>
+      <Tabs defaultValue="registry">
+        <Tabs.List>
+          <Tabs.Tab value="registry" leftSection={<IconBox size={16} />}>
+            Registry
+          </Tabs.Tab>
+          <Tabs.Tab value="compare" leftSection={<IconChartBar size={16} />}>
+            Compare
+          </Tabs.Tab>
+        </Tabs.List>
+
+        <Tabs.Panel value="registry" pt="md">
+          <Stack gap="lg">
+            <Group justify="flex-end">
+              <Button
+                leftSection={<IconCloudDownload size={16} />}
+                variant="light"
+                onClick={() => setDownloadOpen(true)}
+              >
+                Download official model
+              </Button>
+              <FileButton onChange={(f) => f && upload.mutate(f)} accept=".pt">
+                {(props) => (
+                  <Button
+                    {...props}
+                    variant="light"
+                    color="grape"
+                    leftSection={<IconUpload size={16} />}
+                    loading={upload.isPending}
+                  >
+                    Upload .pt
+                  </Button>
+                )}
+              </FileButton>
+            </Group>
+
+            <Table striped highlightOnHover>
         <Table.Thead>
           <Table.Tr>
             <Table.Th>Name</Table.Th>
@@ -206,11 +222,18 @@ export default function ModelsPage() {
           })}
         </Table.Tbody>
       </Table>
-      {models.data?.length === 0 && (
-        <Text c="dimmed">
-          No models registered. Download an official model or upload a trained .pt.
-        </Text>
-      )}
+            {models.data?.length === 0 && (
+              <Text c="dimmed">
+                No models registered. Download an official model or upload a trained .pt.
+              </Text>
+            )}
+          </Stack>
+        </Tabs.Panel>
+
+        <Tabs.Panel value="compare" pt="md">
+          <CompareMode projectId={projectId} models={models.data ?? []} />
+        </Tabs.Panel>
+      </Tabs>
 
       <Modal
         opened={downloadOpen}

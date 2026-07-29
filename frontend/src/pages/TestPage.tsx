@@ -1,10 +1,9 @@
 import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Alert, Badge, Group, Stack, Tabs, Text, Title } from '@mantine/core'
-import { IconAlertTriangle, IconChartBar, IconVideo } from '@tabler/icons-react'
+import { Alert, Badge, Group, Stack, Text, Title } from '@mantine/core'
+import { IconAlertTriangle } from '@tabler/icons-react'
 import { api, getResources, type ModelOut } from '../api/client'
 import TrackMode from '../components/test/TrackMode'
-import CompareMode from '../components/test/CompareMode'
 
 export default function TestPage() {
   const { projectId = '' } = useParams()
@@ -28,7 +27,7 @@ export default function TestPage() {
         <div>
           <Title order={3}>Test</Title>
           <Text c="dimmed" size="sm">
-            Track objects in a video, or compare model accuracy against your labeled data.
+            Track objects in a video with a trained model.
           </Text>
         </div>
         {resources && (
@@ -44,23 +43,7 @@ export default function TestPage() {
         </Alert>
       )}
 
-      <Tabs defaultValue="track">
-        <Tabs.List>
-          <Tabs.Tab value="track" leftSection={<IconVideo size={16} />}>
-            Track
-          </Tabs.Tab>
-          <Tabs.Tab value="compare" leftSection={<IconChartBar size={16} />}>
-            Compare
-          </Tabs.Tab>
-        </Tabs.List>
-
-        <Tabs.Panel value="track" pt="md">
-          <TrackMode projectId={projectId} models={models} />
-        </Tabs.Panel>
-        <Tabs.Panel value="compare" pt="md">
-          <CompareMode projectId={projectId} models={models} />
-        </Tabs.Panel>
-      </Tabs>
+      <TrackMode projectId={projectId} models={models} />
     </Stack>
   )
 }
