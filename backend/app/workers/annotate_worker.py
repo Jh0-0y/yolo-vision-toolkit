@@ -105,6 +105,8 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
 
         # ---- crop trajectory (separate 100ms predict pass) ----
         crop_traj: crop_render.Trajectory | None = None
+        crop_types: tuple[list, list] | None = None  # 디버그 HUD 타입 라벨용
+        dead_zone_half: float | None = None  # 데드존 밴드 반폭 (없는 버전이면 None)
         if crop_tracking:
             _emit(progress, {"phase": "crop_analyze", "total": total})
             # trackcrop pulls in cv2/ultralytics — keep the import lazy (worker only)
@@ -117,6 +119,13 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                 str(src), model_path=pt, device=device, imgsz=1280, conf=0.10, validate=False
             )
             crop_traj = crop_render.build_trajectory(cropres.samples, w)
+            crop_types = crop_render.build_types(cropres.samples)
+            try:  # 데드존 상수는 버전(브랜치)에 따라 없을 수 있음
+                from app.ml.trackcrop.constants import DEAD_ZONE_WIDTH
+
+                dead_zone_half = DEAD_ZONE_WIDTH / 2
+            except ImportError:
+                dead_zone_half = None
             (out.parent / "crop.json").write_text(cropres.to_json(), encoding="utf-8")
 
         idx = 0
@@ -195,7 +204,11 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                             for j in range(1, len(pts)):
                                 cv2.line(frame, pts[j - 1], pts[j], color, 2, cv2.LINE_AA)
                 if crop_traj is not None:
-                    crop_render.draw_window(frame, idx / fps * 1000.0, crop_traj, crop_w, w, h)
+                    ms = idx / fps * 1000.0
+                    crop_render.draw_window(frame, ms, crop_traj, crop_w, w, h)
+                    crop_render.draw_target_overlay(
+                        frame, ms, crop_traj, crop_types, dead_zone_half, w, h
+                    )
                 writer.write(frame)
                 idx += 1
                 if idx % 5 == 0 or idx == total:
@@ -212,7 +225,11 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                     if not ok:
                         break
                     if crop_traj is not None:
-                        crop_render.draw_window(frame, idx / fps * 1000.0, crop_traj, crop_w, w, h)
+                        ms = idx / fps * 1000.0
+                        crop_render.draw_window(frame, ms, crop_traj, crop_w, w, h)
+                        crop_render.draw_target_overlay(
+                            frame, ms, crop_traj, crop_types, dead_zone_half, w, h
+                        )
                     writer.write(frame)
                     idx += 1
                     if idx % 5 == 0 or idx == total:

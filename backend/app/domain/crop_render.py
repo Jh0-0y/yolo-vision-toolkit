@@ -20,6 +20,16 @@ Trajectory = tuple[list[int], list[float]]
 
 _CROP_COLOR = (0, 255, 255)  # BGR yellow — distinct, always the crop window
 
+# 디버그 HUD 색 (BGR)
+_TARGET_COLOR = (0, 165, 255)  # 주황 — 타깃 중심선
+_DEADZONE_COLOR = (200, 200, 200)  # 회색 — 데드존 경계
+_TYPE_COLORS = {
+    "ball": (60, 60, 255),  # 빨강
+    "ball_player": (60, 200, 60),  # 초록
+    "player_group": (255, 190, 60),  # 파랑
+    "center": (160, 160, 160),  # 회색
+}
+
 
 def crop_width_for(height: int, frame_width: int) -> int:
     """Even 9:16 crop width for a frame (e.g. 1080 -> 608), clamped to the frame.
@@ -88,6 +98,60 @@ def draw_window(
         frame, "CROP", (left + 6, 26),
         cv2.FONT_HERSHEY_SIMPLEX, 0.7, _CROP_COLOR, 2, cv2.LINE_AA,
     )
+
+
+def build_types(samples: list) -> tuple[list[int], list[str]]:
+    """trackcrop samples -> (ms_list, target_type_list) — 타입 라벨용 step 조회 소스."""
+    return [s.video_offset_ms for s in samples], [s.target_type for s in samples]
+
+
+def type_at(ms: float, types: tuple[list[int], list[str]]) -> str | None:
+    """시각 `ms`의 target_type (step 함수 — 직전 sample 값)."""
+    ms_list, type_list = types
+    if not ms_list:
+        return None
+    i = bisect.bisect_right(ms_list, ms) - 1
+    return type_list[max(0, i)]
+
+
+def draw_target_overlay(
+    frame,
+    ms: float,
+    traj: Trajectory,
+    types: tuple[list[int], list[str]],
+    dead_zone_half: float | None,
+    frame_width: int,
+    frame_height: int,
+) -> None:
+    """디버그 HUD — 타깃 중심선 + 데드존 밴드 + 타깃 타입 라벨을 frame에 그린다.
+
+    dead_zone_half가 None이면(데드존 없는 버전) 밴드는 그리지 않는다.
+    """
+    import cv2
+
+    cx = center_at(ms, traj)
+    if cx is None:
+        return
+    x = int(round(cx))
+
+    # 데드존 밴드 — 크롭 중심 ±half 세로선 (공이 이 안이면 크롭 고정)
+    if dead_zone_half:
+        for bx in (int(round(cx - dead_zone_half)), int(round(cx + dead_zone_half))):
+            if 0 <= bx < frame_width:
+                cv2.line(frame, (bx, 0), (bx, frame_height - 1), _DEADZONE_COLOR, 1, cv2.LINE_AA)
+
+    # 타깃 중심선 — 크롭이 조준하는 X
+    if 0 <= x < frame_width:
+        cv2.line(frame, (x, 0), (x, frame_height - 1), _TARGET_COLOR, 2, cv2.LINE_AA)
+
+    # 타깃 타입 라벨 (좌하단 고정) — 가독성 위해 검은 외곽선 + 색 채움
+    t = type_at(ms, types)
+    if t:
+        text = f"TARGET: {t}"
+        org = (10, frame_height - 16)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(frame, text, org, font, 0.7, (0, 0, 0), 4, cv2.LINE_AA)
+        cv2.putText(frame, text, org, font, 0.7, _TYPE_COLORS.get(t, (220, 220, 220)), 2, cv2.LINE_AA)
 
 
 def cut_window(frame, ms: float, traj: Trajectory, crop_w: int, frame_width: int):

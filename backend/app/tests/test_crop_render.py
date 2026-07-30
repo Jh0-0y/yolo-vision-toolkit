@@ -63,3 +63,28 @@ def test_cut_window_clamps_at_edges():
     traj = crop_render.build_trajectory([_Sample(0, 5000.0, "ball")], 1920)
     out = crop_render.cut_window(frame, 0, traj, crop_w, 1920)
     assert out.shape == (1080, crop_w, 3)
+
+
+def test_build_types_and_type_at_step_lookup():
+    samples = [_Sample(0, 100.0, "ball"), _Sample(100, 200.0, "player_group")]
+    types = crop_render.build_types(samples)
+    assert types == ([0, 100], ["ball", "player_group"])
+    assert crop_render.type_at(0, types) == "ball"
+    assert crop_render.type_at(50, types) == "ball"  # step — 직전 값 유지
+    assert crop_render.type_at(100, types) == "player_group"
+    assert crop_render.type_at(9999, types) == "player_group"
+    assert crop_render.type_at(0, ([], [])) is None
+
+
+def test_draw_target_overlay_smoke():
+    # blank 프레임에 그려도 에러 없이 픽셀이 변경되는지 (HUD가 실제로 그려짐)
+    frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    samples = [_Sample(0, 900.0, "ball"), _Sample(100, 900.0, "ball")]
+    traj = crop_render.build_trajectory(samples, 1920)
+    types = crop_render.build_types(samples)
+    crop_render.draw_target_overlay(frame, 50, traj, types, dead_zone_half=104, frame_width=1920, frame_height=1080)
+    assert frame.any()  # 무언가 그려짐 (중심선·밴드·라벨)
+    # dead_zone_half=None(데드존 없는 버전)이어도 에러 없이 동작
+    frame2 = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    crop_render.draw_target_overlay(frame2, 50, traj, types, dead_zone_half=None, frame_width=1920, frame_height=1080)
+    assert frame2.any()
