@@ -17,8 +17,8 @@ from .types import CropResult
 
 # YOLO 기본값 (원본 CropWorker Settings 기준)
 DEFAULT_MODEL_PATH = "yolo26m.pt"
-DEFAULT_DEVICE = "cpu"  # "cpu" | "cuda" | "mps"
-DEFAULT_IMGSZ = 1280
+DEFAULT_DEVICE = "mps"  # "cpu" | "cuda" | "mps"
+DEFAULT_IMGSZ = 1920
 DEFAULT_CONF = 0.10  # 낮은 값 + 추적기 필터로 공 검출률 확보
 
 

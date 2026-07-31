@@ -24,13 +24,16 @@ CROP_X_MIN = 0
 CROP_X_MAX = SOURCE_WIDTH - CROP_WIDTH  # 1312
 
 # 분석 정책
-SAMPLING_INTERVAL_MS = 100
+SAMPLING_INTERVAL_MS = 50
 MAX_MOVE_PX_PER_SECOND = 1200
 BALL_LOST_HOLD_MS = 1000
 PLAYER_LOST_HOLD_MS = 1500
 
 # 화면 중앙 Fallback (장시간 미검출 시 target_center_x)
 CENTER_FALLBACK_X = SOURCE_WIDTH // 2  # 960
+
+# 크롭 데드존 — 공이 크롭 중심 ±(폭/2) 안이면 크롭 고정 (작은 흔들림 무시)
+DEAD_ZONE_WIDTH = 208
 
 # Target 가중 중심 (공 + 주요 선수 군집)
 BALL_WEIGHT = 0.7

@@ -9,7 +9,7 @@
 
 import statistics
 
-from .constants import MAX_MOVE_PX_PER_SECOND, SAMPLING_INTERVAL_MS
+from .constants import DEAD_ZONE_WIDTH, MAX_MOVE_PX_PER_SECOND, SAMPLING_INTERVAL_MS
 from .types import TargetSample
 
 # 구현 세부 상수
@@ -20,6 +20,9 @@ _SMOOTH_WINDOW = 5  # 이동 평균 창 크기 (중심)
 
 # 샘플 간 최대 이동량: 1200px/s × 0.1s = 120px
 _MAX_STEP_PX = MAX_MOVE_PX_PER_SECOND * SAMPLING_INTERVAL_MS / 1000
+
+# 데드존 반폭 — 공이 크롭 중심 ±이 값 안이면 크롭 고정
+_DEAD_ZONE_HALF = DEAD_ZONE_WIDTH / 2  # 104
 
 
 def remove_outliers(samples: list[TargetSample]) -> list[TargetSample]:
@@ -123,6 +126,38 @@ def smooth(samples: list[TargetSample]) -> list[TargetSample]:
     return result
 
 
+def apply_dead_zone(samples: list[TargetSample]) -> list[TargetSample]:
+    """데드존 — 공(target)이 크롭 중심 ±_DEAD_ZONE_HALF 안이면 크롭을 고정한다.
+
+    벗어나면 공을 데드존 경계에 걸치도록만 크롭 중심을 이동한다(그만큼만 따라감).
+    작은 흔들림·드리블에 크롭이 반응하지 않아 화면이 안정적으로 유지된다.
+
+    뒤이은 limit_speed가 경계 이동을 최대 속도 이내로 캡하므로 속도 정책을 지킨다.
+    """
+    if not samples:
+        return []
+
+    result: list[TargetSample] = [samples[0]]
+    crop_center = samples[0].target_center_x
+    for sample in samples[1:]:
+        delta = sample.target_center_x - crop_center
+        if abs(delta) > _DEAD_ZONE_HALF:
+            # 데드존을 벗어난 만큼만 이동 — 공을 경계에 걸침
+            crop_center = sample.target_center_x - (
+                _DEAD_ZONE_HALF if delta > 0 else -_DEAD_ZONE_HALF
+            )
+        # else: crop_center 유지(고정)
+        result.append(
+            TargetSample(
+                video_offset_ms=sample.video_offset_ms,
+                target_center_x=crop_center,
+                target_type=sample.target_type,
+                confidence=sample.confidence,
+            )
+        )
+    return result
+
+
 def stabilize(samples: list[TargetSample]) -> list[TargetSample]:
-    """안정화 전체 파이프라인 — Outlier 제거 → 보간 → 속도 제한 → 평활화."""
-    return smooth(limit_speed(interpolate_gaps(remove_outliers(samples))))
+    """안정화 전체 파이프라인 — Outlier 제거 → 보간 → 데드존 → 속도 제한 → 평활화."""
+    return smooth(limit_speed(apply_dead_zone(interpolate_gaps(remove_outliers(samples)))))
