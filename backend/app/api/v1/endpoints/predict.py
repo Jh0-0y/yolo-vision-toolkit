@@ -141,14 +141,19 @@ async def unload_resident(model_id: str):
 @router.post("/annotate", response_model=TestJobStart, status_code=201)
 async def start_annotate(
     model_ids: str = Form(...),
-    conf: float = Form(0.4),
+    conf: float | None = Form(None),  # None → 파이프라인별 기본값 (crop 0.10 / object 0.4)
     iou_wbf: float = Form(0.55),
     imgsz: int = Form(640),
     device: str | None = Form(None),
     project_id: str | None = Form(None),
     object_tracking: bool = Form(True),  # ByteTrack boxes + IDs + trails
     crop_tracking: bool = Form(True),  # trackcrop vertical 9:16 crop window
-    crop_output: str = Form("label"),  # "label" = rectangle overlay | "video" = cut clip
+    crop_output: str = Form("label"),  # "none" = JSON only | "label" = overlay | "video" = cut clip
+    draw_crop_box: bool = Form(True),  # label: 9:16 사각형(+데드존·센터선)
+    show_dead_zone: bool = Form(True),  # label: 데드존 밴드
+    show_center_line: bool = Form(True),  # label: 타깃 중심선·타입 라벨
+    show_target_highlight: bool = Form(False),  # label: 선택 공/소유선수 마커
+    overrides: str = Form("{}"),  # trackcrop 튜닝 오버라이드 (JSON)
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
 ):
@@ -157,8 +162,14 @@ async def start_annotate(
         raise HTTPException(422, f"Unsupported video type: {ext}")
     if not object_tracking and not crop_tracking:
         raise HTTPException(422, "Enable object tracking, crop tracking, or both")
-    if crop_output not in ("label", "video"):
-        raise HTTPException(422, "crop_output must be 'label' or 'video'")
+    if crop_output not in ("none", "label", "video"):
+        raise HTTPException(422, "crop_output must be 'none', 'label' or 'video'")
+    try:
+        overrides_dict = json.loads(overrides) if overrides else {}
+        if not isinstance(overrides_dict, dict):
+            raise ValueError
+    except ValueError:
+        raise HTTPException(422, "overrides must be a JSON object") from None
     ids = [m.strip() for m in model_ids.split(",") if m.strip()]
     if not ids:
         raise HTTPException(422, "Select at least one model")
@@ -184,6 +195,11 @@ async def start_annotate(
         "object_tracking": object_tracking,
         "crop_tracking": crop_tracking,
         "crop_output": crop_output,
+        "draw_crop_box": draw_crop_box,
+        "show_dead_zone": show_dead_zone,
+        "show_center_line": show_center_line,
+        "show_target_highlight": show_target_highlight,
+        "overrides": overrides_dict,
     }
     await run_in_threadpool(test_job_manager.submit_annotate, job_id, cfg)
     return TestJobStart(job_id=job_id)
@@ -214,6 +230,65 @@ def annotate_crop(job_id: str):
     if not crop.exists():
         raise HTTPException(404, "Crop coordinates not available")
     return FileResponse(crop, media_type="application/json", filename="crop.json")
+
+
+# ---------- crop-cut: make a vertical crop clip without inference ----------
+
+
+@router.post("/crop-cut", response_model=TestJobStart, status_code=201)
+async def start_crop_cut(
+    mode: str = Form(...),  # "json" = follow uploaded crop.json | "center" = fixed centre
+    file: UploadFile = File(...),
+    crop_json: UploadFile | None = File(None),
+):
+    """Cut a vertical 9:16 crop clip with NO model inference.
+
+    - mode="json":   follow the coordinates in an uploaded crop.json.
+    - mode="center": crop fixed to the frame centre (no JSON).
+    Reuses the annotate job dir + events/result endpoints.
+    """
+    ext = Path(file.filename or "v").suffix.lower()
+    if ext not in VIDEO_EXTS:
+        raise HTTPException(422, f"Unsupported video type: {ext}")
+    if mode not in ("json", "center"):
+        raise HTTPException(422, "mode must be 'json' or 'center'")
+
+    crop_bytes: bytes | None = None
+    if mode == "json":
+        if crop_json is None:
+            raise HTTPException(422, "crop_json file is required for 'json' mode")
+        crop_bytes = await crop_json.read()
+        try:
+            parsed = json.loads(crop_bytes)
+            if not isinstance(parsed.get("samples"), list) or not parsed["samples"]:
+                raise ValueError
+        except (ValueError, AttributeError, TypeError):
+            raise HTTPException(
+                422, "crop_json must be a crop.json with a non-empty 'samples' array"
+            ) from None
+
+    await run_in_threadpool(sweep_old_annotations)
+    job_id = uuid.uuid4().hex
+    work = settings.test_dir / "annotate" / job_id
+    work.mkdir(parents=True, exist_ok=True)
+    src = work / f"source{ext}"
+    with open(src, "wb") as f:
+        while chunk := await file.read(1 << 20):
+            f.write(chunk)
+
+    crop_json_path = None
+    if crop_bytes is not None:
+        crop_json_path = work / "crop_input.json"
+        crop_json_path.write_bytes(crop_bytes)
+
+    cfg = {
+        "source": str(src),
+        "out": str(work / "out.mp4"),
+        "crop_source": mode,
+        "crop_json_path": str(crop_json_path) if crop_json_path else None,
+    }
+    await run_in_threadpool(test_job_manager.submit_annotate, job_id, cfg)
+    return TestJobStart(job_id=job_id)
 
 
 # ---------- model comparison (score models vs an uploaded YOLO test set) ----------

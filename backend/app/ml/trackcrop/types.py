@@ -71,6 +71,7 @@ class CropResult:
     keyframes: list[Keyframe]
     samples: list[TargetSample] = field(default_factory=list)
     summary: dict = field(default_factory=dict)
+    debug: list = field(default_factory=list)  # 대상 하이라이트용 시점별 선택 공/소유선수 bbox (opt-in)
 
     def to_dict(self) -> dict:
         return asdict(self)

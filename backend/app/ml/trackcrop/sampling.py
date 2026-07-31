@@ -10,11 +10,13 @@ from .constants import SAMPLING_INTERVAL_MS
 from .errors import ErrorCode, TrackCropError
 
 
-def sample_frames(path: Path) -> Iterator[tuple[int, np.ndarray]]:
-    """(video_offset_ms, frame BGR ndarray)를 100ms 격자로 생성한다.
+def sample_frames(
+    path: Path, interval_ms: int = SAMPLING_INTERVAL_MS
+) -> Iterator[tuple[int, np.ndarray]]:
+    """(video_offset_ms, frame BGR ndarray)를 interval_ms 격자로 생성한다.
 
-    순차 읽기 방식 — 목표 offset(0, 100, 200, …)에 도달한 첫 프레임을 그 offset의
-    대표 프레임으로 낸다. seek 반복보다 빠르고 프레임 누락이 없다.
+    순차 읽기 방식 — 목표 offset(0, interval, 2·interval, …)에 도달한 첫 프레임을 그
+    offset의 대표 프레임으로 낸다. seek 반복보다 빠르고 프레임 누락이 없다.
     """
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
@@ -43,7 +45,7 @@ def sample_frames(path: Path) -> Iterator[tuple[int, np.ndarray]]:
             frame_ms = frame_index / fps * 1000
             if frame_ms + (1000 / fps) / 2 >= next_offset_ms:
                 yield next_offset_ms, frame
-                next_offset_ms += SAMPLING_INTERVAL_MS
+                next_offset_ms += interval_ms
             frame_index += 1
     finally:
         cap.release()

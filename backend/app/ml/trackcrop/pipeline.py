@@ -7,6 +7,7 @@
 
 from pathlib import Path
 
+from .config import TrackcropConfig, resolve_config
 from .detection import Detector
 from .keyframe import reduce_keyframes
 from .result import build_crop_result, validate_crop_result
@@ -31,26 +32,33 @@ def analyze_video(
     imgsz: int = DEFAULT_IMGSZ,
     conf: float = DEFAULT_CONF,
     validate: bool = True,
+    overrides: dict | None = None,
+    collect_debug: bool = False,
 ) -> CropResult:
     """영상을 분석해 Crop 좌표(CropResult)를 계산한다.
 
     detector를 주면 재사용한다 (여러 영상 처리 시 모델 1회 로딩).
     주지 않으면 model_path/device/imgsz/conf로 새로 만든다.
 
+    overrides로 튜닝 값(데드존·샘플링 간격 등)을 런타임 오버라이드한다.
+    collect_debug=True면 CropResult.debug에 시점별 선택 공/소유선수 bbox를 채운다.
     validate=True면 결과 자체 검증에 실패할 때 ValueError를 던진다.
     """
+    cfg: TrackcropConfig = resolve_config(overrides)
+
     if detector is None:
         detector = Detector(model_path=model_path, device=device, imgsz=imgsz, conf=conf)
 
     video = Path(video_path)
-    detected = list(detector.track(sample_frames(video)))
-    targets = resolve_targets(detected)
-    stabilized = stabilize(targets)
+    detected = list(detector.track(sample_frames(video, cfg.sampling_interval_ms)))
+    debug: list | None = [] if collect_debug else None
+    targets = resolve_targets(detected, cfg, debug)
+    stabilized = stabilize(targets, cfg)
     keyframes = reduce_keyframes(stabilized)
-    result = build_crop_result(stabilized, keyframes)
+    result = build_crop_result(stabilized, keyframes, debug=debug)
 
     if validate:
-        violations = validate_crop_result(result)
+        violations = validate_crop_result(result, cfg)
         if violations:
             raise ValueError(f"Crop 결과 검증 실패: {violations}")
 

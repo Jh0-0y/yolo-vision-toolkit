@@ -88,3 +88,46 @@ def test_draw_target_overlay_smoke():
     frame2 = np.zeros((1080, 1920, 3), dtype=np.uint8)
     crop_render.draw_target_overlay(frame2, 50, traj, types, dead_zone_half=None, frame_width=1920, frame_height=1080)
     assert frame2.any()
+
+
+def _overlay_frame(**flags):
+    frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    samples = [_Sample(0, 900.0, "ball"), _Sample(100, 900.0, "ball")]
+    traj = crop_render.build_trajectory(samples, 1920)
+    types = crop_render.build_types(samples)
+    crop_render.draw_target_overlay(
+        frame, 50, traj, types, dead_zone_half=104, frame_width=1920, frame_height=1080, **flags
+    )
+    return frame
+
+
+def test_draw_target_overlay_toggles():
+    # 데드존 밴드는 크롭 중심(900) ±104 = 796/1004 세로선. show_dead_zone=False면 그 열이 비어야
+    only_center = _overlay_frame(show_dead_zone=False, show_center_line=True)
+    assert not only_center[:, 796].any()  # 밴드 열 비어있음
+    assert only_center[:, 900].any()  # 중심선은 있음
+    # show_center_line=False면 중심선(900 열)이 없어야
+    only_band = _overlay_frame(show_dead_zone=True, show_center_line=False)
+    assert not only_band[:, 900].any()
+    assert only_band[:, 796].any()  # 밴드는 있음
+    # 둘 다 False면 아무것도 안 그려짐
+    assert not _overlay_frame(show_dead_zone=False, show_center_line=False).any()
+
+
+def test_draw_selection_overlay_smoke():
+    # debug lookup으로 선택 공/소유선수 마커가 그려지는지 (빈 debug·None bbox 안전)
+    debug = [
+        {"video_offset_ms": 0, "ball_bbox": [900, 480, 20, 20], "carrier_bbox": [700, 400, 60, 180]},
+        {"video_offset_ms": 100, "ball_bbox": None, "carrier_bbox": None},
+    ]
+    lookup = crop_render.build_debug_lookup(debug)
+    assert lookup[0] == [0, 100]
+    frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    crop_render.draw_selection_overlay(frame, 0, lookup, 1920, 1080)
+    assert frame.any()  # 마커가 그려짐
+    # bbox 둘 다 None인 시각 → 에러 없이 아무것도 안 그림
+    frame2 = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    crop_render.draw_selection_overlay(frame2, 100, lookup, 1920, 1080)
+    assert not frame2.any()
+    # 빈 lookup도 무해
+    crop_render.draw_selection_overlay(frame2, 0, ([], []), 1920, 1080)
