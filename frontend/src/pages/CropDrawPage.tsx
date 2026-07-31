@@ -3,9 +3,9 @@ import { useQuery } from '@tanstack/react-query'
 import { Alert, Badge, Group, Stack, Text, Title } from '@mantine/core'
 import { IconAlertTriangle } from '@tabler/icons-react'
 import { api, getResources, type ModelOut } from '../api/client'
-import TrackMode from '../components/test/TrackMode'
+import CropDrawMode from '../components/lab/CropDrawMode'
 
-export default function TestPage() {
+export default function CropDrawPage() {
   const { projectId = '' } = useParams()
 
   const modelsQuery = useQuery({
@@ -25,9 +25,9 @@ export default function TestPage() {
     <Stack gap="lg">
       <Group justify="space-between" align="flex-start">
         <div>
-          <Title order={3}>Test</Title>
+          <Title order={3}>Crop Draw Tool</Title>
           <Text c="dimmed" size="sm">
-            Track objects in a video with a trained model.
+            Tune crop performance visually — render overlays (objects, crop box, dead zone, target highlight) onto the video.
           </Text>
         </div>
         {resources && (
@@ -43,7 +43,7 @@ export default function TestPage() {
         </Alert>
       )}
 
-      <TrackMode projectId={projectId} models={models} />
+      <CropDrawMode projectId={projectId} models={models} />
     </Stack>
   )
 }

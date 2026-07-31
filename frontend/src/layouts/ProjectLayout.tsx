@@ -12,7 +12,8 @@ import {
 } from '@mantine/core'
 import {
   IconBox,
-  IconFlask,
+  IconBrush,
+  IconFileCode,
   IconFolder,
   IconHistory,
   IconLibraryPhoto,
@@ -42,7 +43,13 @@ const NAV_SECTIONS = [
       { to: 'train', label: 'Train', icon: IconPlayerPlay },
       { to: 'history', label: 'Training History', icon: IconHistory },
       { to: 'models', label: 'Models', icon: IconBox },
-      { to: 'test', label: 'Test', icon: IconFlask },
+    ],
+  },
+  {
+    label: 'Lab',
+    items: [
+      { to: 'lab/crop-result', label: 'Crop Result', icon: IconFileCode },
+      { to: 'lab/crop-draw', label: 'Crop Draw Tool', icon: IconBrush },
     ],
   },
 ]

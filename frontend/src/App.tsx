@@ -4,10 +4,11 @@ import ProjectLayout from './layouts/ProjectLayout'
 import ClassesPage from './pages/ClassesPage'
 import DatasetPage from './pages/DatasetPage'
 import ExportsPage from './pages/ExportsPage'
+import CropDrawPage from './pages/CropDrawPage'
+import CropResultPage from './pages/CropResultPage'
 import HomePage from './pages/HomePage'
 import LabelEditorPage from './pages/LabelEditorPage'
 import ModelsPage from './pages/ModelsPage'
-import TestPage from './pages/TestPage'
 import TrainPage from './pages/TrainPage'
 import TrainingHistoryPage from './pages/TrainingHistoryPage'
 import TrainRunDetailPage from './pages/TrainRunDetailPage'
@@ -30,7 +31,10 @@ export default function App() {
         <Route path="history" element={<TrainingHistoryPage />} />
         <Route path="history/:runId" element={<TrainRunDetailPage />} />
         <Route path="models" element={<ModelsPage />} />
-        <Route path="test" element={<TestPage />} />
+        <Route path="lab/crop-result" element={<CropResultPage />} />
+        <Route path="lab/crop-draw" element={<CropDrawPage />} />
+        {/* 옛 Test 경로 → 그리기 도구로 리다이렉트 (링크 깨짐 방지) */}
+        <Route path="test" element={<Navigate to="../lab/crop-draw" replace />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

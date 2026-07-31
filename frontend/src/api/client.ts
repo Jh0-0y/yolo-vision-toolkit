@@ -602,7 +602,7 @@ export interface ResourceInfo {
 }
 
 export interface PredictParams {
-  conf: number
+  conf?: number // omit to use the backend default
   iou_wbf: number
   imgsz: number
   device?: string | null
@@ -623,7 +623,31 @@ export interface AnnotateProgress {
   msg?: string
 }
 
-export type CropOutput = 'label' | 'video'
+// "none" = JSON만 | "label" = 오버레이 그리기 | "video" = 세로 크롭 컷
+export type CropOutput = 'none' | 'label' | 'video'
+
+/** trackcrop 런타임 튜닝 오버라이드 — 비운 값은 보내지 않아 기본값(constants) 사용. */
+export interface TrackcropOverrides {
+  dead_zone_width?: number
+  sampling_interval_ms?: number
+  ball_lost_hold_ms?: number
+  player_lost_hold_ms?: number
+  max_move_px_per_second?: number
+  ball_weight?: number
+  match_max_jump_px?: number
+  outlier_deviation_px?: number
+  outlier_window?: number
+  low_confidence?: number
+  smooth_window?: number
+  confidence_decay?: number
+  reacquire_blend?: number
+  w_continuity?: number
+  w_confidence?: number
+  w_player_proximity?: number
+  w_carrier_proximity?: number
+  w_carrier_velocity?: number
+  velocity_scale?: number
+}
 
 export function startAnnotate(opts: {
   file: File
@@ -633,19 +657,46 @@ export function startAnnotate(opts: {
   objectTracking: boolean
   cropTracking: boolean
   cropOutput: CropOutput
+  drawCropBox?: boolean
+  showDeadZone?: boolean
+  showCenterLine?: boolean
+  showTargetHighlight?: boolean
+  overrides?: TrackcropOverrides
 }): Promise<TestJobStart> {
   const form = new FormData()
   form.append('file', opts.file)
   form.append('model_ids', opts.modelIds.join(','))
   form.append('project_id', opts.projectId)
-  form.append('conf', String(opts.params.conf))
+  if (opts.params.conf != null) form.append('conf', String(opts.params.conf))
   form.append('iou_wbf', String(opts.params.iou_wbf))
+  // imgsz는 백엔드에서 1920 고정 — 호환 위해 값은 보내되 무시됨
   form.append('imgsz', String(opts.params.imgsz))
   if (opts.params.device) form.append('device', opts.params.device)
   form.append('object_tracking', String(opts.objectTracking))
   form.append('crop_tracking', String(opts.cropTracking))
   form.append('crop_output', opts.cropOutput)
+  if (opts.drawCropBox != null) form.append('draw_crop_box', String(opts.drawCropBox))
+  if (opts.showDeadZone != null) form.append('show_dead_zone', String(opts.showDeadZone))
+  if (opts.showCenterLine != null) form.append('show_center_line', String(opts.showCenterLine))
+  if (opts.showTargetHighlight != null)
+    form.append('show_target_highlight', String(opts.showTargetHighlight))
+  if (opts.overrides) form.append('overrides', JSON.stringify(opts.overrides))
   return api.upload<TestJobStart>('/predict/annotate', form)
+}
+
+// Crop-cut: make a vertical crop clip with NO inference.
+//   mode="json"  → follow an uploaded crop.json / mode="center" → fixed centre.
+// Reuses the annotate events/result endpoints (same job dir).
+export function startCropCut(opts: {
+  file: File
+  mode: 'json' | 'center'
+  cropJson?: File
+}): Promise<TestJobStart> {
+  const form = new FormData()
+  form.append('file', opts.file)
+  form.append('mode', opts.mode)
+  if (opts.cropJson) form.append('crop_json', opts.cropJson)
+  return api.upload<TestJobStart>('/predict/crop-cut', form)
 }
 
 export function subscribeAnnotateEvents(jobId: string, onEvent: (ev: AnnotateProgress) => void): () => void {
