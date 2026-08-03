@@ -1,18 +1,20 @@
-"""오프라인 공 트랙 확정 (2-패스 설계의 패스 1).
+"""클립 단위 공 트랙 확정 (2-패스 설계의 패스 1).
 
-프레임 단위 공 선정(select_ball) 대신, 클립 전체를 놓고 트랙(궤적) 단위로 판단한다:
+프레임 단위 공 선정 대신, 클립 전체를 놓고 트랙(궤적) 단위로 판단한다:
 
   1. tracklet 구성 — ByteTrack id로 묶되, 같은 id 안의 불가능한 점프는 쪼갠다
-  2. 스티칭      — 조각 끝/시작의 위치·속도·시간 일관성으로 오프라인 연결
+  2. 스티칭      — 조각 끝/시작의 위치·속도·시간 일관성으로 클립 전체에서 연결
   3. 트랙 채점    — 이동량·선수 상호작용(기하 겹침)·커버 시간으로 경기 공 채택
   4. 흡수 병합    — 시간이 안 겹치는 나머지 트랙을 완화된 허용치로 회수
 
 관중석·벤치·프린트 공은 궤적이 죽어 있고(이동량↓) 선수와 상호작용이 없어
-트랙 단위에서 명확히 갈린다. 설계 배경은 docs/trackcrop-offline-2pass.md 참고.
+트랙 단위에서 명확히 갈린다. 설계 배경은 docs/trackcrop-clip-planner.md 참고.
 """
 
-from dataclasses import dataclass, field
+import statistics
+from dataclasses import dataclass, field, fields
 
+from . import constants
 from .types import Detection
 
 # ---------------------------------------------------------------------------
@@ -20,8 +22,14 @@ from .types import Detection
 
 
 @dataclass(frozen=True)
-class OfflinePlanConfig:
-    """오프라인 2-패스 튜닝 값. 런타임 TrackcropConfig와 별도(독립 실험용)."""
+class ClipPlanConfig:
+    """클립 플래너 튜닝 값 — 파이프라인의 유일한 런타임 설정."""
+
+    # --- 검출/지오메트리 정책 ---
+    sampling_interval_ms: int = constants.SAMPLING_INTERVAL_MS  # 100 (detect 단계)
+    dead_zone_width: float = constants.DEAD_ZONE_WIDTH  # 208 — 무페널티 구간 폭
+    max_move_px_per_second: float = constants.MAX_MOVE_PX_PER_SECOND  # 1200 — 크롭 속도 캡
+    ball_weight: float = constants.BALL_WEIGHT  # 0.7 — 공+군집 가중 (군집 = 1-이 값)
 
     # --- tracklet 쪼개기 / 스티칭 ---
     ball_max_speed_px_s: float = 3000.0  # 공 물리 한계 속도 (슛 포함 — 크롭 속도와 무관)
@@ -50,6 +58,36 @@ class OfflinePlanConfig:
     w_acc: float = 15.0  # 팬 가속 페널티
     irls_iters: int = 30  # IRLS 반복 횟수
     min_follow_conf: float = 0.1  # confidence 가중 하한
+
+    @property
+    def dead_zone_half(self) -> float:
+        return self.dead_zone_width / 2
+
+    @property
+    def player_group_weight(self) -> float:
+        return 1.0 - self.ball_weight
+
+
+_FIELD_NAMES = {f.name for f in fields(ClipPlanConfig)}
+
+
+def resolve_clip_config(overrides: dict | None) -> ClipPlanConfig:
+    """overrides(dict) 중 알려진 필드·비어있지 않은 값만 반영해 Config를 만든다.
+
+    알 수 없는 키·None 값은 무시한다 (프론트가 빈 노브를 안 보내거나 None으로 보냄).
+    """
+    if not overrides:
+        return ClipPlanConfig()
+    clean = {k: v for k, v in overrides.items() if k in _FIELD_NAMES and v is not None}
+    return ClipPlanConfig(**clean)
+
+
+def player_group_center(detections: list[Detection]) -> float | None:
+    """선수 군집 중심 X — 중앙값 (심판·벤치 등 outlier에 강건). 선수 없으면 None."""
+    xs = [d.center_x for d in detections if d.object_type == "player"]
+    if not xs:
+        return None
+    return float(statistics.median(xs))
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +148,7 @@ class BallTrack:
 
 
 def build_tracklets(
-    samples: list[tuple[int, list[Detection]]], cfg: OfflinePlanConfig
+    samples: list[tuple[int, list[Detection]]], cfg: ClipPlanConfig
 ) -> list[BallTrack]:
     """공 검출을 track_id로 묶고, 같은 id 안의 불가능한 점프에서 쪼갠다.
 
@@ -150,18 +188,18 @@ def build_tracklets(
 # 2. 스티칭
 
 
-def _link_allowance(gap_ms: int, cfg: OfflinePlanConfig, scale: float = 1.0) -> float:
+def _link_allowance(gap_ms: int, cfg: ClipPlanConfig, scale: float = 1.0) -> float:
     return scale * (cfg.stitch_base_px + cfg.ball_max_speed_px_s * gap_ms / 1000)
 
 
-def _link_distance(chain: BallTrack, nxt: BallTrack, gap_ms: int, cfg: OfflinePlanConfig) -> float:
+def _link_distance(chain: BallTrack, nxt: BallTrack, gap_ms: int, cfg: ClipPlanConfig) -> float:
     """앞 트랙 끝에서 외삽한 예측과 뒤 트랙 시작의 거리."""
     extrapolate_ms = min(gap_ms, cfg.stitch_velocity_cap_ms)
     predicted = chain.end_x + chain.tail_velocity() * extrapolate_ms
     return abs(nxt.start_x - predicted)
 
 
-def stitch_tracks(tracklets: list[BallTrack], cfg: OfflinePlanConfig) -> list[BallTrack]:
+def stitch_tracks(tracklets: list[BallTrack], cfg: ClipPlanConfig) -> list[BallTrack]:
     """시간순으로 tracklet을 체인에 연결한다.
 
     시간이 겹치는 조각은 절대 같은 체인이 되지 않는다 (동시에 보이면 다른 공).
@@ -202,7 +240,7 @@ def ball_in_player_box(ball: Detection, player: Detection, margin_ratio: float) 
 def _interaction_fraction(
     track: BallTrack,
     players_at: dict[int, list[Detection]],
-    cfg: OfflinePlanConfig,
+    cfg: ClipPlanConfig,
 ) -> float:
     """트랙 점 중 선수와 겹친(들고 있거나 스친) 비율 — 경기 공의 핵심 신호."""
     if not track.points:
@@ -222,7 +260,7 @@ def score_track(
     track: BallTrack,
     players_at: dict[int, list[Detection]],
     clip_span_ms: int,
-    cfg: OfflinePlanConfig,
+    cfg: ClipPlanConfig,
 ) -> float:
     travel = min(track.travel_px() / cfg.travel_norm_px, 1.0)
     interaction = _interaction_fraction(track, players_at, cfg)
@@ -232,13 +270,13 @@ def score_track(
 
 def select_game_ball_track(
     samples: list[tuple[int, list[Detection]]],
-    cfg: OfflinePlanConfig | None = None,
+    cfg: ClipPlanConfig | None = None,
 ) -> tuple[BallTrack | None, dict]:
     """클립 전체에서 경기 공 트랙을 확정한다. (트랙, 진단 정보) 반환.
 
     최고점 트랙이 min_track_score 미달이면 (None, info) — "공 없음" 클립.
     """
-    cfg = cfg or OfflinePlanConfig()
+    cfg = cfg or ClipPlanConfig()
     players_at = {
         offset_ms: [d for d in dets if d.object_type == "player"]
         for offset_ms, dets in samples

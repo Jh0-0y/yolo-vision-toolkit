@@ -15,8 +15,8 @@ IRLS(반복 재가중 최소제곱)로 푼다: 이탈 항은 데드존 경계까
 
 import numpy as np
 
-from .balltrack import OfflinePlanConfig
-from .constants import CROP_WIDTH, DEAD_ZONE_WIDTH, MAX_MOVE_PX_PER_SECOND, SOURCE_WIDTH
+from .balltrack import ClipPlanConfig
+from .constants import CROP_WIDTH, SOURCE_WIDTH
 from .types import TargetSample
 
 # 크롭 중심 허용 범위 (크롭 박스가 소스를 벗어나지 않게)
@@ -36,9 +36,9 @@ def _difference_penalty(n: int, w_vel: float, w_acc: float) -> np.ndarray:
     return penalty
 
 
-def optimize_path(samples: list[TargetSample], cfg: OfflinePlanConfig | None = None) -> list[float]:
+def optimize_path(samples: list[TargetSample], cfg: ClipPlanConfig | None = None) -> list[float]:
     """타깃 시퀀스에서 최적 크롭 중심 경로를 계산한다 (같은 그리드, 같은 길이)."""
-    cfg = cfg or OfflinePlanConfig()
+    cfg = cfg or ClipPlanConfig()
     n = len(samples)
     if n == 0:
         return []
@@ -47,7 +47,7 @@ def optimize_path(samples: list[TargetSample], cfg: OfflinePlanConfig | None = N
         return list(np.clip(b, _CENTER_MIN, _CENTER_MAX))
 
     conf = np.array([max(s.confidence, cfg.min_follow_conf) for s in samples])
-    dz = DEAD_ZONE_WIDTH / 2
+    dz = cfg.dead_zone_half
     smooth = _difference_penalty(n, cfg.w_vel, cfg.w_acc)
 
     c = b.copy()
@@ -61,15 +61,15 @@ def optimize_path(samples: list[TargetSample], cfg: OfflinePlanConfig | None = N
         c = np.linalg.solve(a_matrix, weight * pull)
         c = np.clip(c, _CENTER_MIN, _CENTER_MAX)
 
-    return list(_cap_speed(c, samples))
+    return list(_cap_speed(c, samples, cfg))
 
 
-def _cap_speed(path: np.ndarray, samples: list[TargetSample]) -> np.ndarray:
+def _cap_speed(path: np.ndarray, samples: list[TargetSample], cfg: ClipPlanConfig) -> np.ndarray:
     """샘플 간 이동량을 스펙 최대 속도로 하드 캡 (앞→뒤 한 번)."""
     capped = path.copy()
     for i in range(1, len(capped)):
         dt_ms = samples[i].video_offset_ms - samples[i - 1].video_offset_ms
-        max_step = MAX_MOVE_PX_PER_SECOND * max(dt_ms, 0) / 1000
+        max_step = cfg.max_move_px_per_second * max(dt_ms, 0) / 1000
         delta = capped[i] - capped[i - 1]
         if abs(delta) > max_step:
             capped[i] = capped[i - 1] + np.sign(delta) * max_step

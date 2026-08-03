@@ -7,7 +7,6 @@
 import math
 
 from . import constants
-from .config import TrackcropConfig
 from .types import CropResult, Keyframe, TargetSample, TargetType
 
 
@@ -72,7 +71,10 @@ def build_crop_result(
     )
 
 
-def validate_crop_result(result: CropResult, cfg: TrackcropConfig | None = None) -> list[str]:
+def validate_crop_result(
+    result: CropResult,
+    max_move_px_per_second: float = constants.MAX_MOVE_PX_PER_SECOND,
+) -> list[str]:
     """결과 자체 검증. 위반 목록을 반환한다 (빈 리스트 = 통과).
 
       1. Crop 규격 (width/height/y)이 constants와 일치
@@ -85,7 +87,6 @@ def validate_crop_result(result: CropResult, cfg: TrackcropConfig | None = None)
       8. 최대 이동 속도(1200px/s) 정책 충족
       9. NaN · 무한대 값 없음
     """
-    cfg = cfg or TrackcropConfig()
     violations: list[str] = []
     kfs = result.keyframes
 
@@ -122,11 +123,11 @@ def validate_crop_result(result: CropResult, cfg: TrackcropConfig | None = None)
         delta_ms = nxt.video_offset_ms - prev.video_offset_ms
         if delta_ms <= 0:
             continue  # 순서 위반은 위에서 보고됨
-        max_move = cfg.max_step_px(delta_ms)
+        max_move = max_move_px_per_second * delta_ms / 1000
         if abs(nxt.x - prev.x) > max_move:
             violations.append(
                 f"{prev.video_offset_ms}→{nxt.video_offset_ms}ms 이동 "
-                f"{abs(nxt.x - prev.x)}px가 최대 속도({cfg.max_move_px_per_second:g}px/s) 초과"
+                f"{abs(nxt.x - prev.x)}px가 최대 속도({max_move_px_per_second:g}px/s) 초과"
             )
             break
 

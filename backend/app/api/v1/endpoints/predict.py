@@ -159,7 +159,6 @@ async def start_annotate(
     show_center_line: bool = Form(True),  # label: 타깃 중심선·타입 라벨
     show_target_highlight: bool = Form(False),  # label: 선택 공/소유선수 마커
     overrides: str = Form("{}"),  # trackcrop 튜닝 오버라이드 (JSON)
-    offline: bool = Form(False),  # 오프라인 2-패스 플래너 사용
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
 ):
@@ -206,7 +205,6 @@ async def start_annotate(
         "show_center_line": show_center_line,
         "show_target_highlight": show_target_highlight,
         "overrides": overrides_dict,
-        "offline": offline,
     }
     await run_in_threadpool(test_job_manager.submit_annotate, job_id, cfg)
     return TestJobStart(job_id=job_id)
@@ -396,7 +394,6 @@ async def live_plan(detect_id: str, body: dict = Body(default={})):
     if not isinstance(overrides, dict):
         raise HTTPException(422, "overrides must be an object")
     collect_debug = bool(body.get("collect_debug", False))
-    offline = bool(body.get("offline", False))
 
     def _compute() -> dict:
         # trackcrop imports cv2/numpy but not torch here (Detector loads YOLO lazily).
@@ -408,8 +405,7 @@ async def live_plan(detect_id: str, body: dict = Body(default={})):
         # validate=False: non-1080p input trips the 1920/608 geometry checks (same as
         # the batch annotate path); the client scales the overlay to the real frame.
         result = plan_from_detections(
-            detected, overrides=overrides, collect_debug=collect_debug,
-            validate=False, offline=offline,
+            detected, overrides=overrides, collect_debug=collect_debug, validate=False,
         )
         return result.to_dict()
 

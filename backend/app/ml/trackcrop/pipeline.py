@@ -1,26 +1,26 @@
 """추적 → Crop 좌표 파이프라인 오케스트레이터.
 
-  프레임 샘플링 → 탐지·추적ID → Target 선정 → 안정화 → Keyframe 축약 → 결과 조립
+  프레임 샘플링 → 탐지·추적ID → 클립 플래너(트랙 확정·타깃 결정·경로 최적화)
+  → Keyframe 축약 → 결과 조립
 
 순수 계산만 하며 파일 입출력·네트워크는 하지 않는다 (영상 경로 읽기만).
 
 파이프라인은 두 단계로 나뉜다:
   - `detect_video` — 프레임 샘플링 + YOLO·ByteTrack 추론 (비쌈, 모델 필요).
-  - `plan_from_detections` — Target 선정·안정화·Keyframe 축약 (쌈, 순수 계산).
+  - `plan_from_detections` — 클립 플래너 + Keyframe 축약 (쌈, 순수 계산).
 `analyze_video`는 둘을 이어 붙인 편의 함수다. 검출 결과를 캐시해두고 튜닝
-파라미터만 바꿔 좌표를 즉시 재계산하려면(실시간 프리뷰) 두 단계를 따로 부른다.
+파라미터만 바꿔 좌표를 즉시 재계산하려면(라이브 프리뷰) 두 단계를 따로 부른다.
 """
 
 from collections.abc import Callable
 from pathlib import Path
 
-from .config import TrackcropConfig, resolve_config
+from .balltrack import ClipPlanConfig, resolve_clip_config
+from .clip_planner import plan_clip
 from .detection import Detector
 from .keyframe import reduce_keyframes
 from .result import build_crop_result, validate_crop_result
 from .sampling import sample_frames
-from .stabilization import stabilize
-from .target import resolve_targets
 from .types import CropResult, Detection
 
 # YOLO 기본값 (원본 CropWorker Settings 기준)
@@ -54,7 +54,7 @@ def detect_video(
     """
     if detector is None:
         detector = Detector(model_path=model_path, device=device, imgsz=imgsz, conf=conf)
-    interval = sampling_interval_ms or resolve_config(None).sampling_interval_ms
+    interval = sampling_interval_ms or ClipPlanConfig().sampling_interval_ms
 
     detected: DetectedSamples = []
     for i, (offset_ms, dets) in enumerate(
@@ -72,35 +72,24 @@ def plan_from_detections(
     overrides: dict | None = None,
     collect_debug: bool = False,
     validate: bool = True,
-    offline: bool = False,
 ) -> CropResult:
     """캐시된 Detection 시퀀스에서 Crop 좌표(CropResult)를 계산한다 (싼 계산 단계).
 
-    offline=False: 온라인 경로(resolve_targets → stabilize).
-    offline=True:  오프라인 2-패스 플래너(plan_offline: 트랙 스티칭 + 타깃 결정 +
-                   전역 경로 최적화). 이미 스무딩·속도캡이 pathopt에서 끝나므로 별도
-                   stabilize를 타지 않는다.
+    클립 플래너(plan_clip)가 트랙 스티칭·타깃 결정·전역 경로 최적화를 한 번에
+    수행한다 — 스무딩·속도 캡이 pathopt에서 끝나므로 별도 안정화 단계가 없다.
 
     torch/모델 없이 순수 계산만 하므로 튜닝만 바꿔 밀리초 단위로 재호출할 수 있다.
     overrides의 sampling_interval_ms는 여기선 무시된다(간격 변경은 detect_video 재실행).
     """
-    cfg: TrackcropConfig = resolve_config(overrides)
+    cfg = resolve_clip_config(overrides)
     debug: list | None = [] if collect_debug else None
 
-    if offline:
-        from .balltrack import OfflinePlanConfig
-        from .offline_planner import plan_offline
-
-        stabilized, _info = plan_offline(detected, OfflinePlanConfig(), debug)
-    else:
-        targets = resolve_targets(detected, cfg, debug)
-        stabilized = stabilize(targets, cfg)
-
-    keyframes = reduce_keyframes(stabilized)
-    result = build_crop_result(stabilized, keyframes, debug=debug)
+    planned, _info = plan_clip(detected, cfg, debug)
+    keyframes = reduce_keyframes(planned)
+    result = build_crop_result(planned, keyframes, debug=debug)
 
     if validate:
-        violations = validate_crop_result(result, cfg)
+        violations = validate_crop_result(result, cfg.max_move_px_per_second)
         if violations:
             raise ValueError(f"Crop 결과 검증 실패: {violations}")
 
@@ -118,11 +107,8 @@ def analyze_video(
     validate: bool = True,
     overrides: dict | None = None,
     collect_debug: bool = False,
-    offline: bool = False,
 ) -> CropResult:
     """영상을 분석해 Crop 좌표(CropResult)를 계산한다 (검출 + 좌표계산 일괄).
-
-    offline=True면 오프라인 2-패스 플래너로 좌표를 계산한다(온라인 대신).
 
     detector를 주면 재사용한다 (여러 영상 처리 시 모델 1회 로딩).
     주지 않으면 model_path/device/imgsz/conf로 새로 만든다.
@@ -131,7 +117,7 @@ def analyze_video(
     collect_debug=True면 CropResult.debug에 시점별 선택 공/소유선수 bbox를 채운다.
     validate=True면 결과 자체 검증에 실패할 때 ValueError를 던진다.
     """
-    cfg: TrackcropConfig = resolve_config(overrides)
+    cfg = resolve_clip_config(overrides)
 
     if detector is None:
         detector = Detector(model_path=model_path, device=device, imgsz=imgsz, conf=conf)
@@ -140,9 +126,5 @@ def analyze_video(
         video_path, detector=detector, sampling_interval_ms=cfg.sampling_interval_ms
     )
     return plan_from_detections(
-        detected,
-        overrides=overrides,
-        collect_debug=collect_debug,
-        validate=validate,
-        offline=offline,
+        detected, overrides=overrides, collect_debug=collect_debug, validate=validate
     )

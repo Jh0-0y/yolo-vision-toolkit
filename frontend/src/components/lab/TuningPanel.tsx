@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import {
   Button,
+  Checkbox,
   Group,
   NumberInput,
   SimpleGrid,
@@ -11,8 +12,10 @@ import {
 import { IconChevronRight } from '@tabler/icons-react'
 import type { TrackcropOverrides } from '../../api/client'
 
+type NumberKnobKey = Exclude<keyof TrackcropOverrides, 'use_carrier'>
+
 interface Knob {
-  key: keyof TrackcropOverrides
+  key: NumberKnobKey
   label: string
   def: number
   step?: number
@@ -24,27 +27,31 @@ interface Knob {
 const CORE: Knob[] = [
   { key: 'dead_zone_width', label: 'Dead zone width (px)', def: 208, step: 8, min: 0 },
   { key: 'sampling_interval_ms', label: 'Sampling interval (ms)', def: 100, step: 10, min: 10 },
-  { key: 'ball_lost_hold_ms', label: 'Ball lost hold (ms)', def: 1000, step: 100, min: 0 },
-  { key: 'player_lost_hold_ms', label: 'Player lost hold (ms)', def: 1500, step: 100, min: 0 },
   { key: 'max_move_px_per_second', label: 'Max move speed (px/s)', def: 1200, step: 100, min: 0 },
   { key: 'ball_weight', label: 'Ball weight (0–1)', def: 0.7, step: 0.05, min: 0, max: 1 },
-  { key: 'match_max_jump_px', label: 'Ball gate ± base (px, 0=off)', def: 300, step: 20, min: 0 },
+  { key: 'interp_max_gap_ms', label: 'Interpolate gap ≤ (ms)', def: 2000, step: 100, min: 0 },
+  { key: 'stitch_max_gap_ms', label: 'Stitch gap ≤ (ms)', def: 2500, step: 100, min: 0 },
+  { key: 'min_track_score', label: 'Min track score (0–1)', def: 0.25, step: 0.05, min: 0, max: 1 },
 ]
 
-// Advanced — stabilization & selection internals
+// Advanced — track stitching/scoring & path-optimization internals
 const ADVANCED: Knob[] = [
-  { key: 'outlier_deviation_px', label: 'Outlier deviation (px)', def: 300, step: 10, min: 0 },
-  { key: 'outlier_window', label: 'Outlier window', def: 5, step: 2, min: 1 },
-  { key: 'smooth_window', label: 'Smooth window', def: 5, step: 2, min: 1 },
-  { key: 'low_confidence', label: 'Low-confidence threshold', def: 0.3, step: 0.05, min: 0, max: 1 },
-  { key: 'confidence_decay', label: 'Confidence decay', def: 0.9, step: 0.05, min: 0, max: 1 },
-  { key: 'reacquire_blend', label: 'Reacquire blend', def: 0.5, step: 0.05, min: 0, max: 1 },
-  { key: 'w_continuity', label: 'Ball: continuity weight', def: 0.5, step: 0.05, min: 0, max: 1 },
-  { key: 'w_confidence', label: 'Ball: conf weight', def: 0.3, step: 0.05, min: 0, max: 1 },
-  { key: 'w_player_proximity', label: 'Ball: player-proximity weight', def: 0.2, step: 0.05, min: 0, max: 1 },
-  { key: 'w_carrier_proximity', label: 'Carrier: proximity weight', def: 0.6, step: 0.05, min: 0, max: 1 },
-  { key: 'w_carrier_velocity', label: 'Carrier: velocity weight', def: 0.4, step: 0.05, min: 0, max: 1 },
-  { key: 'velocity_scale', label: 'Velocity scale (px/ms)', def: 0.5, step: 0.1, min: 0.01 },
+  { key: 'ball_max_speed_px_s', label: 'Ball max speed (px/s)', def: 3000, step: 100, min: 0 },
+  { key: 'split_base_px', label: 'Split: base jump (px)', def: 80, step: 10, min: 0 },
+  { key: 'stitch_base_px', label: 'Stitch: base dist (px)', def: 150, step: 10, min: 0 },
+  { key: 'stitch_velocity_cap_ms', label: 'Stitch: extrapolate cap (ms)', def: 500, step: 50, min: 0 },
+  { key: 'w_travel', label: 'Score: travel weight', def: 0.4, step: 0.05, min: 0, max: 1 },
+  { key: 'w_interaction', label: 'Score: interaction weight', def: 0.4, step: 0.05, min: 0, max: 1 },
+  { key: 'w_span', label: 'Score: span weight', def: 0.2, step: 0.05, min: 0, max: 1 },
+  { key: 'travel_norm_px', label: 'Score: travel norm (px)', def: 1920, step: 100, min: 1 },
+  { key: 'absorb_allow_scale', label: 'Absorb-merge scale', def: 2, step: 0.5, min: 1 },
+  { key: 'possession_margin', label: 'Possession margin (×height)', def: 0.15, step: 0.05, min: 0 },
+  { key: 'w_follow', label: 'Path: follow weight', def: 1, step: 0.1, min: 0 },
+  { key: 'w_inside', label: 'Path: inside pull', def: 0.05, step: 0.01, min: 0 },
+  { key: 'w_vel', label: 'Path: velocity penalty', def: 0.1, step: 0.05, min: 0 },
+  { key: 'w_acc', label: 'Path: accel penalty', def: 15, step: 5, min: 0 },
+  { key: 'irls_iters', label: 'Path: solver iters', def: 30, step: 5, min: 1 },
+  { key: 'min_follow_conf', label: 'Path: min follow conf', def: 0.1, step: 0.05, min: 0, max: 1 },
 ]
 
 interface Props {
@@ -55,7 +62,7 @@ interface Props {
   exclude?: (keyof TrackcropOverrides)[]
 }
 
-/** trackcrop tuning knobs — leaving a field empty omits it, so the default (constants) is used. */
+/** trackcrop clip-planner tuning knobs — leaving a field empty omits it, so the default is used. */
 export default function TuningPanel({ value, onChange, disabled, exclude }: Props) {
   const [showTuning, setShowTuning] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -63,10 +70,17 @@ export default function TuningPanel({ value, onChange, disabled, exclude }: Prop
   const core = CORE.filter((k) => !hidden.has(k.key))
   const advanced = ADVANCED.filter((k) => !hidden.has(k.key))
 
-  const set = (k: keyof TrackcropOverrides, v: number | string) => {
+  const set = (k: NumberKnobKey, v: number | string) => {
     const next = { ...value }
     if (v === '' || v == null || Number.isNaN(Number(v))) delete next[k]
     else next[k] = Number(v)
+    onChange(next)
+  }
+
+  const setCarrier = (checked: boolean) => {
+    const next = { ...value }
+    if (checked) next.use_carrier = true
+    else delete next.use_carrier
     onChange(next)
   }
 
@@ -112,9 +126,18 @@ export default function TuningPanel({ value, onChange, disabled, exclude }: Prop
       </Group>
 
       {showTuning && (
-        <SimpleGrid cols={{ base: 2, sm: 3 }} spacing="xs">
-          {core.map(renderKnob)}
-        </SimpleGrid>
+        <>
+          <SimpleGrid cols={{ base: 2, sm: 3 }} spacing="xs">
+            {core.map(renderKnob)}
+          </SimpleGrid>
+          <Checkbox
+            size="xs"
+            label="Track last ball carrier during long occlusion (use_carrier)"
+            checked={value.use_carrier ?? false}
+            onChange={(e) => setCarrier(e.currentTarget.checked)}
+            disabled={disabled}
+          />
+        </>
       )}
 
       <UnstyledButton onClick={() => setShowAdvanced((v) => !v)} disabled={disabled}>

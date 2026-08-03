@@ -55,7 +55,6 @@ export default function CropDrawMode({ projectId, models }: Props) {
   const [showCenterLine, setShowCenterLine] = useState(true)
   const [showHighlight, setShowHighlight] = useState(true)
   const [showOverlays, setShowOverlays] = useState(true)
-  const [offline, setOffline] = useState(false)  // 오프라인 2-패스 플래너
 
   const [file, setFile] = useState<File | null>(null)
   const [result, setResult] = useState<LiveResult | null>(null)
@@ -117,7 +116,7 @@ export default function CropDrawMode({ projectId, models }: Props) {
     setPlanLoading(true)
     const timer = window.setTimeout(async () => {
       try {
-        const p = await livePlan(result.detect_id, overrides, showHighlight, offline)
+        const p = await livePlan(result.detect_id, overrides, showHighlight)
         if (planReq.current === id) setPlan(p)
       } catch (e) {
         if (planReq.current === id) setLoadError((e as Error).message)
@@ -127,7 +126,7 @@ export default function CropDrawMode({ projectId, models }: Props) {
     }, 180)
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overridesKey, showHighlight, offline, result?.detect_id])
+  }, [overridesKey, showHighlight, result?.detect_id])
 
   // ---- canvas overlay render loop (reads latest state from a ref, no re-subscribe) ----
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -260,14 +259,6 @@ export default function CropDrawMode({ projectId, models }: Props) {
               Re-analyze with new detection settings
             </Button>
           )}
-
-          <Checkbox
-            mt="xs"
-            size="xs"
-            label="Offline 2-pass planner (track stitching + global path optimization)"
-            checked={offline}
-            onChange={(e) => setOffline(e.currentTarget.checked)}
-          />
 
           <Text size="sm" fw={600} mt="xs">Tuning (instant)</Text>
           <TuningPanel

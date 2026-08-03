@@ -1,31 +1,24 @@
-"""오프라인 2-패스 플래너 — 트랙 확정(balltrack) + 타깃 결정 + 경로 최적화(pathopt).
+"""클립 플래너 — 트랙 확정(balltrack) + 타깃 결정 + 경로 최적화(pathopt).
 
-기존 resolve_targets(순차·프레임 단위) + stabilize(체인)를 대체하는 경로:
+클립 전체를 한 번에 보고 크롭 경로를 계산하는 2-패스 경로:
 
   detect  →  select_game_ball_track  →  타깃 결정(보간·fallback)  →  optimize_path
 
-핵심 차이는 공 미검출 구간이 "외삽(추측)"이 아니라 "보간(확정)"이라는 것 —
-재등장 위치를 이미 알기 때문에 크롭 점프가 구조적으로 없다.
-기존 파이프라인은 건드리지 않는 독립 모듈이라 같은 검출 캐시로 A/B 비교할 수 있다.
+순차(프레임 단위) 방식과의 핵심 차이는 공 미검출 구간이 "외삽(추측)"이 아니라
+"보간(확정)"이라는 것 — 재등장 위치를 이미 알기 때문에 크롭 점프가 구조적으로 없다.
 """
 
 import bisect
 
 from .balltrack import (
     BallTrack,
-    OfflinePlanConfig,
+    ClipPlanConfig,
     ball_in_player_box,
+    player_group_center,
     select_game_ball_track,
 )
-from .constants import (
-    BALL_WEIGHT,
-    CENTER_FALLBACK_X,
-    CROP_WIDTH,
-    PLAYER_GROUP_WEIGHT,
-    PLAYER_LOST_HOLD_MS,
-)
+from .constants import CENTER_FALLBACK_X, CROP_WIDTH, PLAYER_LOST_HOLD_MS
 from .pathopt import optimize_path
-from .tracking import player_group_center
 from .types import Detection, TargetSample, TargetType
 
 
@@ -36,7 +29,7 @@ def _bbox(det: Detection | None) -> list[float] | None:
 
 
 def _ball_at(
-    track: BallTrack | None, offset_ms: int, cfg: OfflinePlanConfig
+    track: BallTrack | None, offset_ms: int, cfg: ClipPlanConfig
 ) -> tuple[float, float, Detection | None] | None:
     """시각 offset_ms의 공 위치. (x, confidence, 실측 Detection|None) 또는 None.
 
@@ -65,7 +58,7 @@ def _ball_at(
 def _build_carrier_timeline(
     track: BallTrack | None,
     players_at: dict[int, list[Detection]],
-    cfg: OfflinePlanConfig,
+    cfg: ClipPlanConfig,
 ) -> list[tuple[int, int]]:
     """실측 공 점마다 기하 겹침으로 소유선수를 판정한 (ms, track_id) 시퀀스."""
     if track is None:
@@ -92,16 +85,16 @@ def _carrier_as_of(timeline: list[tuple[int, int]], offset_ms: int) -> int | Non
     return timeline[i - 1][1] if i > 0 else None
 
 
-def resolve_targets_offline(
+def resolve_targets_clip(
     samples: list[tuple[int, list[Detection]]],
-    cfg: OfflinePlanConfig | None = None,
+    cfg: ClipPlanConfig | None = None,
     debug: list | None = None,
 ) -> tuple[list[TargetSample], dict]:
     """클립 전체를 놓고 시점별 Target X를 결정한다 (최적화 전 원시 타깃).
 
     우선순위: 공(실측/보간) → 공+군집 가중 중심 → 소유선수 → 군집 → 직전 유지 → 중앙.
     """
-    cfg = cfg or OfflinePlanConfig()
+    cfg = cfg or ClipPlanConfig()
     track, info = select_game_ball_track(samples, cfg)
     players_at = {
         offset_ms: [d for d in dets if d.object_type == "player"]
@@ -126,7 +119,7 @@ def resolve_targets_offline(
         if ball is not None:
             ball_x, confidence, measured = ball
             if group_x is not None and abs(ball_x - group_x) <= CROP_WIDTH:
-                target_x = ball_x * BALL_WEIGHT + group_x * PLAYER_GROUP_WEIGHT
+                target_x = ball_x * cfg.ball_weight + group_x * cfg.player_group_weight
                 target_type = TargetType.BALL_PLAYER
             else:
                 target_x = ball_x
@@ -183,14 +176,14 @@ def resolve_targets_offline(
     return results, info
 
 
-def plan_offline(
+def plan_clip(
     samples: list[tuple[int, list[Detection]]],
-    cfg: OfflinePlanConfig | None = None,
+    cfg: ClipPlanConfig | None = None,
     debug: list | None = None,
 ) -> tuple[list[TargetSample], dict]:
     """검출 시퀀스 → 최종 크롭 중심 경로 (타깃 결정 + 전역 최적화)."""
-    cfg = cfg or OfflinePlanConfig()
-    targets, info = resolve_targets_offline(samples, cfg, debug)
+    cfg = cfg or ClipPlanConfig()
+    targets, info = resolve_targets_clip(samples, cfg, debug)
     path = optimize_path(targets, cfg)
     planned = [
         TargetSample(

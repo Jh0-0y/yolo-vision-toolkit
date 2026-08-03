@@ -1,4 +1,4 @@
-"""Unit tests for 오프라인 2-패스 플래너 (balltrack / pathopt / offline_planner).
+"""Unit tests for 클립 플래너 (balltrack / pathopt / clip_planner).
 
 순수 계산 — 모델·영상 없음. 합성 시나리오로 요구사항을 검증한다:
   - 같은 id 내 불가능 점프 쪼개기, id 바뀐 조각 스티칭
@@ -8,16 +8,16 @@
 """
 
 from app.ml.trackcrop.balltrack import (
-    OfflinePlanConfig,
+    ClipPlanConfig,
     build_tracklets,
     select_game_ball_track,
     stitch_tracks,
 )
-from app.ml.trackcrop.offline_planner import plan_offline, resolve_targets_offline
+from app.ml.trackcrop.clip_planner import plan_clip, resolve_targets_clip
 from app.ml.trackcrop.pathopt import optimize_path
 from app.ml.trackcrop.types import Detection, TargetSample, TargetType
 
-CFG = OfflinePlanConfig()
+CFG = ClipPlanConfig()
 
 
 def _ball(cx: float, ms: int, track_id: int | None = 1, conf: float = 0.6) -> Detection:
@@ -109,7 +109,7 @@ def test_short_gap_is_interpolated_as_ball():
         else:
             x = 500 if ms <= 1000 else 800
             samples.append((ms, [_ball(x, ms)]))
-    targets, _ = resolve_targets_offline(samples, CFG)
+    targets, _ = resolve_targets_clip(samples, CFG)
     mid = next(t for t in targets if t.video_offset_ms == 1300)
     assert mid.target_type == TargetType.BALL.value
     assert abs(mid.target_center_x - 650) < 1  # (500+800)/2
@@ -118,7 +118,7 @@ def test_short_gap_is_interpolated_as_ball():
 def test_long_gap_falls_back_to_carrier():
     # 3초 가림(보간 한계 초과) — use_carrier=True면 마지막으로 공을 든 선수를 따라간다.
     # 흡수 병합(스티칭 한계 2.5s 초과라 별도 체인)도 함께 검증된다.
-    cfg = OfflinePlanConfig(use_carrier=True)
+    cfg = ClipPlanConfig(use_carrier=True)
     samples = []
     for ms in range(0, 1100, 100):
         x = 500 + 0.1 * ms
@@ -128,7 +128,7 @@ def test_long_gap_falls_back_to_carrier():
     for ms in range(4000, 5100, 100):
         samples.append((ms, [_ball(700, ms, track_id=2), _player(700, ms, track_id=5), _player(1500, ms, track_id=6)]))
 
-    targets, info = resolve_targets_offline(samples, cfg)
+    targets, info = resolve_targets_clip(samples, cfg)
     assert info["absorbed"] == 1
     mid = next(t for t in targets if t.video_offset_ms == 2500)
     # carrier ON: 군집 중앙값(≈1060)이 아니라 소유선수(620)를 따라가야 한다
@@ -136,14 +136,14 @@ def test_long_gap_falls_back_to_carrier():
     assert abs(mid.target_center_x - 620) < 1
 
     # 기본(use_carrier=False): 소유선수 대신 선수 군집 중앙값을 따라간다
-    targets_off, _ = resolve_targets_offline(samples, OfflinePlanConfig())
+    targets_off, _ = resolve_targets_clip(samples, ClipPlanConfig())
     mid_off = next(t for t in targets_off if t.video_offset_ms == 2500)
     assert abs(mid_off.target_center_x - 620) > 100  # 620(carrier) 아님
 
 
 def test_no_ball_clip_uses_player_group():
     samples = [(ms, [_player(900, ms, track_id=5)]) for ms in range(0, 2000, 100)]
-    planned, info = plan_offline(samples, CFG)
+    planned, info = plan_clip(samples, CFG)
     assert len(planned) == len(samples)
     assert all(t.target_type == TargetType.PLAYER_GROUP.value for t in planned)
 
@@ -183,7 +183,7 @@ def test_path_respects_speed_cap_and_bounds():
 # 통합
 
 
-def test_plan_offline_end_to_end():
+def test_plan_clip_end_to_end():
     samples = []
     for ms in range(0, 20000, 100):
         dets = [_ball(1800, ms, track_id=99, conf=0.9)]  # 관중석 공 상시
@@ -194,7 +194,7 @@ def test_plan_offline_end_to_end():
         samples.append((ms, dets))
 
     debug: list = []
-    planned, info = plan_offline(samples, CFG, debug=debug)
+    planned, info = plan_clip(samples, CFG, debug=debug)
     assert len(planned) == len(samples) == len(debug)
     assert all(304 <= t.target_center_x <= 1616 for t in planned)
     max_step = max(

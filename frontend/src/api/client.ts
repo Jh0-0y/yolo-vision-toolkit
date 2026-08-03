@@ -628,25 +628,35 @@ export type CropOutput = 'none' | 'label' | 'video'
 
 /** trackcrop 런타임 튜닝 오버라이드 — 비운 값은 보내지 않아 기본값(constants) 사용. */
 export interface TrackcropOverrides {
-  dead_zone_width?: number
+  // 검출/지오메트리 정책
   sampling_interval_ms?: number
-  ball_lost_hold_ms?: number
-  player_lost_hold_ms?: number
+  dead_zone_width?: number
   max_move_px_per_second?: number
   ball_weight?: number
-  match_max_jump_px?: number
-  outlier_deviation_px?: number
-  outlier_window?: number
-  low_confidence?: number
-  smooth_window?: number
-  confidence_decay?: number
-  reacquire_blend?: number
-  w_continuity?: number
-  w_confidence?: number
-  w_player_proximity?: number
-  w_carrier_proximity?: number
-  w_carrier_velocity?: number
-  velocity_scale?: number
+  // tracklet 쪼개기 / 스티칭
+  ball_max_speed_px_s?: number
+  split_base_px?: number
+  stitch_max_gap_ms?: number
+  stitch_base_px?: number
+  stitch_velocity_cap_ms?: number
+  // 트랙 채점
+  w_travel?: number
+  w_interaction?: number
+  w_span?: number
+  travel_norm_px?: number
+  min_track_score?: number
+  absorb_allow_scale?: number
+  possession_margin?: number
+  // 타깃 결정
+  interp_max_gap_ms?: number
+  use_carrier?: boolean
+  // 경로 최적화
+  w_follow?: number
+  w_inside?: number
+  w_vel?: number
+  w_acc?: number
+  irls_iters?: number
+  min_follow_conf?: number
 }
 
 export function startAnnotate(opts: {
@@ -819,12 +829,10 @@ export const livePlan = (
   detectId: string,
   overrides: TrackcropOverrides,
   collectDebug: boolean,
-  offline = false,
 ) =>
   api.post<CropPlan>(`/predict/live/${detectId}/plan`, {
     overrides,
     collect_debug: collectDebug,
-    offline,
   })
 
 // ---------- test: model comparison (score models vs labeled ground truth) ----------
