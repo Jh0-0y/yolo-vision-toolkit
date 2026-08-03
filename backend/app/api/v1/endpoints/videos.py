@@ -13,6 +13,7 @@ from sse_starlette.sse import EventSourceResponse
 from sqlmodel import Session
 
 from app.core.config import settings
+from app.domain.tiling import TilingParams
 from app.domain.video import VIDEO_EXTS, ExtractParams
 from app.db import get_session
 from app.services.label_manager import read_progress
@@ -46,11 +47,18 @@ def _params(
     end_sec: float | None,
     dedup: bool,
     dedup_threshold: float,
+    tile: bool = False,
+    tile_size: int = 640,
+    stride: int = 480,
 ) -> ExtractParams:
     if target_fps <= 0:
         raise HTTPException(422, "target_fps must be greater than 0")
     if max_frames <= 0:
         raise HTTPException(422, "max_frames must be greater than 0")
+    if tile:
+        errors = TilingParams(tile_size=tile_size, stride=stride).validate()
+        if errors:
+            raise HTTPException(422, f"Invalid tiling params: {errors}")
     return ExtractParams(
         target_fps=target_fps,
         max_frames=max_frames,
@@ -58,6 +66,9 @@ def _params(
         end_sec=end_sec,
         dedup=dedup,
         dedup_threshold=dedup_threshold,
+        tile=tile,
+        tile_size=tile_size,
+        stride=stride,
     )
 
 
@@ -71,10 +82,16 @@ async def upload_video(
     end_sec: float | None = Form(None),
     dedup: bool = Form(True),
     dedup_threshold: float = Form(0.92),
+    tile: bool = Form(False),  # 프레임을 학습용 타일로 쪼개 저장
+    tile_size: int = Form(640),
+    stride: int = Form(480),  # 겹침 = tile_size - stride
     session: Session = Depends(get_session),
 ):
     _require_project(session, project_id)
-    params = _params(target_fps, max_frames, start_sec, end_sec, dedup, dedup_threshold)
+    params = _params(
+        target_fps, max_frames, start_sec, end_sec, dedup, dedup_threshold,
+        tile, tile_size, stride,
+    )
 
     name = (file.filename or "").rsplit("/", 1)[-1]
     ext = Path(name).suffix.lower()
@@ -115,10 +132,16 @@ def resample_video(
     end_sec: float | None = Form(None),
     dedup: bool = Form(True),
     dedup_threshold: float = Form(0.92),
+    tile: bool = Form(False),  # 프레임을 학습용 타일로 쪼개 저장
+    tile_size: int = Form(640),
+    stride: int = Form(480),  # 겹침 = tile_size - stride
     session: Session = Depends(get_session),
 ):
     _require_project(session, project_id)
-    params = _params(target_fps, max_frames, start_sec, end_sec, dedup, dedup_threshold)
+    params = _params(
+        target_fps, max_frames, start_sec, end_sec, dedup, dedup_threshold,
+        tile, tile_size, stride,
+    )
 
     videos_dir = _project_dir(project_id) / "videos"
     meta_path = videos_dir / f"{video_id}.json"

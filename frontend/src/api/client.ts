@@ -520,6 +520,10 @@ export interface VideoUploadParams {
   end_sec: number | null
   dedup: boolean
   dedup_threshold: number
+  // 타일링 — 프레임을 학습용 타일로 쪼개 저장
+  tile?: boolean
+  tile_size?: number
+  stride?: number
 }
 
 export interface VideoProgressEvent {
@@ -547,6 +551,11 @@ export function uploadVideo(
   if (params.end_sec != null) form.append('end_sec', String(params.end_sec))
   form.append('dedup', String(params.dedup))
   form.append('dedup_threshold', String(params.dedup_threshold))
+  if (params.tile) {
+    form.append('tile', 'true')
+    if (params.tile_size != null) form.append('tile_size', String(params.tile_size))
+    if (params.stride != null) form.append('stride', String(params.stride))
+  }
   return xhrUpload<{ video_id: string; filename: string; status: string }>(
     `/projects/${projectId}/videos`,
     form,

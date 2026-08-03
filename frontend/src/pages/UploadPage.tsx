@@ -8,44 +8,31 @@ import {
   ThemeIcon,
   Title,
 } from '@mantine/core'
-import { Dropzone, IMAGE_MIME_TYPE } from '@mantine/dropzone'
-import { IconFileZip, IconMovie, IconPhoto, IconUpload, IconX } from '@tabler/icons-react'
+import { Dropzone } from '@mantine/dropzone'
+import { IconFileZip, IconMovie } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import VideoExtractCard from '../components/upload/VideoExtractCard'
+import TilingOptions, { DEFAULT_TILING, type TilingState } from '../components/upload/TilingOptions'
 
 export default function UploadPage() {
   const { projectId } = useParams() as { projectId: string }
   const queryClient = useQueryClient()
-  const [count, setCount] = useState(0)
-
-  const upload = useMutation({
-    mutationFn: (files: File[]) => {
-      const form = new FormData()
-      files.forEach((f) => form.append('files', f))
-      setCount(files.length)
-      return api.upload<{ added: number; skipped: number }>(
-        `/projects/${projectId}/images`,
-        form,
-      )
-    },
-    onSuccess: (res) => {
-      notifications.show({
-        message: `${res.added} images added${res.skipped ? `, ${res.skipped} skipped` : ''}`,
-        color: 'green',
-      })
-      queryClient.invalidateQueries({ queryKey: ['images', projectId] })
-      queryClient.invalidateQueries({ queryKey: ['stats', projectId] })
-    },
-    onError: (e) => notifications.show({ message: String(e), color: 'red' }),
-  })
+  const [tiling, setTiling] = useState<TilingState>(DEFAULT_TILING)
 
   const importZip = useMutation({
     mutationFn: (file: File) => {
       const form = new FormData()
       form.append('file', file)
+      if (tiling.tile) {
+        form.append('tiling', 'true')
+        form.append('tile_size', String(tiling.tileSize))
+        form.append('stride', String(tiling.stride))
+        form.append('min_visibility', String(tiling.minVisibility))
+        form.append('drop_empty', String(tiling.dropEmpty))
+      }
       return api.upload<{ images: number; labeled: number; classes: number }>(
         `/projects/${projectId}/dataset-zip`,
         form,
@@ -67,15 +54,12 @@ export default function UploadPage() {
       <div>
         <Title order={3}>Upload Data</Title>
         <Text c="dimmed" size="sm">
-          Upload images, extract frames from a video, or import a labeled YOLO dataset.
+          Extract frames from a video, or import a labeled YOLO dataset — optionally tiled for training.
         </Text>
       </div>
 
-      <Tabs defaultValue="images">
+      <Tabs defaultValue="video">
         <Tabs.List>
-          <Tabs.Tab value="images" leftSection={<IconPhoto size={16} />}>
-            Images
-          </Tabs.Tab>
           <Tabs.Tab value="video" leftSection={<IconMovie size={16} />}>
             Video
           </Tabs.Tab>
@@ -83,53 +67,6 @@ export default function UploadPage() {
             Labeled .zip
           </Tabs.Tab>
         </Tabs.List>
-
-        <Tabs.Panel value="images" pt="md">
-          <Card withBorder radius="md" padding="lg">
-            <Stack>
-              <Group gap="xs">
-                <ThemeIcon variant="light" size="lg" radius="md">
-                  <IconPhoto size={20} />
-                </ThemeIcon>
-                <div>
-                  <Text fw={600}>Image upload</Text>
-                  <Text size="xs" c="dimmed">
-                    Upload multiple images at once
-                  </Text>
-                </div>
-              </Group>
-
-              <Dropzone
-                onDrop={(files) => upload.mutate(files)}
-                accept={IMAGE_MIME_TYPE}
-                loading={upload.isPending}
-                radius="md"
-              >
-                <Stack align="center" gap={6} py="xl" style={{ pointerEvents: 'none' }}>
-                  <Dropzone.Accept>
-                    <IconUpload size={32} stroke={1.4} />
-                  </Dropzone.Accept>
-                  <Dropzone.Reject>
-                    <IconX size={32} stroke={1.4} />
-                  </Dropzone.Reject>
-                  <Dropzone.Idle>
-                    <IconPhoto size={32} stroke={1.4} />
-                  </Dropzone.Idle>
-                  <Text size="sm">Drag images here or click to browse</Text>
-                  <Text size="xs" c="dimmed">
-                    jpg · png · bmp · webp · tiff
-                  </Text>
-                </Stack>
-              </Dropzone>
-
-              {upload.isPending && (
-                <Text size="xs" c="dimmed">
-                  Uploading {count} files…
-                </Text>
-              )}
-            </Stack>
-          </Card>
-        </Tabs.Panel>
 
         <Tabs.Panel value="video" pt="md">
           <VideoExtractCard projectId={projectId} />
@@ -149,6 +86,13 @@ export default function UploadPage() {
                   </Text>
                 </div>
               </Group>
+
+              <TilingOptions
+                value={tiling}
+                onChange={setTiling}
+                disabled={importZip.isPending}
+                withLabels
+              />
 
               <Dropzone
                 onDrop={(files) => files[0] && importZip.mutate(files[0])}

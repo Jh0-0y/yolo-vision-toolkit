@@ -13,6 +13,8 @@ from pathlib import Path
 
 import cv2
 
+from app.domain.tiling import TilingParams, tile_grid, tile_stem
+
 VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
 
 
@@ -24,6 +26,10 @@ class ExtractParams:
     end_sec: float | None = None
     dedup: bool = True
     dedup_threshold: float = 0.92  # >= means "too similar", frame is skipped
+    # 타일링 — 프레임을 학습용 타일로 쪼개 저장 (라벨 전 단계라 가시 비율 없음)
+    tile: bool = False
+    tile_size: int = 640
+    stride: int = 480
 
 
 def _append(progress_path: Path, event: dict) -> None:
@@ -82,6 +88,7 @@ def extract_frames(
 
     idx = 0
     saved = 0
+    tiles = 0
     skipped_dup = 0
     prev_small = None
     cancelled = False
@@ -115,8 +122,16 @@ def extract_frames(
                 if keep:
                     # Sequential, contiguous frame numbering: {video-name}_00001.jpg,
                     # _00002.jpg ... in save order (not the sparse source frame index).
-                    fname = f"{stem}_{saved + 1:05d}.jpg"
-                    cv2.imwrite(str(raw_dir / fname), frame)
+                    frame_stem = f"{stem}_{saved + 1:05d}"
+                    if params.tile:
+                        h, w = frame.shape[:2]
+                        grid = TilingParams(tile_size=params.tile_size, stride=params.stride)
+                        for col, row, tx, ty in tile_grid(w, h, grid):
+                            crop = frame[ty : ty + grid.tile_size, tx : tx + grid.tile_size]
+                            cv2.imwrite(str(raw_dir / f"{tile_stem(frame_stem, col, row)}.jpg"), crop)
+                            tiles += 1
+                    else:
+                        cv2.imwrite(str(raw_dir / f"{frame_stem}.jpg"), frame)
                     saved += 1
                     if saved % 10 == 0 or saved == 1:
                         _append(
@@ -136,11 +151,11 @@ def extract_frames(
         cap.release()
 
     if cancelled:
-        _append(progress_path, {"phase": "cancelled", "saved": saved})
-        return {"status": "cancelled", "saved": saved, "skipped_dup": skipped_dup}
+        _append(progress_path, {"phase": "cancelled", "saved": saved, "tiles": tiles})
+        return {"status": "cancelled", "saved": saved, "tiles": tiles, "skipped_dup": skipped_dup}
 
     _append(
         progress_path,
-        {"phase": "done", "saved": saved, "scanned": idx, "skipped_dup": skipped_dup},
+        {"phase": "done", "saved": saved, "tiles": tiles, "scanned": idx, "skipped_dup": skipped_dup},
     )
-    return {"status": "done", "saved": saved, "skipped_dup": skipped_dup, "scanned": idx}
+    return {"status": "done", "saved": saved, "tiles": tiles, "skipped_dup": skipped_dup, "scanned": idx}

@@ -10,7 +10,7 @@ import zipfile
 from pathlib import Path
 
 import yaml
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from app.schemas.project import (
     DeleteImagesIn,
@@ -32,7 +32,8 @@ from app.domain.labels import (
     set_reviewed,
     write_reviewed,
 )
-from app.domain.yolo_io import atomic_write_text
+from app.domain.tiling import TilingParams, clip_boxes_to_tile, tile_grid, tile_stem
+from app.domain.yolo_io import atomic_write_text, read_label_file, write_label_file
 from app.db import get_session
 from app.models import ModelEntry, Project, TrainRun, iso_utc
 
@@ -182,10 +183,52 @@ def _remap_label_text(path: Path, mapping: dict[int, int]) -> str:
     return "\n".join(lines) + ("\n" if lines else "")
 
 
-def _import_labeled_zip(tmp_zip: Path, pdir: Path) -> dict:
+def _import_tiled(
+    img: Path,
+    lbl: Path | None,
+    mapping: dict[int, int],
+    raw_dir: Path,
+    labels_dir: Path,
+    tiling: TilingParams,
+) -> tuple[int, int]:
+    """이미지 한 장을 타일로 쪼개 저장한다. (저장한 타일 수, 라벨 쓴 타일 수) 반환.
+
+    라벨은 자동 변환: 타일에 들어온 박스의 가시 비율이 min_visibility 이상이면
+    타일 경계로 클립해 유지, 미만이면 삭제. drop_empty면 (라벨 있는 원본에서)
+    박스가 하나도 안 남은 타일은 저장하지 않는다.
+    """
+    import cv2
+
+    frame = cv2.imread(str(img))
+    if frame is None:
+        return 0, 0
+    img_h, img_w = frame.shape[:2]
+
+    boxes: list[tuple[int, tuple[float, float, float, float]]] = []
+    if lbl is not None:
+        boxes = [(mapping.get(c, c), xyxy) for c, xyxy in read_label_file(lbl)]
+
+    saved = labeled = 0
+    for col, row, tx, ty in tile_grid(img_w, img_h, tiling):
+        tile_boxes = clip_boxes_to_tile(boxes, img_w, img_h, tx, ty, tiling)
+        if lbl is not None and tiling.drop_empty and not tile_boxes:
+            continue
+        stem = tile_stem(img.stem, col, row)
+        crop = frame[ty : ty + tiling.tile_size, tx : tx + tiling.tile_size]
+        cv2.imwrite(str(raw_dir / f"{stem}.jpg"), crop)
+        saved += 1
+        if lbl is not None:
+            write_label_file(labels_dir / f"{stem}.txt", tile_boxes)
+            labeled += 1
+    return saved, labeled
+
+
+def _import_labeled_zip(tmp_zip: Path, pdir: Path, tiling: TilingParams | None = None) -> dict:
     """Import a YOLO-format dataset zip (images + labels + data.yaml) into a
     project's raw/ + labels/, merging its classes into classes.json and
-    remapping label class ids so they stay valid project-wide."""
+    remapping label class ids so they stay valid project-wide.
+
+    tiling이 주어지면 각 이미지를 타일로 쪼개 저장한다 (라벨 자동 클립/삭제)."""
     with tempfile.TemporaryDirectory() as td:
         extract = Path(td)
         try:
@@ -219,9 +262,14 @@ def _import_labeled_zip(tmp_zip: Path, pdir: Path) -> dict:
         for img in extract.rglob("*"):
             if img.suffix.lower() not in IMAGE_EXTS or img.name.startswith("."):
                 continue
+            lbl = label_files.get(img.stem)
+            if tiling is not None:
+                saved, labeled = _import_tiled(img, lbl, mapping, raw_dir, labels_dir, tiling)
+                added_images += saved
+                added_labels += labeled
+                continue
             shutil.copyfile(img, raw_dir / img.name)
             added_images += 1
-            lbl = label_files.get(img.stem)
             if lbl is not None:
                 atomic_write_text(labels_dir / f"{img.stem}.txt", _remap_label_text(lbl, mapping))
                 added_labels += 1
@@ -238,12 +286,29 @@ def _import_labeled_zip(tmp_zip: Path, pdir: Path) -> dict:
 async def import_dataset_zip(
     project_id: str,
     file: UploadFile,
+    tiling: bool = Form(False),  # 타일로 쪼개 학습 데이터셋 생성
+    tile_size: int = Form(640),
+    stride: int = Form(480),  # 겹침 = tile_size - stride
+    min_visibility: float = Form(0.6),  # 60% 이상 보여야 라벨 유지 (프로젝트 기본)
+    drop_empty: bool = Form(True),  # 박스 없는 타일 제외
     session: Session = Depends(get_session),
 ):
-    """Ingest an already-labeled YOLO dataset zip so it shows up in the dataset view."""
+    """Ingest an already-labeled YOLO dataset zip so it shows up in the dataset view.
+
+    tiling=True면 각 이미지를 타일(tile_size/stride)로 쪼개고 라벨을 자동
+    변환한다 — 가시 비율 min_visibility 이상이면 클립 유지, 미만이면 삭제."""
     _get_project(session, project_id)
     if not file.filename or not file.filename.lower().endswith(".zip"):
         raise HTTPException(422, "Only .zip files are accepted")
+    params: TilingParams | None = None
+    if tiling:
+        params = TilingParams(
+            tile_size=tile_size, stride=stride,
+            min_visibility=min_visibility, drop_empty=drop_empty,
+        )
+        errors = params.validate()
+        if errors:
+            raise HTTPException(422, f"Invalid tiling params: {errors}")
     pdir = _project_dir(project_id)
     pdir.mkdir(parents=True, exist_ok=True)
     tmp_zip = pdir / f".import_{uuid.uuid4().hex[:8]}.zip"
@@ -251,7 +316,7 @@ async def import_dataset_zip(
         with open(tmp_zip, "wb") as f:
             while chunk := await file.read(1 << 20):
                 f.write(chunk)
-        return await run_in_threadpool(_import_labeled_zip, tmp_zip, pdir)
+        return await run_in_threadpool(_import_labeled_zip, tmp_zip, pdir, params)
     finally:
         tmp_zip.unlink(missing_ok=True)
 
