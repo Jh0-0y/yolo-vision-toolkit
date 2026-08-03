@@ -47,7 +47,9 @@ class ClipPlanConfig:
     w_span: float = 0.1  # 클립 대비 커버 시간
     travel_norm_px: float = 3840.0  # 포화 완화 — 1920이면 부분 체인도 만점이라 변별력 상실
     min_track_score: float = 0.25  # 미달이면 "공 없음" 클립
-    absorb_allow_scale: float = 2.0  # 흡수 병합 시 허용치 완화 배율
+    absorb_allow_scale: float = 2.0  # 흡수 병합(체인) 시 허용치 완화 배율
+    absorb_point_scale: float = 0.5  # 점 단위 흡수 허용치 — 좁게 (다른 공 흡입 방지)
+    prune_dev_px: float = 300.0  # 이웃 보간 대비 이 이상 벗어난 점 제거 (다른 공 관측)
     possession_margin: float = 0.15  # 소유 판정: 선수 bbox 확장 비율 (×키)
 
     # --- 타깃 결정 ---
@@ -334,7 +336,37 @@ def select_game_ball_track(
         if kept is None or p.det.confidence > kept.det.confidence:
             dedup[p.offset_ms] = p
     best.points = [dedup[ms] for ms in sorted(dedup)]
+
+    # 트랙 정제 — 이웃 보간에서 크게 벗어난 점(다른 공/오탐의 관측)을 반복 제거.
+    # 스티칭·흡수가 지저분한 검출에서 남긴 지그재그(물리적으로 불가능한 왕복)를 푼다.
+    info["pruned_points"] = _prune_outlier_points(best, cfg)
     return best, info
+
+
+def _prune_outlier_points(track: BallTrack, cfg: ClipPlanConfig) -> int:
+    """이웃 점 선형 보간 대비 prune_dev_px 이상 벗어난 점을 최악부터 반복 제거."""
+    removed = 0
+    while len(track.points) >= 3:
+        worst_i = -1
+        worst_dev = cfg.prune_dev_px
+        for i in range(1, len(track.points) - 1):
+            before, cur, after = track.points[i - 1 : i + 2]
+            span = after.offset_ms - before.offset_ms
+            if span <= 0:
+                continue
+            ratio = (cur.offset_ms - before.offset_ms) / span
+            expected = (
+                before.det.center_x
+                + (after.det.center_x - before.det.center_x) * ratio
+            )
+            dev = abs(cur.det.center_x - expected)
+            if dev > worst_dev:
+                worst_dev, worst_i = dev, i
+        if worst_i < 0:
+            break
+        del track.points[worst_i]
+        removed += 1
+    return removed
 
 
 def _absorb_consistent_points(
@@ -371,7 +403,7 @@ def _absorb_consistent_points(
             else:
                 expected = best.points[-1].det.center_x
                 gap = ms - times[-1]
-            if abs(p.det.center_x - expected) <= _link_allowance(gap, cfg):
+            if abs(p.det.center_x - expected) <= _link_allowance(gap, cfg, cfg.absorb_point_scale):
                 best.points.insert(i, p)
                 times.insert(i, ms)
                 have.add(ms)
