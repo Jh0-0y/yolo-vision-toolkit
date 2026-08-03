@@ -51,12 +51,17 @@ interface Props {
   value: TrackcropOverrides
   onChange: (v: TrackcropOverrides) => void
   disabled?: boolean
+  /** knobs to hide — e.g. live preview hides sampling_interval_ms (a detection param). */
+  exclude?: (keyof TrackcropOverrides)[]
 }
 
 /** trackcrop tuning knobs — leaving a field empty omits it, so the default (constants) is used. */
-export default function TuningPanel({ value, onChange, disabled }: Props) {
+export default function TuningPanel({ value, onChange, disabled, exclude }: Props) {
   const [showTuning, setShowTuning] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const hidden = new Set(exclude ?? [])
+  const core = CORE.filter((k) => !hidden.has(k.key))
+  const advanced = ADVANCED.filter((k) => !hidden.has(k.key))
 
   const set = (k: keyof TrackcropOverrides, v: number | string) => {
     const next = { ...value }
@@ -108,7 +113,7 @@ export default function TuningPanel({ value, onChange, disabled }: Props) {
 
       {showTuning && (
         <SimpleGrid cols={{ base: 2, sm: 3 }} spacing="xs">
-          {CORE.map(renderKnob)}
+          {core.map(renderKnob)}
         </SimpleGrid>
       )}
 
@@ -126,7 +131,7 @@ export default function TuningPanel({ value, onChange, disabled }: Props) {
       </UnstyledButton>
       {showAdvanced && (
         <SimpleGrid cols={{ base: 2, sm: 3 }} spacing="xs">
-          {ADVANCED.map(renderKnob)}
+          {advanced.map(renderKnob)}
         </SimpleGrid>
       )}
 

@@ -713,6 +713,120 @@ export const annotateResultUrl = (jobId: string) => `${BASE}/predict/annotate/${
 
 export const annotateCropUrl = (jobId: string) => `${BASE}/predict/annotate/${jobId}/crop`
 
+// ---------- test: live crop preview (detect once → recompute crop coords on the fly) ----------
+
+export interface LiveProgress {
+  phase: 'start' | 'detect' | 'encoding' | 'done' | 'error' | 'cancelled'
+  done?: number
+  total?: number
+  msg?: string
+}
+
+// One sampled frame's detections (ByteTrack boxes), in source-pixel coordinates.
+export interface LiveDetection {
+  object_type: 'ball' | 'player'
+  track_id: number | null
+  bbox_x: number
+  bbox_y: number
+  bbox_width: number
+  bbox_height: number
+  confidence: number
+}
+
+export interface LiveSample {
+  video_offset_ms: number
+  detections: LiveDetection[]
+}
+
+// Cached detection result + geometry meta (the crop trajectory comes from livePlan).
+export interface LiveResult {
+  detect_id: string
+  source_width: number
+  source_height: number
+  fps: number
+  duration_ms: number
+  sampling_interval_ms: number
+  sample_count: number
+  detections: LiveSample[]
+}
+
+// One point of the target-centre trajectory (source-pixel X at a sample time).
+export interface CropSample {
+  video_offset_ms: number
+  target_center_x: number
+  target_type: 'ball' | 'ball_player' | 'player_group' | 'center'
+  confidence: number
+}
+
+// Selected ball / carrier bbox at a sample time (target-highlight overlay). [x,y,w,h].
+export interface CropDebug {
+  video_offset_ms: number
+  ball_bbox: [number, number, number, number] | null
+  carrier_bbox: [number, number, number, number] | null
+}
+
+// Crop coordinates recomputed from cached detections for a given set of overrides.
+export interface CropPlan {
+  source_width: number
+  source_height: number
+  duration_ms: number
+  crop_width: number
+  crop_height: number
+  crop_y: number
+  keyframes: { video_offset_ms: number; x: number; target_type: string; confidence: number }[]
+  samples: CropSample[]
+  summary: Record<string, number>
+  debug: CropDebug[]
+}
+
+export function startLive(opts: {
+  file: File
+  modelIds: string[]
+  projectId: string
+  conf?: number
+  imgsz: number
+  device?: string | null
+  samplingIntervalMs?: number
+}): Promise<TestJobStart> {
+  const form = new FormData()
+  form.append('file', opts.file)
+  form.append('model_ids', opts.modelIds.join(','))
+  form.append('project_id', opts.projectId)
+  if (opts.conf != null) form.append('conf', String(opts.conf))
+  form.append('imgsz', String(opts.imgsz))
+  if (opts.device) form.append('device', opts.device)
+  if (opts.samplingIntervalMs != null)
+    form.append('sampling_interval_ms', String(opts.samplingIntervalMs))
+  return api.upload<TestJobStart>('/predict/live', form)
+}
+
+export function subscribeLiveEvents(jobId: string, onEvent: (ev: LiveProgress) => void): () => void {
+  const source = new EventSource(`${BASE}/predict/live/${jobId}/events`)
+  source.addEventListener('progress', (e) => {
+    const ev = JSON.parse((e as MessageEvent).data) as LiveProgress
+    onEvent(ev)
+    if (ev.phase === 'done' || ev.phase === 'error' || ev.phase === 'cancelled') source.close()
+  })
+  return () => source.close()
+}
+
+export const liveVideoUrl = (detectId: string) => `${BASE}/predict/live/${detectId}/video`
+
+export const getLiveResult = (jobId: string) => api.get<LiveResult>(`/predict/live/${jobId}/result`)
+
+// Cheap crop-coordinate recompute — call on every tuning change; no inference happens.
+export const livePlan = (
+  detectId: string,
+  overrides: TrackcropOverrides,
+  collectDebug: boolean,
+  offline = false,
+) =>
+  api.post<CropPlan>(`/predict/live/${detectId}/plan`, {
+    overrides,
+    collect_debug: collectDebug,
+    offline,
+  })
+
 // ---------- test: model comparison (score models vs labeled ground truth) ----------
 
 export interface ClassMetric {

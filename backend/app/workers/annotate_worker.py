@@ -85,6 +85,7 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
     show_center_line = bool(cfg.get("show_center_line", True))
     show_target_highlight = bool(cfg.get("show_target_highlight", False))
     overrides = cfg.get("overrides") or None  # trackcrop 튜닝 오버라이드 (dict)
+    offline = bool(cfg.get("offline", False))  # 오프라인 2-패스 플래너 사용 여부
 
     from app.domain import crop_render  # cv2-only geometry (no torch) — safe here
 
@@ -136,7 +137,7 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
             # geometry checks. overrides = runtime tuning; collect_debug = highlight bboxes.
             cropres = analyze_video(
                 str(src), model_path=pt, device=device, imgsz=imgsz, conf=crop_conf,
-                validate=False, overrides=overrides,
+                validate=False, overrides=overrides, offline=offline,
                 collect_debug=show_target_highlight and not crop_json_only,
             )
             crop_traj = crop_render.build_trajectory(cropres.samples, w)

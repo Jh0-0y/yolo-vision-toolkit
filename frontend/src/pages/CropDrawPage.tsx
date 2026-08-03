@@ -25,9 +25,9 @@ export default function CropDrawPage() {
     <Stack gap="lg">
       <Group justify="space-between" align="flex-start">
         <div>
-          <Title order={3}>Crop Draw Tool</Title>
+          <Title order={3}>Live Crop Preview</Title>
           <Text c="dimmed" size="sm">
-            Tune crop performance visually — render overlays (objects, crop box, dead zone, target highlight) onto the video.
+            Detect once, then play the video with the crop overlay drawn live — tuning knobs apply instantly, no re-render.
           </Text>
         </div>
         {resources && (

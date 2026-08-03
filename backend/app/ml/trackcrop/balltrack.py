@@ -41,6 +41,7 @@ class OfflinePlanConfig:
 
     # --- 타깃 결정 ---
     interp_max_gap_ms: int = 2000  # 이하 gap은 선형 보간(BALL 유지)
+    use_carrier: bool = False  # 공 없을 때 소유선수(특정 선수) 추적 여부. off=선수군집/유지로
 
     # --- 경로 최적화 ---
     w_follow: float = 1.0  # 데드존 밖 이탈 페널티

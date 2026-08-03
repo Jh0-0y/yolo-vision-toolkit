@@ -116,8 +116,9 @@ def test_short_gap_is_interpolated_as_ball():
 
 
 def test_long_gap_falls_back_to_carrier():
-    # 3초 가림(보간 한계 초과) — 마지막으로 공을 든 선수를 따라간다.
+    # 3초 가림(보간 한계 초과) — use_carrier=True면 마지막으로 공을 든 선수를 따라간다.
     # 흡수 병합(스티칭 한계 2.5s 초과라 별도 체인)도 함께 검증된다.
+    cfg = OfflinePlanConfig(use_carrier=True)
     samples = []
     for ms in range(0, 1100, 100):
         x = 500 + 0.1 * ms
@@ -127,12 +128,17 @@ def test_long_gap_falls_back_to_carrier():
     for ms in range(4000, 5100, 100):
         samples.append((ms, [_ball(700, ms, track_id=2), _player(700, ms, track_id=5), _player(1500, ms, track_id=6)]))
 
-    targets, info = resolve_targets_offline(samples, CFG)
+    targets, info = resolve_targets_offline(samples, cfg)
     assert info["absorbed"] == 1
     mid = next(t for t in targets if t.video_offset_ms == 2500)
-    # 군집 중앙값(≈1060)이 아니라 소유선수(620)를 따라가야 한다
+    # carrier ON: 군집 중앙값(≈1060)이 아니라 소유선수(620)를 따라가야 한다
     assert mid.target_type == TargetType.PLAYER_GROUP.value
     assert abs(mid.target_center_x - 620) < 1
+
+    # 기본(use_carrier=False): 소유선수 대신 선수 군집 중앙값을 따라간다
+    targets_off, _ = resolve_targets_offline(samples, OfflinePlanConfig())
+    mid_off = next(t for t in targets_off if t.video_offset_ms == 2500)
+    assert abs(mid_off.target_center_x - 620) > 100  # 620(carrier) 아님
 
 
 def test_no_ball_clip_uses_player_group():

@@ -48,6 +48,11 @@ def sweep_old_compare() -> None:
     _sweep_dir(settings.test_dir / "compare", ANNOTATE_TTL_SEC)
 
 
+def sweep_old_live() -> None:
+    """Delete live-preview cache dirs (detections + preview.mp4) older than the TTL."""
+    _sweep_dir(settings.test_dir / "live", ANNOTATE_TTL_SEC)
+
+
 class TestJobManager:
     """Owns two single-worker pools so a long video-tracking job and a
     model-comparison/analysis job don't block each other (they used to share one
@@ -88,6 +93,17 @@ class TestJobManager:
         self._prepare(job_id)
         future = self._get_executor("eval").submit(
             compare_worker.run_compare, job_id, cfg, str(settings.jobs_dir)
+        )
+        self._futures[job_id] = future
+
+    def submit_live(self, job_id: str, cfg: dict) -> None:
+        """Live-preview detection pass — shares the single "video" worker with
+        annotate so a heavy GPU detection and a heavy render never run at once."""
+        from app.workers import live_worker
+
+        self._prepare(job_id)
+        future = self._get_executor("video").submit(
+            live_worker.run_live, job_id, cfg, str(settings.jobs_dir)
         )
         self._futures[job_id] = future
 

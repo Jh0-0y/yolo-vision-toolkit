@@ -14,7 +14,7 @@ import uuid
 import zipfile
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from sqlmodel import Session
@@ -28,7 +28,12 @@ from app.models import ModelEntry
 from app.schemas.predict import PredictResponse, ResidentModel, TestJobStart
 from app.services.infer_manager import infer_manager
 from app.services.label_manager import read_progress
-from app.services.test_jobs import sweep_old_annotations, sweep_old_compare, test_job_manager
+from app.services.test_jobs import (
+    sweep_old_annotations,
+    sweep_old_compare,
+    sweep_old_live,
+    test_job_manager,
+)
 
 router = APIRouter(prefix="/predict", tags=["predict"])
 
@@ -154,6 +159,7 @@ async def start_annotate(
     show_center_line: bool = Form(True),  # label: 타깃 중심선·타입 라벨
     show_target_highlight: bool = Form(False),  # label: 선택 공/소유선수 마커
     overrides: str = Form("{}"),  # trackcrop 튜닝 오버라이드 (JSON)
+    offline: bool = Form(False),  # 오프라인 2-패스 플래너 사용
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
 ):
@@ -200,6 +206,7 @@ async def start_annotate(
         "show_center_line": show_center_line,
         "show_target_highlight": show_target_highlight,
         "overrides": overrides_dict,
+        "offline": offline,
     }
     await run_in_threadpool(test_job_manager.submit_annotate, job_id, cfg)
     return TestJobStart(job_id=job_id)
@@ -289,6 +296,124 @@ async def start_crop_cut(
     }
     await run_in_threadpool(test_job_manager.submit_annotate, job_id, cfg)
     return TestJobStart(job_id=job_id)
+
+
+# ---------- live preview: detect once, recompute crop coords on every tuning change ----------
+
+
+def _live_dir(detect_id: str) -> Path:
+    """Resolve a live-preview cache dir, blocking path traversal via the id shape."""
+    if not detect_id.isalnum():  # uuid4().hex
+        raise HTTPException(422, "Invalid detect id")
+    return settings.test_dir / "live" / detect_id
+
+
+@router.post("/live", response_model=TestJobStart, status_code=201)
+async def start_live(
+    model_ids: str = Form(...),
+    conf: float | None = Form(None),  # None → crop 검출 기본값 0.10
+    imgsz: int = Form(1920),
+    device: str | None = Form(None),
+    project_id: str | None = Form(None),
+    sampling_interval_ms: int | None = Form(None),  # None → 기본값 (100ms)
+    file: UploadFile = File(...),
+    session: Session = Depends(get_session),
+):
+    """Run the expensive detection pass ONCE and cache the per-sample detections +
+    a browser-playable preview. The crop trajectory is then computed on demand via
+    `/live/{id}/plan` (cheap, no inference) as the user tunes parameters."""
+    ext = Path(file.filename or "v").suffix.lower()
+    if ext not in VIDEO_EXTS:
+        raise HTTPException(422, f"Unsupported video type: {ext}")
+    ids = [m.strip() for m in model_ids.split(",") if m.strip()]
+    if not ids:
+        raise HTTPException(422, "Select at least one model")
+    specs = [(mid, _model_pt(session, mid, project_id)) for mid in ids]
+
+    await run_in_threadpool(sweep_old_live)  # keep test_dir/live tidy
+    job_id = uuid.uuid4().hex
+    work = settings.test_dir / "live" / job_id
+    work.mkdir(parents=True, exist_ok=True)
+    src = work / f"source{ext}"
+    with open(src, "wb") as f:
+        while chunk := await file.read(1 << 20):
+            f.write(chunk)
+
+    cfg = {
+        "work": str(work),
+        "source": str(src),
+        "specs": specs,
+        "conf": conf,
+        "imgsz": imgsz,
+        "device": device,
+        "sampling_interval_ms": sampling_interval_ms,
+    }
+    await run_in_threadpool(test_job_manager.submit_live, job_id, cfg)
+    return TestJobStart(job_id=job_id)
+
+
+@router.get("/live/{job_id}/events")
+async def live_events(job_id: str):
+    return await _job_event_stream(job_id)
+
+
+@router.get("/live/{job_id}/video")
+def live_video(job_id: str):
+    """The browser-playable H.264 preview the client plays back under the overlay."""
+    preview = _live_dir(job_id) / "preview.mp4"
+    if not preview.exists():
+        raise HTTPException(404, "Preview not ready")
+    return FileResponse(preview, media_type="video/mp4")  # FileResponse handles Range
+
+
+@router.get("/live/{job_id}/result")
+def live_result(job_id: str):
+    """Detection cache + geometry meta for the client: video dimensions/fps/duration
+    and the raw per-sample detections (for the ByteTrack overlay). The crop trajectory
+    itself comes from `/plan` so tuning changes need no re-fetch of this payload."""
+    work = _live_dir(job_id)
+    meta_path = work / "meta.json"
+    det_path = work / "detected.json"
+    if not meta_path.exists() or not det_path.exists():
+        raise HTTPException(404, "Detection result not ready")
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    detections = json.loads(det_path.read_text(encoding="utf-8"))
+    return {"detect_id": job_id, **meta, "detections": detections}
+
+
+@router.post("/live/{detect_id}/plan")
+async def live_plan(detect_id: str, body: dict = Body(default={})):
+    """Recompute the crop trajectory from cached detections + tuning overrides.
+
+    This is the cheap half of the pipeline (no model/torch) — it runs synchronously
+    so the client can call it on every knob change and redraw the crop box at once.
+    """
+    work = _live_dir(detect_id)
+    det_path = work / "detected.json"
+    if not det_path.exists():
+        raise HTTPException(404, "Detection cache not found")
+    overrides = body.get("overrides") or {}
+    if not isinstance(overrides, dict):
+        raise HTTPException(422, "overrides must be an object")
+    collect_debug = bool(body.get("collect_debug", False))
+    offline = bool(body.get("offline", False))
+
+    def _compute() -> dict:
+        # trackcrop imports cv2/numpy but not torch here (Detector loads YOLO lazily).
+        from app.ml.trackcrop.detection_io import load_detections
+        from app.ml.trackcrop.pipeline import plan_from_detections
+
+        data = json.loads(det_path.read_text(encoding="utf-8"))
+        detected = load_detections(data)
+        # validate=False: non-1080p input trips the 1920/608 geometry checks (same as
+        # the batch annotate path); the client scales the overlay to the real frame.
+        result = plan_from_detections(
+            detected, overrides=overrides, collect_debug=collect_debug,
+            validate=False, offline=offline,
+        )
+        return result.to_dict()
+
+    return await run_in_threadpool(_compute)
 
 
 # ---------- model comparison (score models vs an uploaded YOLO test set) ----------

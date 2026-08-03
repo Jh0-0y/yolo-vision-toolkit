@@ -133,9 +133,12 @@ def resolve_targets_offline(
                 target_type = TargetType.BALL
         else:
             measured = None
-            carrier_id = _carrier_as_of(carrier_timeline, offset_ms)
-            carrier_det = next(
-                (p for p in players if p.track_id == carrier_id), None
+            # use_carrier=False면 소유선수 추적 생략 — 크롭이 특정 선수로 튀지 않게
+            carrier_id = _carrier_as_of(carrier_timeline, offset_ms) if cfg.use_carrier else None
+            carrier_det = (
+                next((p for p in players if p.track_id == carrier_id), None)
+                if carrier_id is not None
+                else None
             )
             if carrier_det is not None:
                 # 장기 가림 — 공을 마지막으로 든 선수를 따라간다
