@@ -157,10 +157,6 @@ export default function TuningPanel({ value, onChange, disabled, exclude }: Prop
           {advanced.map(renderKnob)}
         </SimpleGrid>
       )}
-
-      <Text size="xs" c="dimmed">
-        Empty fields use the default value.
-      </Text>
     </Stack>
   )
 }
