@@ -23,7 +23,12 @@ services:
     volumes:
       # 왼쪽 = 호스트 실제 경로(.env 에서 지정) / 오른쪽 = 컨테이너 내부 별명
       - ${DATA_DIR:-./data}:/data         # HDD (영구 저장)
-      - ${CACHE_DIR:-./cache}:/cache  # SSD 캐시 (학습 시 복사→종료 시 삭제, :ro 금지)
+      # 학습 스테이징 캐시는 named volume — 바인드 마운트로 윈도우 드라이브를 물리면
+      # Docker Desktop 파일 공유 계층을 거쳐 파일당 지연이 ~2ms 로 치솟고, 작은 타일
+      # 이미지 학습에서 DataLoader 멈춤/Slow image access 경고의 원인이 된다.
+      # named volume 은 WSL2 VM 내부 ext4 에 저장돼 이 계층을 우회한다. 내용물은
+      # 런 종료 시 코드가 지우는 일회용이라 호스트에서 볼 필요가 없다.
+      - yvt-cache:/cache
     deploy:
       resources:
         reservations:
@@ -41,3 +46,6 @@ services:
     # 외부에 열어야 할 포트는 이 하나뿐 — nginx 가 /api 를 backend 로 프록시한다.
     ports:
       - "${FRONTEND_PORT:-3000}:80"
+
+volumes:
+  yvt-cache:
