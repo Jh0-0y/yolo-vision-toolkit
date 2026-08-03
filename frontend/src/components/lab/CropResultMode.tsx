@@ -12,13 +12,13 @@ import {
 } from '@mantine/core'
 import { Dropzone } from '@mantine/dropzone'
 import { IconAlertTriangle, IconFileCode, IconX } from '@tabler/icons-react'
-import { annotateCropUrl, type ExtraDetector, type ModelOut, type TrackcropOverrides } from '../../api/client'
+import { annotateCropUrl, type DetectorPayload, type ModelOut, type TrackcropOverrides } from '../../api/client'
 import DetectionSettings, { newEntry, type DetectorEntry } from './DetectionSettings'
 import TuningPanel from './TuningPanel'
 import { PHASE_LABEL, useAnnotateJob } from './useAnnotateJob'
 
-function entryPayload(entries: DetectorEntry[]): ExtraDetector[] {
-  return entries.slice(1).filter((e) => e.modelId).map((e) => ({
+function entryPayload(entries: DetectorEntry[]): DetectorPayload[] {
+  return entries.filter((e) => e.modelId).map((e) => ({
     model_id: e.modelId as string,
     mode: e.mode,
     conf: e.conf === '' ? undefined : e.conf,
@@ -84,7 +84,7 @@ export default function CropResultMode({ projectId, models }: Props) {
       cropTracking: true,
       cropOutput: 'none',
       overrides: sampling === '' ? overrides : { ...overrides, sampling_interval_ms: sampling },
-      extraDetectors: entryPayload(entries),
+      detectors: entryPayload(entries),
     })
   }
 

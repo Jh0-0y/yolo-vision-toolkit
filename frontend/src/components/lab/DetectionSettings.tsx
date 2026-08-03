@@ -1,9 +1,10 @@
-import { ActionIcon, Badge, Button, Card, Group, NumberInput, SegmentedControl, Select, Stack, Text } from '@mantine/core'
+import { ActionIcon, Button, Card, Group, NumberInput, SegmentedControl, Select, Stack, Text } from '@mantine/core'
 import { IconPlus, IconX } from '@tabler/icons-react'
 import type { ModelOut } from '../../api/client'
 import { IMGSZ_OPTIONS } from './useAnnotateJob'
 
-/** 검출기 엔트리 — 첫 번째는 베이스(선수+ByteTrack), 추가 엔트리는 공 전담. */
+/** 검출기 엔트리 — 모두 대등하다. 역할(추적/공)은 백엔드가 모드에서 자동 유도:
+ *  첫 번째 Full scan 엔트리가 ByteTrack 추적, 나머지는 공 검출에 기여. */
 export interface DetectorEntry {
   key: string
   modelId: string | null
@@ -40,20 +41,18 @@ interface Props {
   disabled?: boolean
 }
 
-/** Shared detection settings — 모델 리스트 방식.
- *  기본 1개(베이스: 풀 프레임 + ByteTrack). "Add model"로 공 전담 검출기를 추가하고
- *  엔트리마다 풀스캔/타일 추론을 고른다. 추가 검출기가 있으면 공은 그쪽이 전담한다. */
+/** Shared detection settings — 모델 엔트리 리스트.
+ *  각 엔트리는 모델 + 추론 방식(Full scan / Tiled)과 방식별 옵션을 독립적으로 가진다. */
 export default function DetectionSettings({
   models, entries, onEntries, sampling, onSampling, disabled,
 }: Props) {
   const modelData = models.map((m) => ({ value: m.id, label: m.name }))
-  const hasExtras = entries.length > 1
 
   const patch = (key: string, p: Partial<DetectorEntry>) =>
     onEntries(entries.map((e) => (e.key === key ? { ...e, ...p } : e)))
   const remove = (key: string) => onEntries(entries.filter((e) => e.key !== key))
   const add = () => {
-    const e = newEntry('tiled') // 추가 모델의 주 용도 = 타일 학습된 공 모델
+    const e = newEntry('tiled')
     e.modelId = models[0]?.id ?? null
     onEntries([...entries, e])
   }
@@ -73,33 +72,23 @@ export default function DetectionSettings({
         </Button>
       </Group>
 
-      {entries.map((entry, i) => {
-        const base = i === 0
+      {entries.map((entry) => {
         const overlap = entry.tileSize - entry.stride
         return (
           <Card key={entry.key} withBorder radius="sm" padding="sm">
             <Stack gap="xs">
               <Group justify="space-between">
-                <Group gap="xs">
-                  <Badge variant="light" size="sm">
-                    {base
-                      ? hasExtras ? 'Players — ByteTrack' : 'Players + ball — ByteTrack'
-                      : 'Ball'}
-                  </Badge>
-                  {!base && (
-                    <SegmentedControl
-                      size="xs"
-                      value={entry.mode}
-                      onChange={(v) => patch(entry.key, { mode: v as 'full' | 'tiled' })}
-                      data={[
-                        { value: 'full', label: 'Full scan' },
-                        { value: 'tiled', label: 'Tiled' },
-                      ]}
-                      disabled={disabled}
-                    />
-                  )}
-                </Group>
-                {!base && (
+                <SegmentedControl
+                  size="xs"
+                  value={entry.mode}
+                  onChange={(v) => patch(entry.key, { mode: v as 'full' | 'tiled' })}
+                  data={[
+                    { value: 'full', label: 'Full scan' },
+                    { value: 'tiled', label: 'Tiled' },
+                  ]}
+                  disabled={disabled}
+                />
+                {entries.length > 1 && (
                   <ActionIcon
                     variant="subtle"
                     color="gray"
@@ -124,7 +113,7 @@ export default function DetectionSettings({
                 />
                 <NumberInput
                   label="Confidence"
-                  placeholder={base ? 'default 0.1' : 'same as base'}
+                  placeholder="default 0.1"
                   value={entry.conf}
                   onChange={(v) => patch(entry.key, { conf: v === '' || v == null ? '' : Number(v) })}
                   min={0.05}
@@ -136,7 +125,6 @@ export default function DetectionSettings({
                 {entry.mode === 'full' ? (
                   <Select
                     label="Image size"
-                    description={base ? undefined : 'Full-frame inference size'}
                     data={IMGSZ_OPTIONS}
                     value={String(entry.imgsz)}
                     onChange={(v) => v && patch(entry.key, { imgsz: Number(v) })}
@@ -146,7 +134,6 @@ export default function DetectionSettings({
                 ) : (
                   <NumberInput
                     label="Tile size (px)"
-                    description="Match the training tile"
                     value={entry.tileSize}
                     onChange={(v) => patch(entry.key, { tileSize: Number(v) || 640 })}
                     min={64}
@@ -171,7 +158,6 @@ export default function DetectionSettings({
                   />
                   <NumberInput
                     label="Merge IoU"
-                    description="NMS for overlap duplicates"
                     value={entry.mergeIou}
                     onChange={(v) => patch(entry.key, { mergeIou: v === '' || v == null ? 0.5 : Number(v) })}
                     min={0.1}
@@ -186,13 +172,6 @@ export default function DetectionSettings({
           </Card>
         )
       })}
-
-      {hasExtras && (
-        <Text size="xs" c="dimmed">
-          Added models detect the ball only (no track id — the clip planner stitches the
-          trajectory); the base model keeps the players.
-        </Text>
-      )}
 
       <NumberInput
         label="Sampling interval (ms)"

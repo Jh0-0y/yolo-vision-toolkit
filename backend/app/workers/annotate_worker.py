@@ -135,9 +135,10 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
             # trackcrop is tuned for ball recall (low conf, large imgsz) and its own
             # 1920/608 constants; validate=False so non-1080p input doesn't trip the
             # geometry checks. overrides = runtime tuning; collect_debug = highlight bboxes.
-            crop_detector = build_detector(
-                pt, device, imgsz, crop_conf, extras=cfg.get("extras") or None,
-            )
+            entries = cfg.get("detectors") or [
+                {"pt": pt, "mode": "full", "conf": conf_cfg, "imgsz": imgsz}
+            ]
+            crop_detector = build_detector(entries, device, default_conf=crop_conf)
             cropres = analyze_video(
                 str(src), detector=crop_detector,
                 validate=False, overrides=overrides,

@@ -335,13 +335,15 @@ def _merge_ball_detections(balls: list[Detection]) -> list[Detection]:
 
 
 class SplitDetector:
-    """분리 검출 — 선수는 풀 프레임 track, 공은 별도 검출기 목록(타일/풀스캔).
+    """분리 검출 — 추적 검출기(선수, 선택적) + 공 검출기 목록(타일/풀스캔).
 
     Detector와 같은 `.track(frames)` 인터페이스를 낸다.
     """
 
     def __init__(
-        self, player: Detector, balls: list[TiledBallDetector | FullFrameBallDetector]
+        self,
+        player: Detector | None,
+        balls: list[TiledBallDetector | FullFrameBallDetector],
     ):
         self._player = player
         self._balls = balls
@@ -349,40 +351,69 @@ class SplitDetector:
     def track(
         self, frames: Iterator[tuple[int, np.ndarray]]
     ) -> Iterator[tuple[int, list[Detection]]]:
-        self._player._reset_tracker()
+        if self._player is not None:
+            self._player._reset_tracker()
         for offset_ms, frame in frames:
-            players = self._player.track_frame(frame, offset_ms)
+            players = (
+                self._player.track_frame(frame, offset_ms) if self._player else []
+            )
             balls = [d for b in self._balls for d in b.detect(frame, offset_ms)]
             yield offset_ms, players + _merge_ball_detections(balls)
 
 
 def build_detector(
-    model_path: str,
-    device: str,
-    imgsz: int,
-    conf: float,
-    *,
-    extras: list[dict] | None = None,
+    entries: list[dict], device: str, default_conf: float = 0.10
 ) -> Detector | SplitDetector:
-    """검출기 팩토리.
+    """검출기 팩토리 — 대칭적인 엔트리 목록에서 구성한다.
 
-    extras 없음 → 단일 모델(공+선수 풀 프레임 track).
-    extras 있음 → 베이스 모델은 선수 전담(track), extras가 공을 전담한다.
-      extras 항목: {"pt", "mode": "full"|"tiled", "conf"?, "imgsz"?,
-                    "tile_size"?, "stride"?, "merge_iou"?}
+    entries 항목: {"pt", "mode": "full"|"tiled", "conf"?, "imgsz"?,
+                   "tile_size"?, "stride"?, "merge_iou"?}
+
+    역할은 자동 유도한다:
+      - 첫 번째 full 엔트리 → ByteTrack 추적 담당 (선수; 엔트리가 하나뿐이면 공도)
+      - 나머지 엔트리 전부 → 공 검출 기여 (predict, track_id 없음 — 스티칭이 조립)
+      - full 엔트리가 없으면(모두 타일) 선수 검출 없이 공만 검출한다
     """
-    if not extras:
-        return Detector(model_path=model_path, device=device, imgsz=imgsz, conf=conf)
+    if not entries:
+        raise ValueError("at least one detector entry is required")
+
+    def _conf(e: dict) -> float:
+        return e["conf"] if e.get("conf") is not None else default_conf
+
+    tracked_idx = next(
+        (i for i, e in enumerate(entries) if e.get("mode", "full") == "full"), None
+    )
+
+    if tracked_idx is not None and len(entries) == 1:
+        e = entries[0]
+        return Detector(
+            model_path=e["pt"],
+            device=device,
+            imgsz=int(e.get("imgsz", 1920)),
+            conf=_conf(e),
+        )
+
+    player: Detector | None = None
+    if tracked_idx is not None:
+        e = entries[tracked_idx]
+        player = Detector(
+            model_path=e["pt"],
+            device=device,
+            imgsz=int(e.get("imgsz", 1920)),
+            conf=_conf(e),
+            types=(OBJECT_TYPE_PLAYER,),
+        )
 
     balls: list[TiledBallDetector | FullFrameBallDetector] = []
-    for e in extras:
-        e_conf = e.get("conf")
+    for i, e in enumerate(entries):
+        if i == tracked_idx:
+            continue
         if e.get("mode") == "tiled":
             balls.append(
                 TiledBallDetector(
                     model_path=e["pt"],
                     device=device,
-                    conf=e_conf if e_conf is not None else conf,
+                    conf=_conf(e),
                     tile_size=int(e.get("tile_size", 640)),
                     stride=int(e.get("stride", 480)),
                     merge_iou=float(e.get("merge_iou", 0.5)),
@@ -393,17 +424,8 @@ def build_detector(
                 FullFrameBallDetector(
                     model_path=e["pt"],
                     device=device,
-                    conf=e_conf if e_conf is not None else conf,
-                    imgsz=int(e.get("imgsz", imgsz)),
+                    conf=_conf(e),
+                    imgsz=int(e.get("imgsz", 1920)),
                 )
             )
-    return SplitDetector(
-        player=Detector(
-            model_path=model_path,
-            device=device,
-            imgsz=imgsz,
-            conf=conf,
-            types=(OBJECT_TYPE_PLAYER,),
-        ),
-        balls=balls,
-    )
+    return SplitDetector(player=player, balls=balls)

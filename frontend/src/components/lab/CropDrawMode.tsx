@@ -19,7 +19,7 @@ import {
   livePlan,
   liveVideoUrl,
   type CropPlan,
-  type ExtraDetector,
+  type DetectorPayload,
   type LiveResult,
   type ModelOut,
   type TrackcropOverrides,
@@ -29,8 +29,8 @@ import TuningPanel from './TuningPanel'
 import { LIVE_PHASE_LABEL, useLiveJob } from './useLiveJob'
 import { drawOverlay } from './liveOverlay'
 
-function entryPayload(entries: DetectorEntry[]): ExtraDetector[] {
-  return entries.slice(1).filter((e) => e.modelId).map((e) => ({
+function entryPayload(entries: DetectorEntry[]): DetectorPayload[] {
+  return entries.filter((e) => e.modelId).map((e) => ({
     model_id: e.modelId as string,
     mode: e.mode,
     conf: e.conf === '' ? undefined : e.conf,
@@ -105,7 +105,7 @@ export default function CropDrawMode({ projectId, models }: Props) {
       imgsz: base.imgsz,
       device: null,
       samplingIntervalMs: sampling === '' ? undefined : sampling,
-      extraDetectors: entryPayload(entries),
+      detectors: entryPayload(entries),
     })
   }
 

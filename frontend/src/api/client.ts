@@ -668,8 +668,9 @@ export interface TrackcropOverrides {
   min_follow_conf?: number
 }
 
-// 공 전담 추가 검출기 — 베이스 모델 외에 풀스캔/타일 추론 모델을 더 붙인다
-export interface ExtraDetector {
+// 검출기 엔트리 — 모두 대등. 첫 Full scan 엔트리가 ByteTrack 추적을 맡고
+// 나머지는 공 검출에 기여한다 (백엔드에서 자동 유도).
+export interface DetectorPayload {
   model_id: string
   mode: 'full' | 'tiled'
   conf?: number
@@ -680,12 +681,11 @@ export interface ExtraDetector {
 }
 
 export interface BallDetectorOpts {
-  extraDetectors?: ExtraDetector[]
+  detectors?: DetectorPayload[]
 }
 
 function appendBall(form: FormData, opts: BallDetectorOpts) {
-  if (opts.extraDetectors?.length)
-    form.append('extra_detectors', JSON.stringify(opts.extraDetectors))
+  if (opts.detectors?.length) form.append('detectors', JSON.stringify(opts.detectors))
 }
 
 export function startAnnotate(opts: {

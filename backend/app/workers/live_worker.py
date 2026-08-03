@@ -77,9 +77,10 @@ def run_live(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         from app.ml.trackcrop.detection_io import dump_detections
         from app.ml.trackcrop.pipeline import detect_video
 
-        detector = build_detector(
-            pt, device, imgsz, conf, extras=cfg.get("extras") or None,
-        )
+        entries = cfg.get("detectors") or [
+            {"pt": pt, "mode": "full", "conf": conf_cfg, "imgsz": imgsz}
+        ]
+        detector = build_detector(entries, device, default_conf=conf)
 
         def on_progress(done: int) -> None:
             if cancel.exists():
