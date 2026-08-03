@@ -77,14 +77,8 @@ def run_live(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         from app.ml.trackcrop.detection_io import dump_detections
         from app.ml.trackcrop.pipeline import detect_video
 
-        ball = cfg.get("ball") or {}
         detector = build_detector(
-            pt, device, imgsz, conf,
-            ball_model_path=ball.get("pt"),
-            ball_conf=ball.get("conf"),
-            tile_size=int(ball.get("tile_size", 640)),
-            stride=int(ball.get("stride", 480)),
-            merge_iou=float(ball.get("merge_iou", 0.5)),
+            pt, device, imgsz, conf, extras=cfg.get("extras") or None,
         )
 
         def on_progress(done: int) -> None:

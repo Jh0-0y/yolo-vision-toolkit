@@ -159,11 +159,7 @@ async def start_annotate(
     show_center_line: bool = Form(True),  # label: 타깃 중심선·타입 라벨
     show_target_highlight: bool = Form(False),  # label: 선택 공/소유선수 마커
     overrides: str = Form("{}"),  # trackcrop 튜닝 오버라이드 (JSON)
-    ball_model_id: str | None = Form(None),  # 공 전용 모델 — 지정 시 타일 추론
-    ball_conf: float | None = Form(None),
-    tile_size: int = Form(640),
-    stride: int = Form(480),
-    merge_iou: float = Form(0.5),  # 타일 겹침 중복 병합 NMS IoU
+    extra_detectors: str = Form("[]"),  # 공 전담 추가 검출기 목록 (JSON)
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
 ):
@@ -210,7 +206,7 @@ async def start_annotate(
         "show_center_line": show_center_line,
         "show_target_highlight": show_target_highlight,
         "overrides": overrides_dict,
-        "ball": _ball_cfg(session, ball_model_id, project_id, ball_conf, tile_size, stride, merge_iou),
+        "extras": _extras_cfg(session, extra_detectors, project_id),
     }
     await run_in_threadpool(test_job_manager.submit_annotate, job_id, cfg)
     return TestJobStart(job_id=job_id)
@@ -312,27 +308,41 @@ def _live_dir(detect_id: str) -> Path:
     return settings.test_dir / "live" / detect_id
 
 
-def _ball_cfg(
-    session: Session,
-    ball_model_id: str | None,
-    project_id: str | None,
-    ball_conf: float | None,
-    tile_size: int,
-    stride: int,
-    merge_iou: float,
-) -> dict | None:
-    """공 전용(타일 추론) 검출 구성 — ball_model_id 없으면 단일 모델 모드(None)."""
-    if not ball_model_id:
-        return None
-    if stride <= 0 or stride > tile_size:
-        raise HTTPException(422, "stride must be in (0, tile_size]")
-    return {
-        "pt": _model_pt(session, ball_model_id, project_id),
-        "conf": ball_conf,
-        "tile_size": tile_size,
-        "stride": stride,
-        "merge_iou": merge_iou,
-    }
+def _extras_cfg(
+    session: Session, extra_detectors: str, project_id: str | None
+) -> list[dict]:
+    """추가 검출기(공 전담) 목록 파싱 — [{model_id, mode, conf?, imgsz?, tile_size?,
+    stride?, merge_iou?}]. 비어있으면 단일 모델 모드([])."""
+    try:
+        entries = json.loads(extra_detectors) if extra_detectors else []
+        if not isinstance(entries, list):
+            raise ValueError
+    except ValueError:
+        raise HTTPException(422, "extra_detectors must be a JSON array") from None
+
+    extras: list[dict] = []
+    for e in entries:
+        if not isinstance(e, dict) or not e.get("model_id"):
+            raise HTTPException(422, "each extra detector needs a model_id")
+        mode = e.get("mode", "tiled")
+        if mode not in ("full", "tiled"):
+            raise HTTPException(422, "extra detector mode must be 'full' or 'tiled'")
+        tile_size = int(e.get("tile_size", 640))
+        stride = int(e.get("stride", 480))
+        if mode == "tiled" and (stride <= 0 or stride > tile_size):
+            raise HTTPException(422, "stride must be in (0, tile_size]")
+        extras.append(
+            {
+                "pt": _model_pt(session, e["model_id"], project_id),
+                "mode": mode,
+                "conf": e.get("conf"),
+                "imgsz": int(e.get("imgsz", 1920)),
+                "tile_size": tile_size,
+                "stride": stride,
+                "merge_iou": float(e.get("merge_iou", 0.5)),
+            }
+        )
+    return extras
 
 
 @router.post("/live", response_model=TestJobStart, status_code=201)
@@ -343,11 +353,7 @@ async def start_live(
     device: str | None = Form(None),
     project_id: str | None = Form(None),
     sampling_interval_ms: int | None = Form(None),  # None → 기본값 (100ms)
-    ball_model_id: str | None = Form(None),  # 공 전용 모델 — 지정 시 타일 추론
-    ball_conf: float | None = Form(None),
-    tile_size: int = Form(640),
-    stride: int = Form(480),
-    merge_iou: float = Form(0.5),
+    extra_detectors: str = Form("[]"),  # 공 전담 추가 검출기 목록 (JSON)
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
 ):
@@ -379,7 +385,7 @@ async def start_live(
         "imgsz": imgsz,
         "device": device,
         "sampling_interval_ms": sampling_interval_ms,
-        "ball": _ball_cfg(session, ball_model_id, project_id, ball_conf, tile_size, stride, merge_iou),
+        "extras": _extras_cfg(session, extra_detectors, project_id),
     }
     await run_in_threadpool(test_job_manager.submit_live, job_id, cfg)
     return TestJobStart(job_id=job_id)

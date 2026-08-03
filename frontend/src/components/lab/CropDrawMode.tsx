@@ -19,15 +19,27 @@ import {
   livePlan,
   liveVideoUrl,
   type CropPlan,
+  type ExtraDetector,
   type LiveResult,
   type ModelOut,
   type TrackcropOverrides,
 } from '../../api/client'
-import DetectionSettings, { DEFAULT_BALL, type BallDetector } from './DetectionSettings'
+import DetectionSettings, { newEntry, type DetectorEntry } from './DetectionSettings'
 import TuningPanel from './TuningPanel'
-import { DEFAULT_IMGSZ } from './useAnnotateJob'
 import { LIVE_PHASE_LABEL, useLiveJob } from './useLiveJob'
 import { drawOverlay } from './liveOverlay'
+
+function entryPayload(entries: DetectorEntry[]): ExtraDetector[] {
+  return entries.slice(1).filter((e) => e.modelId).map((e) => ({
+    model_id: e.modelId as string,
+    mode: e.mode,
+    conf: e.conf === '' ? undefined : e.conf,
+    imgsz: e.imgsz,
+    tile_size: e.tileSize,
+    stride: e.stride,
+    merge_iou: e.mergeIou,
+  }))
+}
 
 const VIDEO_MIME = [
   'video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska', 'video/x-msvideo',
@@ -42,11 +54,9 @@ interface Props {
  *  canvas. Tuning knobs recompute the crop trajectory instantly (no re-inference). */
 export default function CropDrawMode({ projectId, models }: Props) {
   // detection params (a change needs a re-detect)
-  const [modelId, setModelId] = useState<string | null>(null)
-  const [conf, setConf] = useState<number | ''>('')
-  const [imgsz, setImgsz] = useState(DEFAULT_IMGSZ)
+  const [entries, setEntries] = useState<DetectorEntry[]>(() => [newEntry('full')])
   const [sampling, setSampling] = useState<number | ''>('')
-  const [ball, setBall] = useState<BallDetector>(DEFAULT_BALL)
+  const base = entries[0]
   // tuning overrides (recomputed on the fly)
   const [overrides, setOverrides] = useState<TrackcropOverrides>({})
   // overlay toggles (pure draw switches, except highlight which needs the debug pass)
@@ -70,16 +80,17 @@ export default function CropDrawMode({ projectId, models }: Props) {
   })
 
   useEffect(() => {
-    if (models.length && !modelId) setModelId(models[0].id)
+    if (models.length && !entries[0].modelId)
+      setEntries((prev) => [{ ...prev[0], modelId: models[0].id }, ...prev.slice(1)])
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [models])
 
-  const detectionKey = JSON.stringify({ modelId, conf, imgsz, sampling, ball })
+  const detectionKey = JSON.stringify({ entries, sampling })
   const detectionDirty = analyzedKey != null && analyzedKey !== detectionKey
   const deadZoneWidth = overrides.dead_zone_width ?? 208
 
   async function analyze(f: File) {
-    if (!modelId) return
+    if (!base.modelId) return
     setLoadError(null)
     setVideoFailed(false)
     setResult(null)
@@ -88,17 +99,13 @@ export default function CropDrawMode({ projectId, models }: Props) {
     setAnalyzedKey(detectionKey)
     await job.run({
       file: f,
-      modelIds: [modelId],
+      modelIds: [base.modelId],
       projectId,
-      conf: conf === '' ? undefined : conf,
-      imgsz,
+      conf: base.conf === '' ? undefined : base.conf,
+      imgsz: base.imgsz,
       device: null,
       samplingIntervalMs: sampling === '' ? undefined : sampling,
-      ballModelId: ball.modelId,
-      ballConf: ball.conf === '' ? undefined : ball.conf,
-      tileSize: ball.tileSize,
-      stride: ball.stride,
-      mergeIou: ball.mergeIou,
+      extraDetectors: entryPayload(entries),
     })
   }
 
@@ -224,16 +231,10 @@ export default function CropDrawMode({ projectId, models }: Props) {
         <Stack gap="sm">
           <DetectionSettings
             models={models}
-            modelId={modelId}
-            onModelId={setModelId}
-            imgsz={imgsz}
-            onImgsz={setImgsz}
-            conf={conf}
-            onConf={setConf}
+            entries={entries}
+            onEntries={setEntries}
             sampling={sampling}
             onSampling={setSampling}
-            ball={ball}
-            onBall={setBall}
             disabled={job.running}
           />
 
@@ -315,7 +316,7 @@ export default function CropDrawMode({ projectId, models }: Props) {
           )}
 
           {!file ? (
-            <Dropzone onDrop={(files) => files[0] && analyze(files[0])} accept={VIDEO_MIME} multiple={false} disabled={!modelId}>
+            <Dropzone onDrop={(files) => files[0] && analyze(files[0])} accept={VIDEO_MIME} multiple={false} disabled={!base.modelId}>
               <Stack align="center" gap="xs" py="xl">
                 <Dropzone.Idle><IconMovie size={40} stroke={1.2} /></Dropzone.Idle>
                 <Dropzone.Reject><IconX size={40} /></Dropzone.Reject>

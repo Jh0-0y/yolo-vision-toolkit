@@ -668,22 +668,24 @@ export interface TrackcropOverrides {
   min_follow_conf?: number
 }
 
-// 공 전용(타일 추론) 검출 옵션 — ballModelId 없으면 단일 모델 모드
-export interface BallDetectorOpts {
-  ballModelId?: string | null
-  ballConf?: number
-  tileSize?: number
+// 공 전담 추가 검출기 — 베이스 모델 외에 풀스캔/타일 추론 모델을 더 붙인다
+export interface ExtraDetector {
+  model_id: string
+  mode: 'full' | 'tiled'
+  conf?: number
+  imgsz?: number
+  tile_size?: number
   stride?: number
-  mergeIou?: number
+  merge_iou?: number
+}
+
+export interface BallDetectorOpts {
+  extraDetectors?: ExtraDetector[]
 }
 
 function appendBall(form: FormData, opts: BallDetectorOpts) {
-  if (!opts.ballModelId) return
-  form.append('ball_model_id', opts.ballModelId)
-  if (opts.ballConf != null) form.append('ball_conf', String(opts.ballConf))
-  if (opts.tileSize != null) form.append('tile_size', String(opts.tileSize))
-  if (opts.stride != null) form.append('stride', String(opts.stride))
-  if (opts.mergeIou != null) form.append('merge_iou', String(opts.mergeIou))
+  if (opts.extraDetectors?.length)
+    form.append('extra_detectors', JSON.stringify(opts.extraDetectors))
 }
 
 export function startAnnotate(opts: {

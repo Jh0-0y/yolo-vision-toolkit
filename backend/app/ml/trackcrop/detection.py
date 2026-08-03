@@ -262,12 +262,89 @@ class TiledBallDetector:
         ]
 
 
-class SplitDetector:
-    """분리 검출 — 선수는 풀 프레임 track, 공은 타일 predict. Detector와 같은 인터페이스."""
+class FullFrameBallDetector:
+    """공 전용 풀 프레임 predict — 슬라이스 없이 원본 그대로 추론. track_id 없음."""
 
-    def __init__(self, player: Detector, ball: TiledBallDetector):
+    def __init__(self, model_path: str, device: str, conf: float, imgsz: int = 1920):
+        self._model = _load_model(model_path)
+        self._device = device
+        self._conf = conf
+        self._imgsz = imgsz
+        self._ball_classes = [
+            cid
+            for cid, t in _map_classes(self._model.names).items()
+            if t == OBJECT_TYPE_BALL
+        ]
+        if not self._ball_classes:
+            raise TrackCropError(
+                ErrorCode.MODEL_LOAD_FAILED,
+                "공 모델에 ball 클래스가 없습니다.",
+                details={"names": dict(self._model.names)},
+            )
+
+    def detect(self, frame: np.ndarray, offset_ms: int) -> list[Detection]:
+        try:
+            result = self._model.predict(
+                frame,
+                classes=self._ball_classes,
+                imgsz=self._imgsz,
+                conf=self._conf,
+                device=self._device,
+                verbose=False,
+            )[0]
+        except Exception as e:
+            raise TrackCropError(
+                ErrorCode.OBJECT_DETECTION_FAILED,
+                "공 풀 프레임 추론 중 오류가 발생했습니다.",
+                details={"video_offset_ms": offset_ms, "cause": str(e)[:300]},
+            ) from e
+        boxes = result.boxes
+        if boxes is None or len(boxes) == 0:
+            return []
+        return [
+            Detection(
+                object_type=OBJECT_TYPE_BALL,
+                track_id=None,
+                bbox_x=x1,
+                bbox_y=y1,
+                bbox_width=x2 - x1,
+                bbox_height=y2 - y1,
+                confidence=conf,
+                video_offset_ms=offset_ms,
+            )
+            for (x1, y1, x2, y2), conf in zip(
+                boxes.xyxy.tolist(), boxes.conf.tolist(), strict=True
+            )
+        ]
+
+
+# 서로 다른 공 검출기(모델)가 같은 공을 중복으로 잡았을 때 병합하는 IoU
+_CROSS_MODEL_MERGE_IOU = 0.5
+
+
+def _merge_ball_detections(balls: list[Detection]) -> list[Detection]:
+    """여러 공 검출기의 출력을 합칠 때 모델 간 중복을 NMS로 정리한다."""
+    if len(balls) <= 1:
+        return balls
+    boxes = [
+        (d.bbox_x, d.bbox_y, d.bbox_x + d.bbox_width, d.bbox_y + d.bbox_height, d.confidence)
+        for d in balls
+    ]
+    kept = set(merge_tile_boxes(boxes, _CROSS_MODEL_MERGE_IOU))
+    return [d for d, b in zip(balls, boxes, strict=True) if b in kept]
+
+
+class SplitDetector:
+    """분리 검출 — 선수는 풀 프레임 track, 공은 별도 검출기 목록(타일/풀스캔).
+
+    Detector와 같은 `.track(frames)` 인터페이스를 낸다.
+    """
+
+    def __init__(
+        self, player: Detector, balls: list[TiledBallDetector | FullFrameBallDetector]
+    ):
         self._player = player
-        self._ball = ball
+        self._balls = balls
 
     def track(
         self, frames: Iterator[tuple[int, np.ndarray]]
@@ -275,8 +352,8 @@ class SplitDetector:
         self._player._reset_tracker()
         for offset_ms, frame in frames:
             players = self._player.track_frame(frame, offset_ms)
-            balls = self._ball.detect(frame, offset_ms)
-            yield offset_ms, players + balls
+            balls = [d for b in self._balls for d in b.detect(frame, offset_ms)]
+            yield offset_ms, players + _merge_ball_detections(balls)
 
 
 def build_detector(
@@ -285,15 +362,41 @@ def build_detector(
     imgsz: int,
     conf: float,
     *,
-    ball_model_path: str | None = None,
-    ball_conf: float | None = None,
-    tile_size: int = 640,
-    stride: int = 480,
-    merge_iou: float = 0.5,
+    extras: list[dict] | None = None,
 ) -> Detector | SplitDetector:
-    """검출기 팩토리 — ball_model_path가 있으면 분리(선수 풀 + 공 타일) 구성."""
-    if ball_model_path is None:
+    """검출기 팩토리.
+
+    extras 없음 → 단일 모델(공+선수 풀 프레임 track).
+    extras 있음 → 베이스 모델은 선수 전담(track), extras가 공을 전담한다.
+      extras 항목: {"pt", "mode": "full"|"tiled", "conf"?, "imgsz"?,
+                    "tile_size"?, "stride"?, "merge_iou"?}
+    """
+    if not extras:
         return Detector(model_path=model_path, device=device, imgsz=imgsz, conf=conf)
+
+    balls: list[TiledBallDetector | FullFrameBallDetector] = []
+    for e in extras:
+        e_conf = e.get("conf")
+        if e.get("mode") == "tiled":
+            balls.append(
+                TiledBallDetector(
+                    model_path=e["pt"],
+                    device=device,
+                    conf=e_conf if e_conf is not None else conf,
+                    tile_size=int(e.get("tile_size", 640)),
+                    stride=int(e.get("stride", 480)),
+                    merge_iou=float(e.get("merge_iou", 0.5)),
+                )
+            )
+        else:
+            balls.append(
+                FullFrameBallDetector(
+                    model_path=e["pt"],
+                    device=device,
+                    conf=e_conf if e_conf is not None else conf,
+                    imgsz=int(e.get("imgsz", imgsz)),
+                )
+            )
     return SplitDetector(
         player=Detector(
             model_path=model_path,
@@ -302,12 +405,5 @@ def build_detector(
             conf=conf,
             types=(OBJECT_TYPE_PLAYER,),
         ),
-        ball=TiledBallDetector(
-            model_path=ball_model_path,
-            device=device,
-            conf=ball_conf if ball_conf is not None else conf,
-            tile_size=tile_size,
-            stride=stride,
-            merge_iou=merge_iou,
-        ),
+        balls=balls,
     )

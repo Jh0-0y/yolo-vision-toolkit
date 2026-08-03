@@ -12,10 +12,22 @@ import {
 } from '@mantine/core'
 import { Dropzone } from '@mantine/dropzone'
 import { IconAlertTriangle, IconFileCode, IconX } from '@tabler/icons-react'
-import { annotateCropUrl, type ModelOut, type TrackcropOverrides } from '../../api/client'
-import DetectionSettings, { DEFAULT_BALL, type BallDetector } from './DetectionSettings'
+import { annotateCropUrl, type ExtraDetector, type ModelOut, type TrackcropOverrides } from '../../api/client'
+import DetectionSettings, { newEntry, type DetectorEntry } from './DetectionSettings'
 import TuningPanel from './TuningPanel'
-import { DEFAULT_IMGSZ, PHASE_LABEL, useAnnotateJob } from './useAnnotateJob'
+import { PHASE_LABEL, useAnnotateJob } from './useAnnotateJob'
+
+function entryPayload(entries: DetectorEntry[]): ExtraDetector[] {
+  return entries.slice(1).filter((e) => e.modelId).map((e) => ({
+    model_id: e.modelId as string,
+    mode: e.mode,
+    conf: e.conf === '' ? undefined : e.conf,
+    imgsz: e.imgsz,
+    tile_size: e.tileSize,
+    stride: e.stride,
+    merge_iou: e.mergeIou,
+  }))
+}
 
 const VIDEO_MIME = [
   'video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska', 'video/x-msvideo',
@@ -28,17 +40,16 @@ interface Props {
 
 /** Crop Result — produces crop.json coordinates only (no video render). For inspecting coords after tuning. */
 export default function CropResultMode({ projectId, models }: Props) {
-  const [modelId, setModelId] = useState<string | null>(null)
-  const [conf, setConf] = useState<number | ''>('')
-  const [imgsz, setImgsz] = useState(DEFAULT_IMGSZ)
+  const [entries, setEntries] = useState<DetectorEntry[]>(() => [newEntry('full')])
   const [sampling, setSampling] = useState<number | ''>('')
-  const [ball, setBall] = useState<BallDetector>(DEFAULT_BALL)
+  const base = entries[0]
   const [overrides, setOverrides] = useState<TrackcropOverrides>({})
   const [summary, setSummary] = useState<Record<string, number> | null>(null)
   const job = useAnnotateJob()
 
   useEffect(() => {
-    if (models.length && !modelId) setModelId(models[0].id)
+    if (models.length && !entries[0].modelId)
+      setEntries((prev) => [{ ...prev[0], modelId: models[0].id }, ...prev.slice(1)])
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [models])
 
@@ -57,22 +68,23 @@ export default function CropResultMode({ projectId, models }: Props) {
 
   async function onDrop(files: File[]) {
     const file = files[0]
-    if (!file || !modelId) return
+    if (!file || !base.modelId) return
     setSummary(null)
     await job.run({
       file,
-      modelIds: [modelId],
+      modelIds: [base.modelId],
       projectId,
-      params: { conf: conf === '' ? undefined : conf, iou_wbf: 0.7, imgsz, device: null },
+      params: {
+        conf: base.conf === '' ? undefined : base.conf,
+        iou_wbf: 0.7,
+        imgsz: base.imgsz,
+        device: null,
+      },
       objectTracking: false,
       cropTracking: true,
       cropOutput: 'none',
       overrides: sampling === '' ? overrides : { ...overrides, sampling_interval_ms: sampling },
-      ballModelId: ball.modelId,
-      ballConf: ball.conf === '' ? undefined : ball.conf,
-      tileSize: ball.tileSize,
-      stride: ball.stride,
-      mergeIou: ball.mergeIou,
+      extraDetectors: entryPayload(entries),
     })
   }
 
@@ -82,16 +94,10 @@ export default function CropResultMode({ projectId, models }: Props) {
         <Stack gap="sm">
           <DetectionSettings
             models={models}
-            modelId={modelId}
-            onModelId={setModelId}
-            imgsz={imgsz}
-            onImgsz={setImgsz}
-            conf={conf}
-            onConf={setConf}
+            entries={entries}
+            onEntries={setEntries}
             sampling={sampling}
             onSampling={setSampling}
-            ball={ball}
-            onBall={setBall}
             disabled={job.running}
           />
           <TuningPanel
@@ -112,7 +118,7 @@ export default function CropResultMode({ projectId, models }: Props) {
           )}
 
           {!job.fileName ? (
-            <Dropzone onDrop={onDrop} accept={VIDEO_MIME} multiple={false} disabled={!modelId}>
+            <Dropzone onDrop={onDrop} accept={VIDEO_MIME} multiple={false} disabled={!base.modelId}>
               <Stack align="center" gap="xs" py="xl">
                 <Dropzone.Idle><IconFileCode size={40} stroke={1.2} /></Dropzone.Idle>
                 <Dropzone.Reject><IconX size={40} /></Dropzone.Reject>

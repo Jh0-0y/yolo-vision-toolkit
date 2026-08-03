@@ -135,14 +135,8 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
             # trackcrop is tuned for ball recall (low conf, large imgsz) and its own
             # 1920/608 constants; validate=False so non-1080p input doesn't trip the
             # geometry checks. overrides = runtime tuning; collect_debug = highlight bboxes.
-            ball = cfg.get("ball") or {}
             crop_detector = build_detector(
-                pt, device, imgsz, crop_conf,
-                ball_model_path=ball.get("pt"),
-                ball_conf=ball.get("conf"),
-                tile_size=int(ball.get("tile_size", 640)),
-                stride=int(ball.get("stride", 480)),
-                merge_iou=float(ball.get("merge_iou", 0.5)),
+                pt, device, imgsz, crop_conf, extras=cfg.get("extras") or None,
             )
             cropres = analyze_video(
                 str(src), detector=crop_detector,
