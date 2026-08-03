@@ -86,7 +86,6 @@ export default function CropResultMode({ projectId, models }: Props) {
             onSampling={setSampling}
             disabled={job.running}
           />
-          <Text size="sm" fw={600} mt="xs">Tuning</Text>
           <TuningPanel
             value={overrides}
             onChange={setOverrides}

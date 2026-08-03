@@ -54,7 +54,7 @@ export default function CropDrawMode({ projectId, models }: Props) {
   const [showDeadZone, setShowDeadZone] = useState(true)
   const [showCenterLine, setShowCenterLine] = useState(true)
   const [showHighlight, setShowHighlight] = useState(true)
-  const [showOverlays, setShowOverlays] = useState(true)
+  const [showOverlays, setShowOverlays] = useState(false)
 
   const [file, setFile] = useState<File | null>(null)
   const [result, setResult] = useState<LiveResult | null>(null)
@@ -240,7 +240,6 @@ export default function CropDrawMode({ projectId, models }: Props) {
             </Button>
           )}
 
-          <Text size="sm" fw={600} mt="xs">Tuning</Text>
           <TuningPanel
             value={overrides}
             onChange={setOverrides}
