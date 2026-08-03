@@ -333,14 +333,26 @@ def _run_crop_cut(cfg, src, out, tmp, progress, cancel, mode: str) -> dict:
     traj: crop_render.Trajectory = ([], [])
     if mode == "json":
         data = json.loads(Path(cfg["crop_json_path"]).read_text(encoding="utf-8"))
-        samples = data.get("samples") or []
-        half = w / 2
-        ms_list = [int(s["video_offset_ms"]) for s in samples]
-        cx_list = [
-            half if s.get("target_type") == "center" else float(s["target_center_x"])
-            for s in samples
-        ]
-        traj = (ms_list, cx_list)
+        keyframes = data.get("keyframes") or []
+        if keyframes and "videoOffsetMs" in keyframes[0]:
+            # 계약 스키마(camelCase): keyframes의 x는 크롭 왼쪽 X — 중심으로 변환.
+            # LINEAR 보간 계약은 cut_window의 np.interp가 그대로 충족한다.
+            spec_src_w = float((data.get("source") or {}).get("width") or w)
+            spec_crop_w = float((data.get("crop") or {}).get("width") or crop_w)
+            scale = w / spec_src_w if spec_src_w else 1.0  # 실제 해상도가 다르면 비례
+            ms_list = [int(k["videoOffsetMs"]) for k in keyframes]
+            cx_list = [(float(k["x"]) + spec_crop_w / 2) * scale for k in keyframes]
+            traj = (ms_list, cx_list)
+        else:
+            # 레거시 형식: samples(target_center_x) 기반
+            samples = data.get("samples") or []
+            half = w / 2
+            ms_list = [int(s["video_offset_ms"]) for s in samples]
+            cx_list = [
+                half if s.get("target_type") == "center" else float(s["target_center_x"])
+                for s in samples
+            ]
+            traj = (ms_list, cx_list)
 
     idx = 0
     cancelled = False

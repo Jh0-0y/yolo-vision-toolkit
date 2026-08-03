@@ -150,10 +150,10 @@ export default function CropResultMode({ projectId, models }: Props) {
                     <Card withBorder radius="sm" padding="sm" bg="var(--mantine-color-default-hover)">
                       <Text size="sm" fw={600} mb={4}>Coverage</Text>
                       <Group gap="lg">
-                        <Text size="sm">Ball tracking <Code>{pct(summary.ball_tracking_coverage)}</Code></Text>
-                        <Text size="sm">Player tracking <Code>{pct(summary.player_tracking_coverage)}</Code></Text>
-                        <Text size="sm">Center fallback <Code>{pct(summary.fallback_coverage)}</Code></Text>
-                        <Text size="sm">Keyframes <Code>{summary.keyframe_count}</Code></Text>
+                        <Text size="sm">Ball tracking <Code>{pct(summary.ballTrackingCoverage)}</Code></Text>
+                        <Text size="sm">Player tracking <Code>{pct(summary.playerTrackingCoverage)}</Code></Text>
+                        <Text size="sm">Center fallback <Code>{pct(summary.fallbackCoverage)}</Code></Text>
+                        <Text size="sm">Keyframes <Code>{summary.keyframeCount}</Code></Text>
                       </Group>
                     </Card>
                   )}

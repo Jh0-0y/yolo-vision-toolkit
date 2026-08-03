@@ -119,11 +119,13 @@ export default function CropDrawMode({ projectId, models }: Props) {
     setVideoFailed(false)
   }
 
-  /** 현재 튜닝이 반영된 plan(CropResult)을 crop.json 파일로 저장한다. */
+  /** 현재 튜닝이 반영된 plan을 계약 스키마(camelCase) crop.json으로 저장한다.
+   *  samples/debug는 오버레이용 내부 확장이라 내보내기에서 제거한다. */
   function downloadPlan() {
     if (!plan || !file) return
+    const { samples: _samples, debug: _debug, ...spec } = plan
     const url = URL.createObjectURL(
-      new Blob([JSON.stringify(plan, null, 2)], { type: 'application/json' }),
+      new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' }),
     )
     const a = document.createElement('a')
     a.href = url

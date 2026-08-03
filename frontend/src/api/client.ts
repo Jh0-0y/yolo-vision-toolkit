@@ -806,16 +806,20 @@ export interface CropDebug {
 }
 
 // Crop coordinates recomputed from cached detections for a given set of overrides.
+// 계약 스키마(camelCase) + 라이브 오버레이용 내부 확장(samples/debug — 스펙 외).
+// 파일로 내보낼 때는 samples/debug를 제거해 스펙만 남긴다.
 export interface CropPlan {
-  source_width: number
-  source_height: number
-  duration_ms: number
-  crop_width: number
-  crop_height: number
-  crop_y: number
-  keyframes: { video_offset_ms: number; x: number; target_type: string; confidence: number }[]
-  samples: CropSample[]
+  schemaVersion: number
+  jobId: string
+  gameId: string
+  clipCandidateId: string
+  sourceContentOutputId: string
+  sourceMediaAssetId: string
+  source: { width: number; height: number; durationMs: number }
+  crop: { width: number; height: number; y: number; interpolation: string }
+  keyframes: { videoOffsetMs: number; x: number; targetType: string; confidence: number }[]
   summary: Record<string, number>
+  samples: CropSample[]
   debug: CropDebug[]
 }
 

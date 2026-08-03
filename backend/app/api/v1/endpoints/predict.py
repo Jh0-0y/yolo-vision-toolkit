@@ -267,11 +267,14 @@ async def start_crop_cut(
         crop_bytes = await crop_json.read()
         try:
             parsed = json.loads(crop_bytes)
-            if not isinstance(parsed.get("samples"), list) or not parsed["samples"]:
+            has_spec = isinstance(parsed.get("keyframes"), list) and parsed["keyframes"]
+            has_legacy = isinstance(parsed.get("samples"), list) and parsed["samples"]
+            if not (has_spec or has_legacy):
                 raise ValueError
         except (ValueError, AttributeError, TypeError):
             raise HTTPException(
-                422, "crop_json must be a crop.json with a non-empty 'samples' array"
+                422,
+                "crop_json must contain a non-empty 'keyframes' (or legacy 'samples') array",
             ) from None
 
     await run_in_threadpool(sweep_old_annotations)
@@ -448,7 +451,7 @@ async def live_plan(detect_id: str, body: dict = Body(default={})):
         result = plan_from_detections(
             detected, overrides=overrides, collect_debug=collect_debug, validate=False,
         )
-        return result.to_dict()
+        return result.to_dict(include_internal=True)  # 오버레이용 samples/debug 포함
 
     return await run_in_threadpool(_compute)
 

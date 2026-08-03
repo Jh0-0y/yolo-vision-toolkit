@@ -53,6 +53,24 @@ class Keyframe:
     confidence: float
 
 
+# 스펙 target_type 표기 — 내부 소문자 → 계약(camelCase JSON)의 UPPER_SNAKE
+_SPEC_TARGET_TYPE = {
+    "ball": "BALL",
+    "ball_player": "BALL_PLAYER",
+    "player_group": "PLAYER_GROUP",
+    "center": "CENTER",
+}
+
+# 이 툴킷에는 게임/잡 식별자 체계가 없다 — 스펙 필수 컬럼은 플레이스홀더로 채운다.
+SPEC_PLACEHOLDER_IDS = {
+    "jobId": "job_local",
+    "gameId": "game_local",
+    "clipCandidateId": "clip_local",
+    "sourceContentOutputId": "cnto_local",
+    "sourceMediaAssetId": "mast_local",
+}
+
+
 @dataclass(slots=True)
 class CropResult:
     """추적·크롭 좌표 계산 결과.
@@ -73,8 +91,47 @@ class CropResult:
     summary: dict = field(default_factory=dict)
     debug: list = field(default_factory=list)  # 대상 하이라이트용 시점별 선택 공/소유선수 bbox (opt-in)
 
-    def to_dict(self) -> dict:
-        return asdict(self)
+    def to_dict(self, include_internal: bool = False) -> dict:
+        """계약 스키마(camelCase)로 직렬화한다.
+
+        기본은 스펙 그대로(schemaVersion·id·source/crop 중첩·keyframes·summary).
+        include_internal=True면 라이브 오버레이용 내부 확장 필드(samples·debug —
+        스펙 외)를 함께 담는다. 파일로 내보내는 crop.json은 스펙만 담아야 한다.
+        """
+        out: dict = {
+            "schemaVersion": 1,
+            **SPEC_PLACEHOLDER_IDS,
+            "source": {
+                "width": self.source_width,
+                "height": self.source_height,
+                "durationMs": self.duration_ms,
+            },
+            "crop": {
+                "width": self.crop_width,
+                "height": self.crop_height,
+                "y": self.crop_y,
+                "interpolation": "LINEAR",
+            },
+            "keyframes": [
+                {
+                    "videoOffsetMs": k.video_offset_ms,
+                    "x": k.x,
+                    "targetType": _SPEC_TARGET_TYPE.get(k.target_type, k.target_type.upper()),
+                    "confidence": round(k.confidence, 4),
+                }
+                for k in self.keyframes
+            ],
+            "summary": {
+                "keyframeCount": self.summary.get("keyframe_count", len(self.keyframes)),
+                "ballTrackingCoverage": self.summary.get("ball_tracking_coverage", 0.0),
+                "playerTrackingCoverage": self.summary.get("player_tracking_coverage", 0.0),
+                "fallbackCoverage": self.summary.get("fallback_coverage", 0.0),
+            },
+        }
+        if include_internal:
+            out["samples"] = [asdict(s) for s in self.samples]
+            out["debug"] = list(self.debug)
+        return out
 
     def to_json(self, indent: int | None = 2) -> str:
         import json

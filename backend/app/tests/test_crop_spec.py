@@ -1,0 +1,68 @@
+"""crop.json 계약 스키마(camelCase) 직렬화 검증.
+
+내보내기 형식은 외부 계약을 따른다: schemaVersion·id 컬럼(플레이스홀더)·
+source/crop 중첩·keyframes(videoOffsetMs/targetType UPPER)·summary(camelCase).
+samples/debug는 내부 확장이라 include_internal=True에서만 담긴다.
+"""
+
+import json
+
+from app.ml.trackcrop.result import build_crop_result
+from app.ml.trackcrop.types import Keyframe, TargetSample
+
+
+def _result():
+    samples = [
+        TargetSample(0, 960.0, "ball", 0.9),
+        TargetSample(100, 970.0, "ball_player", 0.85),
+        TargetSample(200, 980.0, "center", 0.0),
+    ]
+    keyframes = [
+        Keyframe(0, 656, "ball", 0.912345),
+        Keyframe(200, 676, "center", 1.0),
+    ]
+    return build_crop_result(samples, keyframes)
+
+
+def test_spec_shape_and_camel_case():
+    d = _result().to_dict()
+    assert d["schemaVersion"] == 1
+    # id 컬럼은 플레이스홀더로 존재해야 한다 (이 툴킷엔 게임/잡 체계가 없음)
+    for key in ("jobId", "gameId", "clipCandidateId", "sourceContentOutputId", "sourceMediaAssetId"):
+        assert isinstance(d[key], str) and d[key]
+    assert d["source"] == {"width": 1920, "height": 1080, "durationMs": 200}
+    assert d["crop"] == {"width": 608, "height": 1080, "y": 0, "interpolation": "LINEAR"}
+    kf = d["keyframes"][0]
+    assert set(kf) == {"videoOffsetMs", "x", "targetType", "confidence"}
+    assert kf["targetType"] == "BALL"
+    assert kf["confidence"] == 0.9123  # 4자리 반올림
+    assert d["keyframes"][1]["targetType"] == "CENTER"
+    assert set(d["summary"]) == {
+        "keyframeCount", "ballTrackingCoverage", "playerTrackingCoverage", "fallbackCoverage",
+    }
+    # 스펙 외 내부 필드는 기본 내보내기에 없어야 한다
+    assert "samples" not in d and "debug" not in d
+    # 키 이름에 snake_case가 남아있지 않아야 한다 (값의 언더스코어는 무관)
+    def _keys(obj):
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                yield k
+                yield from _keys(v)
+        elif isinstance(obj, list):
+            for v in obj:
+                yield from _keys(v)
+
+    assert all("_" not in k for k in _keys(d))
+
+
+def test_internal_fields_only_when_requested():
+    d = _result().to_dict(include_internal=True)
+    assert len(d["samples"]) == 3
+    assert d["samples"][0]["target_center_x"] == 960.0  # 내부 확장은 내부 표기 유지
+    assert d["debug"] == []
+
+
+def test_to_json_is_spec_only():
+    parsed = json.loads(_result().to_json())
+    assert "samples" not in parsed
+    assert parsed["keyframes"][0]["videoOffsetMs"] == 0
