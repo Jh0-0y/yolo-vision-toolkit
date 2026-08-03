@@ -1,12 +1,13 @@
 import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Alert, Badge, Group, Stack, Tabs, Text, Title } from '@mantine/core'
-import { IconAlertTriangle, IconFileCode, IconMovie } from '@tabler/icons-react'
+import { IconAlertTriangle, IconBrush, IconFileCode, IconMovie } from '@tabler/icons-react'
 import { api, getResources, type ModelOut } from '../api/client'
+import CropDrawMode from '../components/lab/CropDrawMode'
 import CropResultMode from '../components/lab/CropResultMode'
 import CropVideoMode from '../components/lab/CropVideoMode'
 
-export default function CropResultPage() {
+export default function CropPage() {
   const { projectId = '' } = useParams()
 
   const modelsQuery = useQuery({
@@ -26,9 +27,9 @@ export default function CropResultPage() {
     <Stack gap="lg">
       <Group justify="space-between" align="flex-start">
         <div>
-          <Title order={3}>Crop Result</Title>
+          <Title order={3}>Crop</Title>
           <Text c="dimmed" size="sm">
-            The production crop output — coordinates (crop.json), and optionally the cut vertical clip.
+            Vertical 9:16 crop — coordinates (crop.json), the cut clip, and the live tuning draw tool.
           </Text>
         </div>
         {resources && (
@@ -44,13 +45,16 @@ export default function CropResultPage() {
         </Alert>
       )}
 
-      <Tabs defaultValue="json">
+      <Tabs defaultValue="json" keepMounted={false}>
         <Tabs.List>
           <Tabs.Tab value="json" leftSection={<IconFileCode size={16} />}>
             Crop JSON
           </Tabs.Tab>
           <Tabs.Tab value="video" leftSection={<IconMovie size={16} />}>
             Crop Video
+          </Tabs.Tab>
+          <Tabs.Tab value="draw" leftSection={<IconBrush size={16} />}>
+            Draw Tool
           </Tabs.Tab>
         </Tabs.List>
 
@@ -59,6 +63,9 @@ export default function CropResultPage() {
         </Tabs.Panel>
         <Tabs.Panel value="video" pt="md">
           <CropVideoMode />
+        </Tabs.Panel>
+        <Tabs.Panel value="draw" pt="md">
+          <CropDrawMode projectId={projectId} models={models} />
         </Tabs.Panel>
       </Tabs>
     </Stack>
