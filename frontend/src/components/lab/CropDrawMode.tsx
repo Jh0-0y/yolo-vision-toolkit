@@ -227,7 +227,6 @@ export default function CropDrawMode({ projectId, models }: Props) {
             sampling={sampling}
             onSampling={setSampling}
             disabled={job.running}
-            description="Runs once on upload. Changing these re-analyzes; tuning below applies instantly."
           />
 
           {detectionDirty && file && !job.running && (

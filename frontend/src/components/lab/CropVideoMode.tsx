@@ -27,7 +27,7 @@ type CutMode = 'center' | 'json'
  *  - Center crop: fixed to the frame centre (no JSON).
  *  - JSON to crop: follow an uploaded crop.json trajectory. */
 export default function CropVideoMode() {
-  const [mode, setMode] = useState<CutMode>('center')
+  const [mode, setMode] = useState<CutMode>('json')
   const [cropJson, setCropJson] = useState<File | null>(null)
   const [videoFailed, setVideoFailed] = useState(false)
   const job = useAnnotateJob()
