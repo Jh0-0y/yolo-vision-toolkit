@@ -50,22 +50,22 @@ export default function CropPage() {
           <Tabs.Tab value="json" leftSection={<IconFileCode size={16} />}>
             Crop JSON
           </Tabs.Tab>
+          <Tabs.Tab value="draw" leftSection={<IconBrush size={16} />}>
+            Crop Draw
+          </Tabs.Tab>
           <Tabs.Tab value="video" leftSection={<IconMovie size={16} />}>
             Crop Video
-          </Tabs.Tab>
-          <Tabs.Tab value="draw" leftSection={<IconBrush size={16} />}>
-            Draw Tool
           </Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="json" pt="md">
           <CropResultMode projectId={projectId} models={models} />
         </Tabs.Panel>
-        <Tabs.Panel value="video" pt="md">
-          <CropVideoMode />
-        </Tabs.Panel>
         <Tabs.Panel value="draw" pt="md">
           <CropDrawMode projectId={projectId} models={models} />
+        </Tabs.Panel>
+        <Tabs.Panel value="video" pt="md">
+          <CropVideoMode />
         </Tabs.Panel>
       </Tabs>
     </Stack>

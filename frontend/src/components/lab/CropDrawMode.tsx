@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
+  Anchor,
   Badge,
   Button,
   Card,
   Checkbox,
   Group,
-  NumberInput,
   Progress,
-  Select,
   Stack,
   Text,
   UnstyledButton,
@@ -24,8 +23,9 @@ import {
   type ModelOut,
   type TrackcropOverrides,
 } from '../../api/client'
+import DetectionSettings from './DetectionSettings'
 import TuningPanel from './TuningPanel'
-import { DEFAULT_IMGSZ, IMGSZ_OPTIONS } from './useAnnotateJob'
+import { DEFAULT_IMGSZ } from './useAnnotateJob'
 import { LIVE_PHASE_LABEL, useLiveJob } from './useLiveJob'
 import { drawOverlay } from './liveOverlay'
 
@@ -104,6 +104,19 @@ export default function CropDrawMode({ projectId, models }: Props) {
     setAnalyzedKey(null)
     setLoadError(null)
     setVideoFailed(false)
+  }
+
+  /** 현재 튜닝이 반영된 plan(CropResult)을 crop.json 파일로 저장한다. */
+  function downloadPlan() {
+    if (!plan || !file) return
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(plan, null, 2)], { type: 'application/json' }),
+    )
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `crop_${file.name.replace(/\.[^.]+$/, '')}.json`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   // recompute the crop trajectory whenever tuning / highlight / the detection cache changes.
@@ -203,52 +216,19 @@ export default function CropDrawMode({ projectId, models }: Props) {
     <Stack gap="md">
       <Card withBorder radius="md" padding="md">
         <Stack gap="sm">
-          <Text size="sm" fw={600}>Detection</Text>
-          <Text size="xs" c="dimmed">
-            Runs once on upload. Changing these re-analyzes; tuning below applies instantly.
-          </Text>
-          <Select
-            label="Model"
-            placeholder={models.length ? 'Pick a model' : 'No models — train or upload one first'}
-            data={models.map((m) => ({ value: m.id, label: m.name }))}
-            value={modelId}
-            onChange={setModelId}
-            disabled={job.running || !models.length}
-            allowDeselect={false}
+          <DetectionSettings
+            models={models}
+            modelId={modelId}
+            onModelId={setModelId}
+            imgsz={imgsz}
+            onImgsz={setImgsz}
+            conf={conf}
+            onConf={setConf}
+            sampling={sampling}
+            onSampling={setSampling}
+            disabled={job.running}
+            description="Runs once on upload. Changing these re-analyzes; tuning below applies instantly."
           />
-          <Group grow align="flex-start">
-            <Select
-              label="Image size"
-              description="Match your model's training size"
-              data={IMGSZ_OPTIONS}
-              value={String(imgsz)}
-              onChange={(v) => v && setImgsz(Number(v))}
-              disabled={job.running}
-              allowDeselect={false}
-            />
-            <NumberInput
-              label="Confidence"
-              description="Detection threshold"
-              placeholder="default 0.1"
-              value={conf}
-              onChange={(v) => setConf(v === '' || v == null ? '' : Number(v))}
-              min={0.05}
-              max={0.95}
-              step={0.05}
-              decimalScale={2}
-              disabled={job.running}
-            />
-            <NumberInput
-              label="Sampling interval (ms)"
-              description="Lower = smoother, slower"
-              placeholder="default 100"
-              value={sampling}
-              onChange={(v) => setSampling(v === '' || v == null ? '' : Number(v))}
-              min={10}
-              step={10}
-              disabled={job.running}
-            />
-          </Group>
 
           {detectionDirty && file && !job.running && (
             <Button
@@ -260,7 +240,7 @@ export default function CropDrawMode({ projectId, models }: Props) {
             </Button>
           )}
 
-          <Text size="sm" fw={600} mt="xs">Tuning (instant)</Text>
+          <Text size="sm" fw={600} mt="xs">Tuning</Text>
           <TuningPanel
             value={overrides}
             onChange={setOverrides}
@@ -381,6 +361,15 @@ export default function CropDrawMode({ projectId, models }: Props) {
                     </div>
                   </div>
                 )
+              )}
+
+              {plan && result && !job.running && (
+                <Group>
+                  <Anchor size="sm" onClick={() => downloadPlan()} style={{ cursor: 'pointer' }}>
+                    Download crop coordinates (JSON) — current tuning
+                  </Anchor>
+                  <Text c="dimmed" size="xs">Reflects the knobs above; re-download after changes.</Text>
+                </Group>
               )}
             </Stack>
           )}

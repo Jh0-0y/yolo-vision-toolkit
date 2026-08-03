@@ -6,17 +6,16 @@ import {
   Card,
   Code,
   Group,
-  NumberInput,
   Progress,
-  Select,
   Stack,
   Text,
 } from '@mantine/core'
 import { Dropzone } from '@mantine/dropzone'
 import { IconAlertTriangle, IconFileCode, IconX } from '@tabler/icons-react'
 import { annotateCropUrl, type ModelOut, type TrackcropOverrides } from '../../api/client'
+import DetectionSettings from './DetectionSettings'
 import TuningPanel from './TuningPanel'
-import { DEFAULT_IMGSZ, IMGSZ_OPTIONS, PHASE_LABEL, useAnnotateJob } from './useAnnotateJob'
+import { DEFAULT_IMGSZ, PHASE_LABEL, useAnnotateJob } from './useAnnotateJob'
 
 const VIDEO_MIME = [
   'video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska', 'video/x-msvideo',
@@ -32,6 +31,7 @@ export default function CropResultMode({ projectId, models }: Props) {
   const [modelId, setModelId] = useState<string | null>(null)
   const [conf, setConf] = useState<number | ''>('')
   const [imgsz, setImgsz] = useState(DEFAULT_IMGSZ)
+  const [sampling, setSampling] = useState<number | ''>('')
   const [overrides, setOverrides] = useState<TrackcropOverrides>({})
   const [summary, setSummary] = useState<Record<string, number> | null>(null)
   const job = useAnnotateJob()
@@ -66,7 +66,7 @@ export default function CropResultMode({ projectId, models }: Props) {
       objectTracking: false,
       cropTracking: true,
       cropOutput: 'none',
-      overrides,
+      overrides: sampling === '' ? overrides : { ...overrides, sampling_interval_ms: sampling },
     })
   }
 
@@ -74,40 +74,25 @@ export default function CropResultMode({ projectId, models }: Props) {
     <Stack gap="md">
       <Card withBorder radius="md" padding="md">
         <Stack gap="sm">
-          <Text size="sm" fw={600}>Inference</Text>
-          <Select
-            label="Model"
-            placeholder={models.length ? 'Pick a model' : 'No models — train or upload one first'}
-            data={models.map((m) => ({ value: m.id, label: m.name }))}
-            value={modelId}
-            onChange={setModelId}
-            disabled={job.running || !models.length}
-            allowDeselect={false}
+          <DetectionSettings
+            models={models}
+            modelId={modelId}
+            onModelId={setModelId}
+            imgsz={imgsz}
+            onImgsz={setImgsz}
+            conf={conf}
+            onConf={setConf}
+            sampling={sampling}
+            onSampling={setSampling}
+            disabled={job.running}
           />
-          <Group grow align="flex-start">
-            <Select
-              label="Image size (inference)"
-              description="Match your model's training size"
-              data={IMGSZ_OPTIONS}
-              value={String(imgsz)}
-              onChange={(v) => v && setImgsz(Number(v))}
-              disabled={job.running}
-              allowDeselect={false}
-            />
-            <NumberInput
-              label="Confidence"
-              description="Detection threshold"
-              placeholder="default 0.1"
-              value={conf}
-              onChange={(v) => setConf(v === '' || v == null ? '' : Number(v))}
-              min={0.05}
-              max={0.95}
-              step={0.05}
-              decimalScale={2}
-              disabled={job.running}
-            />
-          </Group>
-          <TuningPanel value={overrides} onChange={setOverrides} disabled={job.running} />
+          <Text size="sm" fw={600} mt="xs">Tuning</Text>
+          <TuningPanel
+            value={overrides}
+            onChange={setOverrides}
+            disabled={job.running}
+            exclude={['sampling_interval_ms']}
+          />
         </Stack>
       </Card>
 
