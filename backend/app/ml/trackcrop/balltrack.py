@@ -39,10 +39,13 @@ class ClipPlanConfig:
     stitch_velocity_cap_ms: int = 500  # 스티칭 외삽에 쓰는 속도 적용 상한(과외삽 방지)
 
     # --- 트랙 채점 ---
-    w_travel: float = 0.4  # 총 이동량 (정지 공 배제)
-    w_interaction: float = 0.4  # 선수 상호작용 비율 (기하 겹침)
-    w_span: float = 0.2  # 클립 대비 커버 시간
-    travel_norm_px: float = 1920.0  # 이 이상 움직이면 이동량 만점
+    # 이동량이 1등 신호다: 진짜 경기 공은 클립 전체에서 압도적으로 많이 움직인다.
+    # 상호작용 비중을 크게 두면 "드리블 구간만 모은 부분 체인"이나 머리 오탐
+    # 체인(항상 선수와 겹침)이 전체 궤적을 이기는 역전이 생긴다 (실측 사례).
+    w_travel: float = 0.5  # 총 이동량
+    w_interaction: float = 0.3  # 선수 상호작용 비율 (기하 겹침)
+    w_span: float = 0.1  # 클립 대비 커버 시간
+    travel_norm_px: float = 3840.0  # 포화 완화 — 1920이면 부분 체인도 만점이라 변별력 상실
     min_track_score: float = 0.25  # 미달이면 "공 없음" 클립
     absorb_allow_scale: float = 2.0  # 흡수 병합 시 허용치 완화 배율
     possession_margin: float = 0.15  # 소유 판정: 선수 bbox 확장 비율 (×키)
@@ -317,6 +320,13 @@ def select_game_ball_track(
             absorbed += 1
     info["absorbed"] = absorbed
 
+    # 점 단위 흡수 — 스티칭이 궤적을 두 체인으로 쪼갠 경우(경쟁 leapfrog),
+    # 낙선 체인의 점이라도 승자 경로와 시간·위치가 정합하면 회수한다.
+    best.points.sort(key=lambda p: p.offset_ms)
+    info["absorbed_points"] = _absorb_consistent_points(
+        best, [c for _, c in scored[1:]], cfg
+    )
+
     # 같은 시각 중복 점 정리 (병합 안전망) — confidence 높은 쪽 유지
     dedup: dict[int, TrackPoint] = {}
     for p in best.points:
@@ -325,3 +335,45 @@ def select_game_ball_track(
             dedup[p.offset_ms] = p
     best.points = [dedup[ms] for ms in sorted(dedup)]
     return best, info
+
+
+def _absorb_consistent_points(
+    best: BallTrack, others: list[BallTrack], cfg: ClipPlanConfig
+) -> int:
+    """낙선 체인의 점 중 승자 트랙 경로와 정합하는 점을 흡수한다.
+
+    승자 트랙의 이웃 실측에서 예상 위치를 보간(범위 밖이면 끝점 기준)하고,
+    시간 간격에 비례한 허용 반경 안이면 같은 공의 관측으로 보고 회수한다.
+    """
+    import bisect as _bisect
+
+    added = 0
+    for chain in others:
+        times = [p.offset_ms for p in best.points]
+        have = set(times)
+        for p in chain.points:
+            ms = p.offset_ms
+            if ms in have:
+                continue
+            i = _bisect.bisect_left(times, ms)
+            if 0 < i < len(times):
+                before, after = best.points[i - 1], best.points[i]
+                span = after.offset_ms - before.offset_ms
+                ratio = (ms - before.offset_ms) / span
+                expected = (
+                    before.det.center_x
+                    + (after.det.center_x - before.det.center_x) * ratio
+                )
+                gap = min(ms - before.offset_ms, after.offset_ms - ms)
+            elif i == 0:
+                expected = best.points[0].det.center_x
+                gap = times[0] - ms
+            else:
+                expected = best.points[-1].det.center_x
+                gap = ms - times[-1]
+            if abs(p.det.center_x - expected) <= _link_allowance(gap, cfg):
+                best.points.insert(i, p)
+                times.insert(i, ms)
+                have.add(ms)
+                added += 1
+    return added

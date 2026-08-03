@@ -103,16 +103,15 @@ def test_static_only_clip_has_no_ball():
 def test_short_gap_is_interpolated_as_ball():
     # 1000~1600ms 미검출 — 재등장 위치를 아니까 선형 보간, BALL 유지
     samples = []
-    for ms in range(0, 2700, 100):
+    for ms in range(0, 3700, 100):
         if 1000 < ms < 1600:
             samples.append((ms, []))
         else:
-            x = 500 if ms <= 1000 else 800
-            samples.append((ms, [_ball(x, ms)]))
+            samples.append((ms, [_ball(100 + 0.5 * ms, ms)]))  # 0.5px/ms 등속 이동
     targets, _ = resolve_targets_clip(samples, CFG)
     mid = next(t for t in targets if t.video_offset_ms == 1300)
     assert mid.target_type == TargetType.BALL.value
-    assert abs(mid.target_center_x - 650) < 1  # (500+800)/2
+    assert abs(mid.target_center_x - 750) < 1  # (600+900)/2
 
 
 def test_long_gap_falls_back_to_carrier():
