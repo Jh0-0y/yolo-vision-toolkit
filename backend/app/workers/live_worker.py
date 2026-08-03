@@ -73,11 +73,19 @@ def run_live(job_id: str, cfg: dict, jobs_dir: str) -> dict:
 
         # ---- detection (the expensive pass) ----
         # trackcrop pulls in cv2/ultralytics — keep the import lazy (worker only).
-        from app.ml.trackcrop import Detector
+        from app.ml.trackcrop.detection import build_detector
         from app.ml.trackcrop.detection_io import dump_detections
         from app.ml.trackcrop.pipeline import detect_video
 
-        detector = Detector(model_path=pt, device=device, imgsz=imgsz, conf=conf)
+        ball = cfg.get("ball") or {}
+        detector = build_detector(
+            pt, device, imgsz, conf,
+            ball_model_path=ball.get("pt"),
+            ball_conf=ball.get("conf"),
+            tile_size=int(ball.get("tile_size", 640)),
+            stride=int(ball.get("stride", 480)),
+            merge_iou=float(ball.get("merge_iou", 0.5)),
+        )
 
         def on_progress(done: int) -> None:
             if cancel.exists():

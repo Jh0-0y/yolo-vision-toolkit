@@ -1,12 +1,18 @@
-"""YOLO 객체 탐지 + ByteTrack 추적.
+"""YOLO 객체 탐지 + ByteTrack 추적 (+ 공 전용 타일 추론).
 
-탐지·추적은 ultralytics 내장 ByteTrack(`model.track`)으로 수행하고 track_id는
-`boxes.id`에서 받는다 (스펙 DET-01·DET-05). 공의 시간적 연속성·가림 예측은
-BallTracker(tracking.py, 등속 예측)가 보조한다.
+두 가지 검출 구성을 지원한다:
 
-⚠️ 100ms 샘플링(10fps)에서는 빠른 공이 프레임 사이 IoU 연계에 실패해 검출이
-떨어질 수 있다(실측 track 44% vs predict 57%). 그럼에도 원본 스펙이 ByteTrack을
-규정하므로 이를 따른다. 트레이드오프 논의는 프로젝트 문서(trackcrop-considerations) 참고.
+  단일 모델   — Detector: 풀 프레임 `model.track`(ByteTrack)으로 공+선수 동시 탐지.
+  분리 모델   — SplitDetector:
+                 · 선수: Detector 풀 프레임 track (carrier 추적에 track_id 필요)
+                 · 공:   TiledBallDetector — 프레임을 타일로 슬라이스해 batch 추론,
+                        박스를 원본 좌표로 복원, 겹침 중복은 NMS로 병합.
+                        track_id 없이 낸다 — 클립 플래너의 스티칭이 궤적을 조립한다.
+
+타일로 학습한 공 모델은 타일 추론이 학습 분포와 일치한다 (풀 프레임 추론은 어긋남).
+
+⚠️ 100ms 샘플링(10fps)에서 빠른 공은 ByteTrack IoU 연계에 실패해 검출이 떨어질
+수 있다(실측 track 44% vs predict 57%) — 분리 모드의 공 predict 경로는 이 문제가 없다.
 
 클래스 매핑은 model.names에서 자동 인식한다 — COCO(person/sports ball)와
 커스텀 모델(ball/player) 모두 설정 없이 동작한다.
@@ -16,6 +22,8 @@ from collections.abc import Iterator
 
 import numpy as np
 
+from app.domain.tiling import TilingParams, tile_grid
+
 from .errors import ErrorCode, TrackCropError
 from .types import Detection
 
@@ -23,42 +31,55 @@ OBJECT_TYPE_BALL = "ball"
 OBJECT_TYPE_PLAYER = "player"
 
 
+def _map_classes(names: dict[int, str]) -> dict[int, str]:
+    """model.names → {class_id: object_type} 자동 매핑."""
+    mapping: dict[int, str] = {}
+    for class_id, name in names.items():
+        lowered = name.lower()
+        if "ball" in lowered:
+            mapping[class_id] = OBJECT_TYPE_BALL
+        elif "person" in lowered or "player" in lowered:
+            mapping[class_id] = OBJECT_TYPE_PLAYER
+    return mapping
+
+
+def _load_model(model_path: str):
+    # ultralytics·torch는 import에 수 초가 걸려 지연 로딩한다
+    try:
+        from ultralytics import YOLO
+
+        return YOLO(model_path)
+    except Exception as e:
+        raise TrackCropError(
+            ErrorCode.MODEL_LOAD_FAILED,
+            f"탐지 모델을 로딩할 수 없습니다: {model_path}",
+            details={"model_path": model_path, "cause": str(e)[:300]},
+        ) from e
+
+
 class Detector:
-    def __init__(self, model_path: str, device: str, imgsz: int, conf: float):
-        # ultralytics·torch는 import에 수 초가 걸려 지연 로딩한다
-        try:
-            from ultralytics import YOLO
-
-            self._model = YOLO(model_path)
-        except Exception as e:
-            raise TrackCropError(
-                ErrorCode.MODEL_LOAD_FAILED,
-                f"탐지 모델을 로딩할 수 없습니다: {model_path}",
-                details={"model_path": model_path, "cause": str(e)[:300]},
-            ) from e
-
+    def __init__(
+        self,
+        model_path: str,
+        device: str,
+        imgsz: int,
+        conf: float,
+        types: tuple[str, ...] = (OBJECT_TYPE_BALL, OBJECT_TYPE_PLAYER),
+    ):
+        self._model = _load_model(model_path)
         self._device = device
         self._imgsz = imgsz
         self._conf = conf
-        self._type_by_class = self._map_classes(self._model.names)
-        if OBJECT_TYPE_BALL not in self._type_by_class.values():
-            raise TrackCropError(
-                ErrorCode.MODEL_LOAD_FAILED,
-                "모델에 ball 클래스가 없습니다.",
-                details={"names": dict(self._model.names)},
-            )
-
-    @staticmethod
-    def _map_classes(names: dict[int, str]) -> dict[int, str]:
-        """model.names → {class_id: object_type} 자동 매핑."""
-        mapping: dict[int, str] = {}
-        for class_id, name in names.items():
-            lowered = name.lower()
-            if "ball" in lowered:
-                mapping[class_id] = OBJECT_TYPE_BALL
-            elif "person" in lowered or "player" in lowered:
-                mapping[class_id] = OBJECT_TYPE_PLAYER
-        return mapping
+        self._type_by_class = {
+            cid: t for cid, t in _map_classes(self._model.names).items() if t in types
+        }
+        for required in types:
+            if required not in self._type_by_class.values():
+                raise TrackCropError(
+                    ErrorCode.MODEL_LOAD_FAILED,
+                    f"모델에 {required} 클래스가 없습니다.",
+                    details={"names": dict(self._model.names)},
+                )
 
     def _reset_tracker(self) -> None:
         """Detector 재사용(여러 영상 처리) 시 이전 영상의 ByteTrack 상태가
@@ -73,32 +94,31 @@ class Detector:
     def track(
         self, frames: Iterator[tuple[int, np.ndarray]]
     ) -> Iterator[tuple[int, list[Detection]]]:
-        """(offset_ms, Detection 목록)을 Sample 단위로 생성한다.
-
-        ByteTrack을 persist=True로 프레임 간 상태를 유지하며, track_id는 boxes.id에서 받는다.
-        """
+        """(offset_ms, Detection 목록)을 Sample 단위로 생성한다."""
         self._reset_tracker()  # 새 영상마다 tracker 상태 초기화
-        target_classes = list(self._type_by_class)
         for offset_ms, frame in frames:
-            try:
-                result = self._model.track(
-                    frame,
-                    persist=True,
-                    tracker="bytetrack.yaml",
-                    classes=target_classes,
-                    imgsz=self._imgsz,
-                    conf=self._conf,
-                    device=self._device,
-                    verbose=False,
-                )[0]
-            except Exception as e:
-                raise TrackCropError(
-                    ErrorCode.OBJECT_DETECTION_FAILED,
-                    "객체 탐지·추적 추론 중 오류가 발생했습니다.",
-                    details={"video_offset_ms": offset_ms, "cause": str(e)[:300]},
-                ) from e
+            yield offset_ms, self.track_frame(frame, offset_ms)
 
-            yield offset_ms, self._to_detections(result, offset_ms)
+    def track_frame(self, frame: np.ndarray, offset_ms: int) -> list[Detection]:
+        """프레임 1장 track — ByteTrack persist=True로 프레임 간 상태 유지."""
+        try:
+            result = self._model.track(
+                frame,
+                persist=True,
+                tracker="bytetrack.yaml",
+                classes=list(self._type_by_class),
+                imgsz=self._imgsz,
+                conf=self._conf,
+                device=self._device,
+                verbose=False,
+            )[0]
+        except Exception as e:
+            raise TrackCropError(
+                ErrorCode.OBJECT_DETECTION_FAILED,
+                "객체 탐지·추적 추론 중 오류가 발생했습니다.",
+                details={"video_offset_ms": offset_ms, "cause": str(e)[:300]},
+            ) from e
+        return self._to_detections(result, offset_ms)
 
     def _to_detections(self, result, offset_ms: int) -> list[Detection]:
         boxes = result.boxes
@@ -129,3 +149,165 @@ class Detector:
                 )
             )
         return detections
+
+
+# ---------------------------------------------------------------------------
+# 공 전용 타일 추론
+
+
+def _iou(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> float:
+    """xyxy IoU."""
+    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    if inter <= 0:
+        return 0.0
+    area_a = (a[2] - a[0]) * (a[3] - a[1])
+    area_b = (b[2] - b[0]) * (b[3] - b[1])
+    return inter / (area_a + area_b - inter)
+
+
+def merge_tile_boxes(
+    boxes: list[tuple[float, float, float, float, float]], iou_threshold: float
+) -> list[tuple[float, float, float, float, float]]:
+    """겹침 구간 중복 병합 — conf 내림차순 greedy NMS.
+
+    boxes: [(x1, y1, x2, y2, conf)] 원본 좌표. 타일 경계의 반쪽 박스는 conf가
+    낮게 나와, 겹침 덕에 온전히 담긴 쪽이 이긴다 (타일링 겹침 강제의 이유와 대칭).
+    """
+    kept: list[tuple[float, float, float, float, float]] = []
+    for box in sorted(boxes, key=lambda b: b[4], reverse=True):
+        if all(_iou(box[:4], k[:4]) < iou_threshold for k in kept):
+            kept.append(box)
+    return kept
+
+
+class TiledBallDetector:
+    """공 전용 타일 추론 — 슬라이스 → batch 추론 → 좌표 복원 → NMS 병합.
+
+    track_id는 부여하지 않는다(None). 궤적 조립은 클립 플래너의 스티칭 담당.
+    """
+
+    def __init__(
+        self,
+        model_path: str,
+        device: str,
+        conf: float,
+        tile_size: int = 640,
+        stride: int = 480,
+        merge_iou: float = 0.5,
+    ):
+        self._model = _load_model(model_path)
+        self._device = device
+        self._conf = conf
+        self._grid = TilingParams(tile_size=tile_size, stride=stride)
+        self._merge_iou = merge_iou
+        self._ball_classes = [
+            cid
+            for cid, t in _map_classes(self._model.names).items()
+            if t == OBJECT_TYPE_BALL
+        ]
+        if not self._ball_classes:
+            raise TrackCropError(
+                ErrorCode.MODEL_LOAD_FAILED,
+                "공 모델에 ball 클래스가 없습니다.",
+                details={"names": dict(self._model.names)},
+            )
+
+    def detect(self, frame: np.ndarray, offset_ms: int) -> list[Detection]:
+        h, w = frame.shape[:2]
+        tile = self._grid.tile_size
+        grid = tile_grid(w, h, self._grid)
+        tiles = [frame[ty : ty + tile, tx : tx + tile] for _, _, tx, ty in grid]
+
+        try:
+            results = self._model.predict(
+                tiles,  # batch 추론 — GPU 한 번에
+                classes=self._ball_classes,
+                imgsz=tile,
+                conf=self._conf,
+                device=self._device,
+                verbose=False,
+            )
+        except Exception as e:
+            raise TrackCropError(
+                ErrorCode.OBJECT_DETECTION_FAILED,
+                "공 타일 추론 중 오류가 발생했습니다.",
+                details={"video_offset_ms": offset_ms, "cause": str(e)[:300]},
+            ) from e
+
+        # 타일 좌표 → 원본 좌표 복원 (박스만 조립)
+        restored: list[tuple[float, float, float, float, float]] = []
+        for (_, _, tx, ty), result in zip(grid, results, strict=True):
+            boxes = result.boxes
+            if boxes is None or len(boxes) == 0:
+                continue
+            for (x1, y1, x2, y2), conf in zip(
+                boxes.xyxy.tolist(), boxes.conf.tolist(), strict=True
+            ):
+                restored.append((x1 + tx, y1 + ty, x2 + tx, y2 + ty, conf))
+
+        return [
+            Detection(
+                object_type=OBJECT_TYPE_BALL,
+                track_id=None,  # 스티칭이 궤적을 조립 — id 불필요
+                bbox_x=x1,
+                bbox_y=y1,
+                bbox_width=x2 - x1,
+                bbox_height=y2 - y1,
+                confidence=conf,
+                video_offset_ms=offset_ms,
+            )
+            for x1, y1, x2, y2, conf in merge_tile_boxes(restored, self._merge_iou)
+        ]
+
+
+class SplitDetector:
+    """분리 검출 — 선수는 풀 프레임 track, 공은 타일 predict. Detector와 같은 인터페이스."""
+
+    def __init__(self, player: Detector, ball: TiledBallDetector):
+        self._player = player
+        self._ball = ball
+
+    def track(
+        self, frames: Iterator[tuple[int, np.ndarray]]
+    ) -> Iterator[tuple[int, list[Detection]]]:
+        self._player._reset_tracker()
+        for offset_ms, frame in frames:
+            players = self._player.track_frame(frame, offset_ms)
+            balls = self._ball.detect(frame, offset_ms)
+            yield offset_ms, players + balls
+
+
+def build_detector(
+    model_path: str,
+    device: str,
+    imgsz: int,
+    conf: float,
+    *,
+    ball_model_path: str | None = None,
+    ball_conf: float | None = None,
+    tile_size: int = 640,
+    stride: int = 480,
+    merge_iou: float = 0.5,
+) -> Detector | SplitDetector:
+    """검출기 팩토리 — ball_model_path가 있으면 분리(선수 풀 + 공 타일) 구성."""
+    if ball_model_path is None:
+        return Detector(model_path=model_path, device=device, imgsz=imgsz, conf=conf)
+    return SplitDetector(
+        player=Detector(
+            model_path=model_path,
+            device=device,
+            imgsz=imgsz,
+            conf=conf,
+            types=(OBJECT_TYPE_PLAYER,),
+        ),
+        ball=TiledBallDetector(
+            model_path=ball_model_path,
+            device=device,
+            conf=ball_conf if ball_conf is not None else conf,
+            tile_size=tile_size,
+            stride=stride,
+            merge_iou=merge_iou,
+        ),
+    )

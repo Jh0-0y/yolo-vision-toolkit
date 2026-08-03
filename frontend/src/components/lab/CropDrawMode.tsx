@@ -23,7 +23,7 @@ import {
   type ModelOut,
   type TrackcropOverrides,
 } from '../../api/client'
-import DetectionSettings from './DetectionSettings'
+import DetectionSettings, { DEFAULT_BALL, type BallDetector } from './DetectionSettings'
 import TuningPanel from './TuningPanel'
 import { DEFAULT_IMGSZ } from './useAnnotateJob'
 import { LIVE_PHASE_LABEL, useLiveJob } from './useLiveJob'
@@ -46,6 +46,7 @@ export default function CropDrawMode({ projectId, models }: Props) {
   const [conf, setConf] = useState<number | ''>('')
   const [imgsz, setImgsz] = useState(DEFAULT_IMGSZ)
   const [sampling, setSampling] = useState<number | ''>('')
+  const [ball, setBall] = useState<BallDetector>(DEFAULT_BALL)
   // tuning overrides (recomputed on the fly)
   const [overrides, setOverrides] = useState<TrackcropOverrides>({})
   // overlay toggles (pure draw switches, except highlight which needs the debug pass)
@@ -73,7 +74,7 @@ export default function CropDrawMode({ projectId, models }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [models])
 
-  const detectionKey = JSON.stringify({ modelId, conf, imgsz, sampling })
+  const detectionKey = JSON.stringify({ modelId, conf, imgsz, sampling, ball })
   const detectionDirty = analyzedKey != null && analyzedKey !== detectionKey
   const deadZoneWidth = overrides.dead_zone_width ?? 208
 
@@ -93,6 +94,11 @@ export default function CropDrawMode({ projectId, models }: Props) {
       imgsz,
       device: null,
       samplingIntervalMs: sampling === '' ? undefined : sampling,
+      ballModelId: ball.modelId,
+      ballConf: ball.conf === '' ? undefined : ball.conf,
+      tileSize: ball.tileSize,
+      stride: ball.stride,
+      mergeIou: ball.mergeIou,
     })
   }
 
@@ -226,6 +232,8 @@ export default function CropDrawMode({ projectId, models }: Props) {
             onConf={setConf}
             sampling={sampling}
             onSampling={setSampling}
+            ball={ball}
+            onBall={setBall}
             disabled={job.running}
           />
 

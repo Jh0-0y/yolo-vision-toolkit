@@ -13,7 +13,7 @@ import {
 import { Dropzone } from '@mantine/dropzone'
 import { IconAlertTriangle, IconFileCode, IconX } from '@tabler/icons-react'
 import { annotateCropUrl, type ModelOut, type TrackcropOverrides } from '../../api/client'
-import DetectionSettings from './DetectionSettings'
+import DetectionSettings, { DEFAULT_BALL, type BallDetector } from './DetectionSettings'
 import TuningPanel from './TuningPanel'
 import { DEFAULT_IMGSZ, PHASE_LABEL, useAnnotateJob } from './useAnnotateJob'
 
@@ -32,6 +32,7 @@ export default function CropResultMode({ projectId, models }: Props) {
   const [conf, setConf] = useState<number | ''>('')
   const [imgsz, setImgsz] = useState(DEFAULT_IMGSZ)
   const [sampling, setSampling] = useState<number | ''>('')
+  const [ball, setBall] = useState<BallDetector>(DEFAULT_BALL)
   const [overrides, setOverrides] = useState<TrackcropOverrides>({})
   const [summary, setSummary] = useState<Record<string, number> | null>(null)
   const job = useAnnotateJob()
@@ -67,6 +68,11 @@ export default function CropResultMode({ projectId, models }: Props) {
       cropTracking: true,
       cropOutput: 'none',
       overrides: sampling === '' ? overrides : { ...overrides, sampling_interval_ms: sampling },
+      ballModelId: ball.modelId,
+      ballConf: ball.conf === '' ? undefined : ball.conf,
+      tileSize: ball.tileSize,
+      stride: ball.stride,
+      mergeIou: ball.mergeIou,
     })
   }
 
@@ -84,6 +90,8 @@ export default function CropResultMode({ projectId, models }: Props) {
             onConf={setConf}
             sampling={sampling}
             onSampling={setSampling}
+            ball={ball}
+            onBall={setBall}
             disabled={job.running}
           />
           <TuningPanel

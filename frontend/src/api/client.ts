@@ -668,6 +668,24 @@ export interface TrackcropOverrides {
   min_follow_conf?: number
 }
 
+// 공 전용(타일 추론) 검출 옵션 — ballModelId 없으면 단일 모델 모드
+export interface BallDetectorOpts {
+  ballModelId?: string | null
+  ballConf?: number
+  tileSize?: number
+  stride?: number
+  mergeIou?: number
+}
+
+function appendBall(form: FormData, opts: BallDetectorOpts) {
+  if (!opts.ballModelId) return
+  form.append('ball_model_id', opts.ballModelId)
+  if (opts.ballConf != null) form.append('ball_conf', String(opts.ballConf))
+  if (opts.tileSize != null) form.append('tile_size', String(opts.tileSize))
+  if (opts.stride != null) form.append('stride', String(opts.stride))
+  if (opts.mergeIou != null) form.append('merge_iou', String(opts.mergeIou))
+}
+
 export function startAnnotate(opts: {
   file: File
   modelIds: string[]
@@ -681,7 +699,7 @@ export function startAnnotate(opts: {
   showCenterLine?: boolean
   showTargetHighlight?: boolean
   overrides?: TrackcropOverrides
-}): Promise<TestJobStart> {
+} & BallDetectorOpts): Promise<TestJobStart> {
   const form = new FormData()
   form.append('file', opts.file)
   form.append('model_ids', opts.modelIds.join(','))
@@ -700,6 +718,7 @@ export function startAnnotate(opts: {
   if (opts.showTargetHighlight != null)
     form.append('show_target_highlight', String(opts.showTargetHighlight))
   if (opts.overrides) form.append('overrides', JSON.stringify(opts.overrides))
+  appendBall(form, opts)
   return api.upload<TestJobStart>('/predict/annotate', form)
 }
 
@@ -806,7 +825,7 @@ export function startLive(opts: {
   imgsz: number
   device?: string | null
   samplingIntervalMs?: number
-}): Promise<TestJobStart> {
+} & BallDetectorOpts): Promise<TestJobStart> {
   const form = new FormData()
   form.append('file', opts.file)
   form.append('model_ids', opts.modelIds.join(','))
@@ -816,6 +835,7 @@ export function startLive(opts: {
   if (opts.device) form.append('device', opts.device)
   if (opts.samplingIntervalMs != null)
     form.append('sampling_interval_ms', String(opts.samplingIntervalMs))
+  appendBall(form, opts)
   return api.upload<TestJobStart>('/predict/live', form)
 }
 

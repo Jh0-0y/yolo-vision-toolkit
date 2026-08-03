@@ -130,12 +130,22 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
             _emit(progress, {"phase": "crop_analyze", "total": total})
             # trackcrop pulls in cv2/ultralytics — keep the import lazy (worker only)
             from app.ml.trackcrop import analyze_video
+            from app.ml.trackcrop.detection import build_detector
 
             # trackcrop is tuned for ball recall (low conf, large imgsz) and its own
             # 1920/608 constants; validate=False so non-1080p input doesn't trip the
             # geometry checks. overrides = runtime tuning; collect_debug = highlight bboxes.
+            ball = cfg.get("ball") or {}
+            crop_detector = build_detector(
+                pt, device, imgsz, crop_conf,
+                ball_model_path=ball.get("pt"),
+                ball_conf=ball.get("conf"),
+                tile_size=int(ball.get("tile_size", 640)),
+                stride=int(ball.get("stride", 480)),
+                merge_iou=float(ball.get("merge_iou", 0.5)),
+            )
             cropres = analyze_video(
-                str(src), model_path=pt, device=device, imgsz=imgsz, conf=crop_conf,
+                str(src), detector=crop_detector,
                 validate=False, overrides=overrides,
                 collect_debug=show_target_highlight and not crop_json_only,
             )

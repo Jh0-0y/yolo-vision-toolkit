@@ -104,3 +104,26 @@ def test_min_visibility_override():
 
 def test_tile_stem_naming():
     assert tile_stem("game_00001", 2, 1) == "game_00001_r1c2"
+
+
+# ---------------------------------------------------------------------------
+# 타일 추론 병합 (detection.merge_tile_boxes)
+
+
+def test_merge_tile_boxes_dedupes_overlap_region():
+    from app.ml.trackcrop.detection import merge_tile_boxes
+
+    # 겹침 구간에서 같은 공이 두 타일에 잡힘 — 온전한(고conf) 쪽이 남는다
+    full = (600.0, 300.0, 640.0, 340.0, 0.9)
+    half = (602.0, 301.0, 640.0, 339.0, 0.4)  # 경계 반쪽 (IoU 높음)
+    other = (1200.0, 500.0, 1240.0, 540.0, 0.8)  # 다른 위치 공
+    kept = merge_tile_boxes([half, full, other], iou_threshold=0.5)
+    assert full in kept and other in kept and half not in kept
+
+
+def test_merge_tile_boxes_keeps_distinct_boxes():
+    from app.ml.trackcrop.detection import merge_tile_boxes
+
+    a = (0.0, 0.0, 40.0, 40.0, 0.9)
+    b = (100.0, 100.0, 140.0, 140.0, 0.3)
+    assert len(merge_tile_boxes([a, b], iou_threshold=0.5)) == 2
