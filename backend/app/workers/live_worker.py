@@ -161,6 +161,7 @@ def run_live_render(job_id: str, cfg: dict, jobs_dir: str) -> dict:
     overrides = cfg.get("overrides") or {}
     toggles = cfg.get("toggles") or {}
     show_boxes = bool(toggles.get("obj_boxes", True))
+    show_trails = bool(toggles.get("show_trails", True))
     draw_crop_box = bool(toggles.get("draw_crop_box", True))
     show_dead_zone = bool(toggles.get("show_dead_zone", True))
     show_center_line = bool(toggles.get("show_center_line", True))
@@ -200,6 +201,46 @@ def run_live_render(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         dead_zone_half = cfg_resolved.dead_zone_half * scale
 
         det_ms = [ms for ms, _ in detected]
+        trail_ms = 2000  # 궤적 길이 — 최근 2초
+
+        def _draw_trails(frame, now_ms: float) -> None:
+            """선수(track_id별)·선정 공(디버그 궤적)의 최근 2초 이동 경로."""
+            lo = bisect.bisect_left(det_ms, now_ms - trail_ms)
+            hi = bisect.bisect_right(det_ms, now_ms)
+            paths: dict[int, list[tuple[int, int]]] = {}
+            for j in range(lo, hi):
+                for d in detected[j][1]:
+                    if d.track_id is None or d.object_type != "player":
+                        continue
+                    paths.setdefault(d.track_id, []).append(
+                        (
+                            int((d.bbox_x + d.bbox_width / 2) * scale),
+                            int((d.bbox_y + d.bbox_height / 2) * scale),
+                        )
+                    )
+            for tid, pts in paths.items():
+                color = _BOX_PALETTE[tid % len(_BOX_PALETTE)]
+                for k in range(1, len(pts)):
+                    fade = 0.25 + 0.75 * k / len(pts)
+                    cv2.line(
+                        frame, pts[k - 1], pts[k],
+                        tuple(int(c * fade) for c in color), 2, cv2.LINE_AA,
+                    )
+            if cropres.debug:
+                ball_pts = [
+                    (
+                        int((e["ball_bbox"][0] + e["ball_bbox"][2] / 2) * scale),
+                        int((e["ball_bbox"][1] + e["ball_bbox"][3] / 2) * scale),
+                    )
+                    for e in cropres.debug
+                    if e.get("ball_bbox") and now_ms - trail_ms <= e["video_offset_ms"] <= now_ms
+                ]
+                for k in range(1, len(ball_pts)):
+                    fade = 0.25 + 0.75 * k / len(ball_pts)
+                    cv2.line(
+                        frame, ball_pts[k - 1], ball_pts[k],
+                        tuple(int(c * fade) for c in (92, 92, 255)), 3, cv2.LINE_AA,
+                    )
 
         writer = cv2.VideoWriter(str(tmp), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
         _emit(progress, {"phase": "start", "total": total})
@@ -215,6 +256,9 @@ def run_live_render(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                 if not ok:
                     break
                 ms = idx / fps * 1000.0
+
+                if show_trails and det_ms:
+                    _draw_trails(frame, ms)
 
                 if show_boxes and det_ms:
                     i = min(

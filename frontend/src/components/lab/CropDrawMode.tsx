@@ -64,6 +64,7 @@ export default function CropDrawMode({ projectId, models }: Props) {
   const [overrides, setOverrides] = useState<TrackcropOverrides>({})
   // overlay toggles (pure draw switches, except highlight which needs the debug pass)
   const [objInference, setObjInference] = useState(true)
+  const [showTrails, setShowTrails] = useState(true)
   const [drawCropBox, setDrawCropBox] = useState(true)
   const [showDeadZone, setShowDeadZone] = useState(true)
   const [showCenterLine, setShowCenterLine] = useState(true)
@@ -137,6 +138,7 @@ export default function CropDrawMode({ projectId, models }: Props) {
     try {
       const { job_id } = await startLiveRender(result.detect_id, overrides, {
         obj_boxes: objInference,
+        show_trails: showTrails,
         draw_crop_box: drawCropBox,
         show_dead_zone: showDeadZone,
         show_center_line: showCenterLine,
@@ -206,6 +208,7 @@ export default function CropDrawMode({ projectId, models }: Props) {
     detOffsets: number[]
     toggles: {
       objInference: boolean
+      showTrails: boolean
       drawCropBox: boolean
       showDeadZone: boolean
       showCenterLine: boolean
@@ -213,11 +216,11 @@ export default function CropDrawMode({ projectId, models }: Props) {
     }
     deadZoneWidth: number
   }>({ result: null, plan: null, detOffsets: [], toggles: {
-    objInference, drawCropBox, showDeadZone, showCenterLine, showHighlight,
+    objInference, showTrails, drawCropBox, showDeadZone, showCenterLine, showHighlight,
   }, deadZoneWidth })
   drawRef.current = {
     result, plan, detOffsets,
-    toggles: { objInference, drawCropBox, showDeadZone, showCenterLine, showHighlight },
+    toggles: { objInference, showTrails, drawCropBox, showDeadZone, showCenterLine, showHighlight },
     deadZoneWidth,
   }
 
@@ -310,6 +313,12 @@ export default function CropDrawMode({ projectId, models }: Props) {
                   label="Object inference — ByteTrack boxes, IDs & conf"
                   checked={objInference}
                   onChange={(e) => setObjInference(e.currentTarget.checked)}
+                  size="xs"
+                />
+                <Checkbox
+                  label="Motion trails — recent 2s path per player & selected ball"
+                  checked={showTrails}
+                  onChange={(e) => setShowTrails(e.currentTarget.checked)}
                   size="xs"
                 />
                 <Checkbox

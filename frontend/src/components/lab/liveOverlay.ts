@@ -163,6 +163,7 @@ function lerpBbox(
 
 export interface OverlayToggles {
   objInference: boolean
+  showTrails: boolean
   drawCropBox: boolean
   showDeadZone: boolean
   showCenterLine: boolean
@@ -217,12 +218,61 @@ function drawMarker(
   ctx.fillText(label, cx - 20, Math.max(12, baseY - 4))
 }
 
+const TRAIL_MS = 2000 // 궤적 길이 (과거 2초)
+
+/** 이동 궤적 — 최근 TRAIL_MS 동안의 중심점 폴리라인 (뒤로 갈수록 옅게). */
+function drawTrails(p: DrawParams, sx: number, sy: number): void {
+  const { ctx, ms, plan } = p
+  const iNow = stepIndexAt(p.detOffsets, ms)
+  if (iNow < 0) return
+  const tMin = ms - TRAIL_MS
+
+  const paint = (pts: [number, number][], color: string, width: number) => {
+    for (let k = 1; k < pts.length; k++) {
+      ctx.globalAlpha = 0.15 + 0.6 * (k / pts.length)
+      ctx.lineWidth = width
+      ctx.strokeStyle = color
+      ctx.beginPath()
+      ctx.moveTo(pts[k - 1][0], pts[k - 1][1])
+      ctx.lineTo(pts[k][0], pts[k][1])
+      ctx.stroke()
+    }
+    ctx.globalAlpha = 1
+  }
+
+  // 선수(track_id) 궤적 — 샘플 창에서 id별 중심점 수집
+  const paths = new Map<number, [number, number][]>()
+  for (let j = Math.max(0, iNow - 40); j <= iNow; j++) {
+    if (p.detOffsets[j] < tMin) continue
+    for (const d of p.detections[j].detections) {
+      if (d.track_id == null || d.object_type !== 'player') continue
+      const arr = paths.get(d.track_id) ?? []
+      arr.push([(d.bbox_x + d.bbox_width / 2) * sx, (d.bbox_y + d.bbox_height / 2) * sy])
+      paths.set(d.track_id, arr)
+    }
+  }
+  for (const [id, pts] of paths) if (pts.length > 1) paint(pts, trackColor(id), 1.5)
+
+  // 공 궤적 — 선정 트랙(plan.debug, 실측+보간)이 있으면 그걸로 (오탐 없는 깨끗한 선)
+  if (plan?.debug?.length) {
+    const pts: [number, number][] = []
+    for (const e of plan.debug) {
+      if (e.video_offset_ms < tMin || e.video_offset_ms > ms || !e.ball_bbox) continue
+      const [x, y, w, h] = e.ball_bbox
+      pts.push([(x + w / 2) * sx, (y + h / 2) * sy])
+    }
+    if (pts.length > 1) paint(pts, BALL_HL, 2.5)
+  }
+}
+
 /** Draw all enabled overlays for time `ms` onto the canvas (cleared by the caller). */
 export function drawOverlay(p: DrawParams): void {
   const { ctx, canvasW, canvasH, sourceW, sourceH, ms, plan, toggles } = p
   if (!sourceW || !sourceH) return
   const sx = canvasW / sourceW
   const sy = canvasH / sourceH
+
+  if (toggles.showTrails && p.detections.length) drawTrails(p, sx, sy)
 
   // --- object inference: ByteTrack boxes, interpolated between samples ---
   if (toggles.objInference && p.detections.length) {
