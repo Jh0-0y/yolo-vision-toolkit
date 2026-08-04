@@ -45,6 +45,7 @@ const ADVANCED: Knob[] = [
   { key: 'w_span', label: 'Score: span weight', def: 0.2, step: 0.05, min: 0, max: 1 },
   { key: 'travel_norm_px', label: 'Score: travel norm (px)', def: 1920, step: 100, min: 1 },
   { key: 'absorb_allow_scale', label: 'Absorb-merge scale', def: 2, step: 0.5, min: 1 },
+  { key: 'prune_dev_px', label: 'Prune deviation (px)', def: 200, step: 25, min: 50 },
   { key: 'possession_margin', label: 'Possession margin (×height)', def: 0.15, step: 0.05, min: 0 },
   { key: 'w_follow', label: 'Path: follow weight', def: 1, step: 0.1, min: 0 },
   { key: 'w_inside', label: 'Path: inside pull', def: 0.05, step: 0.01, min: 0 },

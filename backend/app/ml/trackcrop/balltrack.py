@@ -11,6 +11,7 @@
 트랙 단위에서 명확히 갈린다. 설계 배경은 docs/trackcrop-clip-planner.md 참고.
 """
 
+import math
 import statistics
 from dataclasses import dataclass, field, fields
 
@@ -49,7 +50,7 @@ class ClipPlanConfig:
     min_track_score: float = 0.25  # 미달이면 "공 없음" 클립
     absorb_allow_scale: float = 2.0  # 흡수 병합(체인) 시 허용치 완화 배율
     absorb_point_scale: float = 0.5  # 점 단위 흡수 허용치 — 좁게 (다른 공 흡입 방지)
-    prune_dev_px: float = 300.0  # 이웃 보간 대비 이 이상 벗어난 점 제거 (다른 공 관측)
+    prune_dev_px: float = 200.0  # 이웃 보간(2D) 대비 이 이상 벗어난 점 제거 (다른 공 관측)
     possession_margin: float = 0.15  # 소유 판정: 선수 bbox 확장 비율 (×키)
 
     # --- 타깃 결정 ---
@@ -127,15 +128,26 @@ class BallTrack:
     def end_x(self) -> float:
         return self.points[-1].det.center_x
 
-    def tail_velocity(self, window: int = 3) -> float:
-        """끝쪽 window개 점의 평균 속도 (px/ms) — 스티칭 외삽용."""
+    @property
+    def start_y(self) -> float:
+        return self.points[0].det.center_y
+
+    @property
+    def end_y(self) -> float:
+        return self.points[-1].det.center_y
+
+    def tail_velocity(self, window: int = 3) -> tuple[float, float]:
+        """끝쪽 window개 점의 평균 속도 (px/ms, x·y) — 스티칭 외삽용."""
         pts = self.points[-window:]
         if len(pts) < 2:
-            return 0.0
+            return 0.0, 0.0
         dt = pts[-1].offset_ms - pts[0].offset_ms
         if dt <= 0:
-            return 0.0
-        return (pts[-1].det.center_x - pts[0].det.center_x) / dt
+            return 0.0, 0.0
+        return (
+            (pts[-1].det.center_x - pts[0].det.center_x) / dt,
+            (pts[-1].det.center_y - pts[0].det.center_y) / dt,
+        )
 
     def travel_px(self) -> float:
         """총 경로 길이(x) — 정지 공 판별의 핵심 신호."""
@@ -178,7 +190,11 @@ def build_tracklets(
         for prev, point in zip(points, points[1:]):
             dt = point.offset_ms - prev.offset_ms
             allow = cfg.split_base_px + cfg.ball_max_speed_px_s * dt / 1000
-            if abs(point.det.center_x - prev.det.center_x) > allow:
+            jump = math.hypot(
+                point.det.center_x - prev.det.center_x,
+                point.det.center_y - prev.det.center_y,
+            )
+            if jump > allow:
                 tracklets.append(BallTrack(current))  # id가 오탐을 문 지점 — 쪼갬
                 current = [point]
             else:
@@ -198,10 +214,15 @@ def _link_allowance(gap_ms: int, cfg: ClipPlanConfig, scale: float = 1.0) -> flo
 
 
 def _link_distance(chain: BallTrack, nxt: BallTrack, gap_ms: int, cfg: ClipPlanConfig) -> float:
-    """앞 트랙 끝에서 외삽한 예측과 뒤 트랙 시작의 거리."""
+    """앞 트랙 끝에서 외삽한 예측과 뒤 트랙 시작의 2D 거리.
+
+    x만 보면 'x는 비슷한데 y가 전혀 다른' 오탐(전광판·로고 등)이 체인에 붙는다.
+    """
     extrapolate_ms = min(gap_ms, cfg.stitch_velocity_cap_ms)
-    predicted = chain.end_x + chain.tail_velocity() * extrapolate_ms
-    return abs(nxt.start_x - predicted)
+    vx, vy = chain.tail_velocity()
+    pred_x = chain.end_x + vx * extrapolate_ms
+    pred_y = chain.end_y + vy * extrapolate_ms
+    return math.hypot(nxt.start_x - pred_x, nxt.start_y - pred_y)
 
 
 def stitch_tracks(tracklets: list[BallTrack], cfg: ClipPlanConfig) -> list[BallTrack]:
@@ -355,11 +376,17 @@ def _prune_outlier_points(track: BallTrack, cfg: ClipPlanConfig) -> int:
             if span <= 0:
                 continue
             ratio = (cur.offset_ms - before.offset_ms) / span
-            expected = (
+            expected_x = (
                 before.det.center_x
                 + (after.det.center_x - before.det.center_x) * ratio
             )
-            dev = abs(cur.det.center_x - expected)
+            expected_y = (
+                before.det.center_y
+                + (after.det.center_y - before.det.center_y) * ratio
+            )
+            dev = math.hypot(
+                cur.det.center_x - expected_x, cur.det.center_y - expected_y
+            )
             if dev > worst_dev:
                 worst_dev, worst_i = dev, i
         if worst_i < 0:
@@ -392,18 +419,25 @@ def _absorb_consistent_points(
                 before, after = best.points[i - 1], best.points[i]
                 span = after.offset_ms - before.offset_ms
                 ratio = (ms - before.offset_ms) / span
-                expected = (
+                expected_x = (
                     before.det.center_x
                     + (after.det.center_x - before.det.center_x) * ratio
                 )
+                expected_y = (
+                    before.det.center_y
+                    + (after.det.center_y - before.det.center_y) * ratio
+                )
                 gap = min(ms - before.offset_ms, after.offset_ms - ms)
             elif i == 0:
-                expected = best.points[0].det.center_x
+                expected_x = best.points[0].det.center_x
+                expected_y = best.points[0].det.center_y
                 gap = times[0] - ms
             else:
-                expected = best.points[-1].det.center_x
+                expected_x = best.points[-1].det.center_x
+                expected_y = best.points[-1].det.center_y
                 gap = ms - times[-1]
-            if abs(p.det.center_x - expected) <= _link_allowance(gap, cfg, cfg.absorb_point_scale):
+            dev = math.hypot(p.det.center_x - expected_x, p.det.center_y - expected_y)
+            if dev <= _link_allowance(gap, cfg, cfg.absorb_point_scale):
                 best.points.insert(i, p)
                 times.insert(i, ms)
                 have.add(ms)

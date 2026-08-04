@@ -32,6 +32,10 @@ class Detection:
     def center_x(self) -> float:
         return self.bbox_x + self.bbox_width / 2
 
+    @property
+    def center_y(self) -> float:
+        return self.bbox_y + self.bbox_height / 2
+
 
 @dataclass(slots=True)
 class TargetSample:

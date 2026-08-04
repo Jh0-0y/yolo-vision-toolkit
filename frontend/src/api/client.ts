@@ -657,6 +657,7 @@ export interface TrackcropOverrides {
   absorb_allow_scale?: number
   possession_margin?: number
   // 타깃 결정
+  prune_dev_px?: number
   interp_max_gap_ms?: number
   use_carrier?: boolean
   // 경로 최적화
