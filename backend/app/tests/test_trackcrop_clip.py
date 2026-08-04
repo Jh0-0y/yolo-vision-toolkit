@@ -223,3 +223,23 @@ def test_trackcrop_error_survives_pickle():
     e = TrackCropError(ErrorCode.MODEL_LOAD_FAILED, "모델에 ball 클래스가 없습니다.", details={"names": {0: "player"}})
     e2 = pickle.loads(pickle.dumps(e))
     assert (e2.code, e2.message, e2.details) == (e.code, e.message, e.details)
+
+
+def test_gap_interpolation_curves_with_motion():
+    """미검출 구간 보간이 직선(chord)이 아니라 이웃 진행 방향을 따라 휘는지 —
+    포물선 궤적(슛)의 정점 프레임을 놓쳤을 때 직선보다 정점에 가깝게 복원."""
+    from app.ml.trackcrop.balltrack import BallTrack, ClipPlanConfig, TrackPoint
+    from app.ml.trackcrop.clip_planner import _ball_at
+    from app.ml.trackcrop.types import Detection
+
+    def det(ms):  # x 등속, y 포물선(정점 t=200에서 y=500), 정점 프레임 미검출
+        cy = 500 - 0.003 * (ms - 200) ** 2
+        return TrackPoint(ms, Detection("ball", None, 0.3 * ms - 10, cy - 10, 20, 20, 0.9, ms))
+
+    track = BallTrack([det(0), det(100), det(300), det(400)])  # 200ms 누락
+    got = _ball_at(track, 200, ClipPlanConfig())
+    assert got is not None
+    _, _, bbox = got
+    cy = bbox[1] + bbox[3] / 2
+    true_y, chord_y = 500.0, 470.0  # 직선 보간이면 470
+    assert abs(cy - true_y) < abs(chord_y - true_y)  # 직선보다 정점에 가까워야 한다

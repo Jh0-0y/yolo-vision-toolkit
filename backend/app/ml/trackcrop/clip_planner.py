@@ -28,13 +28,49 @@ def _bbox(det: Detection | None) -> list[float] | None:
     return [det.bbox_x, det.bbox_y, det.bbox_width, det.bbox_height]
 
 
+def _hermite(
+    p1: float, p2: float, m1: float, m2: float, s: float
+) -> float:
+    """큐빅 Hermite 보간 — 값 p1→p2, 구간 스케일 접선 m1·m2, s∈[0,1]."""
+    s2 = s * s
+    s3 = s2 * s
+    return (
+        (2 * s3 - 3 * s2 + 1) * p1
+        + (s3 - 2 * s2 + s) * m1
+        + (-2 * s3 + 3 * s2) * p2
+        + (s3 - s2) * m2
+    )
+
+
+def _tangent(
+    prev_v: float | None, prev_t: int | None,
+    v1: float, t1: int, v2: float, t2: int,
+    next_v: float | None, next_t: int | None,
+    at_start: bool,
+) -> float:
+    """비균등 시간 Catmull-Rom 접선 (구간 [t1,t2] 스케일). 이웃이 없으면 현(chord).
+
+    과도한 오버슛 방지를 위해 현 길이의 2배로 클램프한다.
+    """
+    span = t2 - t1
+    chord = v2 - v1
+    if at_start:
+        m = (v2 - prev_v) / (t2 - prev_t) * span if prev_v is not None else chord
+    else:
+        m = (next_v - v1) / (next_t - t1) * span if next_v is not None else chord
+    limit = 2 * abs(chord) + 1e-9
+    return max(-limit, min(limit, m))
+
+
 def _ball_at(
     track: BallTrack | None, offset_ms: int, cfg: ClipPlanConfig
 ) -> tuple[float, float, list[float]] | None:
     """시각 offset_ms의 공 위치. (x, confidence, bbox [x,y,w,h]) 또는 None.
 
-    실측 사이 gap ≤ interp_max_gap_ms 이면 선형 보간 — 양끝을 아는 확정 경로다.
-    bbox도 함께 보간해 하이라이트 마커가 실측 사이에서 끊기지 않게 한다.
+    실측 사이 gap ≤ interp_max_gap_ms 이면 보간 — 양끝을 아는 확정 경로다.
+    직선(선형)이 아니라 이웃 점의 진행 방향을 반영한 곡선(Catmull-Rom/Hermite)으로
+    메꾼다: 미검출 구간이 실제 궤적(포물선·턴)을 직선으로 잘라먹지 않게.
+    bbox도 함께 보간해 하이라이트 마커·궤적이 실측 사이에서 끊기지 않는다.
     트랙 범위 밖이거나 긴 gap 안이면 None (fallback으로 넘어감).
     """
     if track is None or not track.points:
@@ -50,21 +86,29 @@ def _ball_at(
     gap = after.offset_ms - before.offset_ms
     if gap > cfg.interp_max_gap_ms:
         return None  # 장기 가림 — 보간 대신 소유선수 fallback
-    ratio = (offset_ms - before.offset_ms) / gap
+    s = (offset_ms - before.offset_ms) / gap
 
-    def _lerp(a: float, b: float) -> float:
-        return a + (b - a) * ratio
-
+    prev_pt = track.points[i - 2] if i >= 2 else None
+    next_pt = track.points[i + 1] if i + 1 < len(times) else None
     bd, ad = before.det, after.det
-    bbox = [
-        _lerp(bd.bbox_x, ad.bbox_x),
-        _lerp(bd.bbox_y, ad.bbox_y),
-        _lerp(bd.bbox_width, ad.bbox_width),
-        _lerp(bd.bbox_height, ad.bbox_height),
-    ]
-    x = _lerp(bd.center_x, ad.center_x)
+    t1, t2 = before.offset_ms, after.offset_ms
+
+    def curve(get) -> float:
+        v1, v2 = get(bd), get(ad)
+        pv = get(prev_pt.det) if prev_pt else None
+        nv = get(next_pt.det) if next_pt else None
+        m1 = _tangent(pv, prev_pt.offset_ms if prev_pt else None, v1, t1, v2, t2, None, None, True)
+        m2 = _tangent(None, None, v1, t1, v2, t2, nv, next_pt.offset_ms if next_pt else None, False)
+        return _hermite(v1, v2, m1, m2, s)
+
+    cx = curve(lambda d: d.center_x)
+    cy = curve(lambda d: d.center_y)
+    # 크기는 위치만큼 민감하지 않다 — 선형
+    w = bd.bbox_width + (ad.bbox_width - bd.bbox_width) * s
+    h = bd.bbox_height + (ad.bbox_height - bd.bbox_height) * s
+    bbox = [cx - w / 2, cy - h / 2, w, h]
     conf = min(bd.confidence, ad.confidence)
-    return x, conf, bbox
+    return cx, conf, bbox
 
 
 def _build_carrier_timeline(
