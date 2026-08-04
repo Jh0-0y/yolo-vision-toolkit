@@ -30,10 +30,11 @@ def _bbox(det: Detection | None) -> list[float] | None:
 
 def _ball_at(
     track: BallTrack | None, offset_ms: int, cfg: ClipPlanConfig
-) -> tuple[float, float, Detection | None] | None:
-    """시각 offset_ms의 공 위치. (x, confidence, 실측 Detection|None) 또는 None.
+) -> tuple[float, float, list[float]] | None:
+    """시각 offset_ms의 공 위치. (x, confidence, bbox [x,y,w,h]) 또는 None.
 
     실측 사이 gap ≤ interp_max_gap_ms 이면 선형 보간 — 양끝을 아는 확정 경로다.
+    bbox도 함께 보간해 하이라이트 마커가 실측 사이에서 끊기지 않게 한다.
     트랙 범위 밖이거나 긴 gap 안이면 None (fallback으로 넘어감).
     """
     if track is None or not track.points:
@@ -42,7 +43,7 @@ def _ball_at(
     i = bisect.bisect_left(times, offset_ms)
     if i < len(times) and times[i] == offset_ms:
         det = track.points[i].det
-        return det.center_x, det.confidence, det
+        return det.center_x, det.confidence, _bbox(det)
     if i == 0 or i == len(times):
         return None  # 트랙 시작 전 / 종료 후
     before, after = track.points[i - 1], track.points[i]
@@ -50,9 +51,20 @@ def _ball_at(
     if gap > cfg.interp_max_gap_ms:
         return None  # 장기 가림 — 보간 대신 소유선수 fallback
     ratio = (offset_ms - before.offset_ms) / gap
-    x = before.det.center_x + (after.det.center_x - before.det.center_x) * ratio
-    conf = min(before.det.confidence, after.det.confidence)
-    return x, conf, None
+
+    def _lerp(a: float, b: float) -> float:
+        return a + (b - a) * ratio
+
+    bd, ad = before.det, after.det
+    bbox = [
+        _lerp(bd.bbox_x, ad.bbox_x),
+        _lerp(bd.bbox_y, ad.bbox_y),
+        _lerp(bd.bbox_width, ad.bbox_width),
+        _lerp(bd.bbox_height, ad.bbox_height),
+    ]
+    x = _lerp(bd.center_x, ad.center_x)
+    conf = min(bd.confidence, ad.confidence)
+    return x, conf, bbox
 
 
 def _build_carrier_timeline(
@@ -117,7 +129,7 @@ def resolve_targets_clip(
 
         carrier_det: Detection | None = None
         if ball is not None:
-            ball_x, confidence, measured = ball
+            ball_x, confidence, ball_bbox = ball
             if group_x is not None and abs(ball_x - group_x) <= CROP_WIDTH:
                 target_x = ball_x * cfg.ball_weight + group_x * cfg.player_group_weight
                 target_type = TargetType.BALL_PLAYER
@@ -125,7 +137,7 @@ def resolve_targets_clip(
                 target_x = ball_x
                 target_type = TargetType.BALL
         else:
-            measured = None
+            ball_bbox = None
             # use_carrier=False면 소유선수 추적 생략 — 크롭이 특정 선수로 튀지 않게
             carrier_id = _carrier_as_of(carrier_timeline, offset_ms) if cfg.use_carrier else None
             carrier_det = (
@@ -168,7 +180,7 @@ def resolve_targets_clip(
             debug.append(
                 {
                     "video_offset_ms": offset_ms,
-                    "ball_bbox": _bbox(measured),
+                    "ball_bbox": ball_bbox,  # 실측+보간 — 마커가 끊기지 않는다
                     "carrier_bbox": _bbox(carrier_det),
                 }
             )

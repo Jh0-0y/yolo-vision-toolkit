@@ -101,27 +101,51 @@ function interpDetections(detections: LiveSample[], offsets: number[], ms: numbe
 
   const bById = new Map<number, LiveDetection>()
   for (const d of b) if (d.track_id != null) bById.set(d.track_id, d)
+  const usedBIdx = new Set<number>() // b 배열 인덱스 기준 사용 표시 (id 유무 무관)
+
+  const lerpDet = (d: LiveDetection, e: LiveDetection): LiveDetection => ({
+    ...d,
+    bbox_x: lerp(d.bbox_x, e.bbox_x, t),
+    bbox_y: lerp(d.bbox_y, e.bbox_y, t),
+    bbox_width: lerp(d.bbox_width, e.bbox_width, t),
+    bbox_height: lerp(d.bbox_height, e.bbox_height, t),
+  })
 
   const out: LiveDetection[] = []
-  const usedB = new Set<number>()
   for (const d of a) {
+    // 1순위: track_id 매칭 (선수 — ByteTrack)
     const e = d.track_id != null ? bById.get(d.track_id) : undefined
     if (e) {
-      usedB.add(d.track_id as number)
-      out.push({
-        ...d,
-        bbox_x: lerp(d.bbox_x, e.bbox_x, t),
-        bbox_y: lerp(d.bbox_y, e.bbox_y, t),
-        bbox_width: lerp(d.bbox_width, e.bbox_width, t),
-        bbox_height: lerp(d.bbox_height, e.bbox_height, t),
-      })
+      usedBIdx.add(b.indexOf(e))
+      out.push(lerpDet(d, e))
+      continue
+    }
+    // 2순위: id 없는 검출(타일/predict 공) — 같은 타입의 미사용 최근접과 매칭.
+    // 이게 없으면 공 박스가 보간되지 못해 100ms마다 툭툭 점프한다.
+    let bestIdx = -1
+    let bestDist = 250 // px (source) — 이 이상 떨어지면 다른 물체로 본다
+    const cx = d.bbox_x + d.bbox_width / 2
+    const cy = d.bbox_y + d.bbox_height / 2
+    for (let j = 0; j < b.length; j++) {
+      if (usedBIdx.has(j) || b[j].object_type !== d.object_type) continue
+      const ex = b[j].bbox_x + b[j].bbox_width / 2
+      const ey = b[j].bbox_y + b[j].bbox_height / 2
+      const dist = Math.hypot(ex - cx, ey - cy)
+      if (dist < bestDist) {
+        bestDist = dist
+        bestIdx = j
+      }
+    }
+    if (bestIdx >= 0) {
+      usedBIdx.add(bestIdx)
+      out.push(lerpDet(d, b[bestIdx]))
     } else if (t < 0.5) {
       out.push(d) // track leaving — hold through the first half of the gap
     }
   }
-  // tracks that appear in the next sample — fade them in over the second half
-  for (const e of b) {
-    if ((e.track_id == null || !usedB.has(e.track_id)) && t >= 0.5) out.push(e)
+  // 다음 샘플에서 새로 나타나는 검출 — 후반부에 등장
+  for (let j = 0; j < b.length; j++) {
+    if (!usedBIdx.has(j) && t >= 0.5) out.push(b[j])
   }
   return out
 }
