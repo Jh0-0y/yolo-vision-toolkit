@@ -107,6 +107,16 @@ class TestJobManager:
         )
         self._futures[job_id] = future
 
+    def submit_live_render(self, job_id: str, cfg: dict) -> None:
+        """라이브 세션 캐시로 오버레이 영상 렌더 — 추론 없음(cv2/ffmpeg만)."""
+        from app.workers import live_worker
+
+        self._prepare(job_id)
+        future = self._get_executor("video").submit(
+            live_worker.run_live_render, job_id, cfg, str(settings.jobs_dir)
+        )
+        self._futures[job_id] = future
+
     def is_active(self, job_id: str) -> bool:
         future = self._futures.get(job_id)
         return future is not None and not future.done()

@@ -857,6 +857,16 @@ export function subscribeLiveEvents(jobId: string, onEvent: (ev: LiveProgress) =
 
 export const liveVideoUrl = (detectId: string) => `${BASE}/predict/live/${detectId}/video`
 
+// 오버레이 렌더 — 캐시된 검출 + 현재 튜닝으로 그림 그려진 영상을 굽는다 (추론 없음)
+export const startLiveRender = (
+  detectId: string,
+  overrides: TrackcropOverrides,
+  toggles: Record<string, boolean>,
+) => api.post<TestJobStart>(`/predict/live/${detectId}/render`, { overrides, toggles })
+
+export const liveRenderVideoUrl = (detectId: string) =>
+  `${BASE}/predict/live/${detectId}/render-video`
+
 export const getLiveResult = (jobId: string) => api.get<LiveResult>(`/predict/live/${jobId}/result`)
 
 // Cheap crop-coordinate recompute — call on every tuning change; no inference happens.

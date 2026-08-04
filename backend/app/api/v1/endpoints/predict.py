@@ -423,6 +423,37 @@ def live_result(job_id: str):
     return {"detect_id": job_id, **meta, "detections": detections}
 
 
+@router.post("/live/{detect_id}/render", response_model=TestJobStart, status_code=201)
+async def start_live_render(detect_id: str, body: dict = Body(default={})):
+    """캐시된 검출 + 현재 튜닝으로 오버레이 영상을 렌더한다 (추론 없음).
+
+    body: {overrides: {...}, toggles: {obj_boxes, draw_crop_box, show_dead_zone,
+    show_center_line, show_highlight}}. 진행은 /live/{job_id}/events로 구독."""
+    work = _live_dir(detect_id)
+    if not (work / "detected.json").exists() or not (work / "preview.mp4").exists():
+        raise HTTPException(404, "Detection cache not found")
+    overrides = body.get("overrides") or {}
+    if not isinstance(overrides, dict):
+        raise HTTPException(422, "overrides must be an object")
+    toggles = body.get("toggles") or {}
+    if not isinstance(toggles, dict):
+        raise HTTPException(422, "toggles must be an object")
+
+    job_id = uuid.uuid4().hex
+    cfg = {"work": str(work), "overrides": overrides, "toggles": toggles}
+    await run_in_threadpool(test_job_manager.submit_live_render, job_id, cfg)
+    return TestJobStart(job_id=job_id)
+
+
+@router.get("/live/{detect_id}/render-video")
+def live_render_video(detect_id: str):
+    """렌더된 오버레이 영상 다운로드."""
+    render = _live_dir(detect_id) / "render.mp4"
+    if not render.exists():
+        raise HTTPException(404, "Rendered video not ready")
+    return FileResponse(render, media_type="video/mp4", filename="crop_overlay.mp4")
+
+
 @router.post("/live/{detect_id}/plan")
 async def live_plan(detect_id: str, body: dict = Body(default={})):
     """Recompute the crop trajectory from cached detections + tuning overrides.

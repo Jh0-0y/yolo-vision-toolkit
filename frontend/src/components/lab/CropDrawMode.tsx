@@ -17,7 +17,10 @@ import { IconAlertTriangle, IconChevronRight, IconMovie, IconRefresh, IconX } fr
 import {
   getLiveResult,
   livePlan,
+  liveRenderVideoUrl,
   liveVideoUrl,
+  startLiveRender,
+  subscribeLiveEvents,
   type CropPlan,
   type DetectorPayload,
   type LiveResult,
@@ -74,6 +77,10 @@ export default function CropDrawMode({ projectId, models }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [videoFailed, setVideoFailed] = useState(false)
   const [analyzedKey, setAnalyzedKey] = useState<string | null>(null)
+  // 오버레이 렌더 잡 (추론 없음 — 캐시로 영상 굽기)
+  const [renderState, setRenderState] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+  const [renderPct, setRenderPct] = useState(0)
+  const renderUnsub = useRef<(() => void) | null>(null)
 
   const job = useLiveJob((detectId) => {
     getLiveResult(detectId).then(setResult).catch((e) => setLoadError((e as Error).message))
@@ -111,12 +118,42 @@ export default function CropDrawMode({ projectId, models }: Props) {
 
   function reset() {
     job.reset()
+    renderUnsub.current?.()
+    setRenderState('idle')
     setFile(null)
     setResult(null)
     setPlan(null)
     setAnalyzedKey(null)
     setLoadError(null)
     setVideoFailed(false)
+  }
+
+  /** 오버레이 영상 렌더 시작 — 검출 캐시 + 현재 튜닝/토글로 서버가 굽는다. */
+  async function renderVideo() {
+    if (!result) return
+    renderUnsub.current?.()
+    setRenderState('running')
+    setRenderPct(0)
+    try {
+      const { job_id } = await startLiveRender(result.detect_id, overrides, {
+        obj_boxes: objInference,
+        draw_crop_box: drawCropBox,
+        show_dead_zone: showDeadZone,
+        show_center_line: showCenterLine,
+        show_highlight: showHighlight,
+      })
+      renderUnsub.current = subscribeLiveEvents(job_id, (ev) => {
+        if (ev.total && ev.done != null) setRenderPct(Math.round((ev.done / ev.total) * 100))
+        if (ev.phase === 'done') setRenderState('done')
+        else if (ev.phase === 'error') {
+          setLoadError(ev.msg || 'Render failed')
+          setRenderState('error')
+        } else if (ev.phase === 'cancelled') setRenderState('idle')
+      })
+    } catch (e) {
+      setLoadError((e as Error).message)
+      setRenderState('error')
+    }
   }
 
   /** 현재 튜닝이 반영된 plan을 계약 스키마(camelCase) crop.json으로 저장한다.
@@ -373,11 +410,22 @@ export default function CropDrawMode({ projectId, models }: Props) {
               )}
 
               {plan && result && !job.running && (
-                <Group>
+                <Group gap="md">
                   <Anchor size="sm" onClick={() => downloadPlan()} style={{ cursor: 'pointer' }}>
-                    Download crop coordinates (JSON) — current tuning
+                    Download crop.json — current tuning
                   </Anchor>
-                  <Text c="dimmed" size="xs">Reflects the knobs above; re-download after changes.</Text>
+                  {renderState === 'running' ? (
+                    <Text size="sm" c="dimmed">Rendering overlay video… {renderPct}%</Text>
+                  ) : (
+                    <Anchor size="sm" onClick={() => renderVideo()} style={{ cursor: 'pointer' }}>
+                      {renderState === 'done' ? 'Re-render overlay video' : 'Render overlay video'}
+                    </Anchor>
+                  )}
+                  {renderState === 'done' && (
+                    <Anchor size="sm" href={liveRenderVideoUrl(result.detect_id)} download="crop_overlay.mp4">
+                      Download overlay video
+                    </Anchor>
+                  )}
                 </Group>
               )}
             </Stack>
