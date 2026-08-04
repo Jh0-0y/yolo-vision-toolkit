@@ -207,3 +207,19 @@ def test_plan_clip_end_to_end():
     # 미검출 구간도 보간으로 BALL 유지 (점프 없음)
     gap_sample = next(t for t in planned if t.video_offset_ms == 5600)
     assert gap_sample.target_type in (TargetType.BALL.value, TargetType.BALL_PLAYER.value)
+
+
+# ---------------------------------------------------------------------------
+# 워커 프로세스 경계
+
+
+def test_trackcrop_error_survives_pickle():
+    """워커가 던진 예외는 부모로 pickle되어 돌아온다 — 언피클 실패는
+    ProcessPool 전체를 BrokenProcessPool로 만들었다 (실측 회귀)."""
+    import pickle
+
+    from app.ml.trackcrop.errors import ErrorCode, TrackCropError
+
+    e = TrackCropError(ErrorCode.MODEL_LOAD_FAILED, "모델에 ball 클래스가 없습니다.", details={"names": {0: "player"}})
+    e2 = pickle.loads(pickle.dumps(e))
+    assert (e2.code, e2.message, e2.details) == (e.code, e.message, e.details)

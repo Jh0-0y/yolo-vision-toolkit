@@ -65,11 +65,18 @@ class TestJobManager:
 
     def _get_executor(self, kind: str) -> ProcessPoolExecutor:
         with self._lock:
-            if kind not in self._executors:
-                self._executors[kind] = ProcessPoolExecutor(
+            executor = self._executors.get(kind)
+            # 자식이 급사(segfault·언피클 실패 등)하면 풀이 영구 broken이 된다 —
+            # 서버 재시작 없이 새 풀로 갈아끼워 다음 잡부터 정상 동작하게 한다.
+            if executor is not None and getattr(executor, "_broken", False):
+                executor.shutdown(wait=False, cancel_futures=True)
+                executor = None
+            if executor is None:
+                executor = ProcessPoolExecutor(
                     max_workers=1, mp_context=multiprocessing.get_context("spawn")
                 )
-            return self._executors[kind]
+                self._executors[kind] = executor
+            return executor
 
     def _prepare(self, job_id: str):
         job_dir = settings.jobs_dir / job_id
