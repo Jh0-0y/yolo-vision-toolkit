@@ -635,7 +635,7 @@ export interface AnnotateProgress {
 // "none" = JSON만 | "label" = 오버레이 그리기 | "video" = 세로 크롭 컷
 export type CropOutput = 'none' | 'label' | 'video'
 
-/** trackcrop 런타임 튜닝 오버라이드 — 비운 값은 보내지 않아 기본값(constants) 사용. */
+/** adaptive-crop 런타임 튜닝 오버라이드 — 비운 값은 보내지 않아 라이브러리 기본값 사용. */
 export interface TrackcropOverrides {
   // 검출/지오메트리 정책
   sampling_interval_ms?: number

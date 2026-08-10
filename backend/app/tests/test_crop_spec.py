@@ -1,14 +1,19 @@
 """crop.json 계약 스키마(camelCase) 직렬화 검증.
 
-내보내기 형식은 외부 계약을 따른다: schemaVersion·id 컬럼(플레이스홀더)·
-source/crop 중첩·keyframes(videoOffsetMs/targetType UPPER)·summary(camelCase).
+좌표·규격은 adaptive-crop이 내고(`CropResult.to_dict`), 이 툴킷은 계약이 요구하는
+id 컬럼을 얹어 파일로 쓴다(`app.ml.crop.crop_plan_json`). 여기서 보는 것은 그
+합성 결과다: schemaVersion·id 컬럼(플레이스홀더)·source/crop 중첩·
+keyframes(videoOffsetMs/targetType UPPER)·summary(camelCase).
 samples/debug는 내부 확장이라 include_internal=True에서만 담긴다.
 """
 
 import json
 
-from app.ml.trackcrop.result import build_crop_result
-from app.ml.trackcrop.types import Keyframe, TargetSample
+from adaptive_crop import CropSpec, Keyframe, TargetSample, build_crop_result
+
+from app.ml.crop import crop_plan_json
+
+WINDOW = CropSpec(608, 1080).resolve(1920, 1080)
 
 
 def _result():
@@ -21,11 +26,11 @@ def _result():
         Keyframe(0, 656, "ball", 0.912345),
         Keyframe(200, 676, "center", 1.0),
     ]
-    return build_crop_result(samples, keyframes)
+    return build_crop_result(samples, keyframes, WINDOW)
 
 
 def test_spec_shape_and_camel_case():
-    d = _result().to_dict()
+    d = json.loads(crop_plan_json(_result()))
     assert d["schemaVersion"] == 1
     # id 컬럼은 플레이스홀더로 존재해야 한다 (이 툴킷엔 게임/잡 체계가 없음)
     for key in ("jobId", "gameId", "clipCandidateId", "sourceContentOutputId", "sourceMediaAssetId"):
@@ -40,7 +45,7 @@ def test_spec_shape_and_camel_case():
     assert set(d["summary"]) == {
         "keyframeCount", "ballTrackingCoverage", "playerTrackingCoverage", "fallbackCoverage",
     }
-    # 스펙 외 내부 필드는 기본 내보내기에 없어야 한다
+    # 스펙 외 내부 필드는 파일로 나가는 crop.json에 없어야 한다
     assert "samples" not in d and "debug" not in d
     # 키 이름에 snake_case가 남아있지 않아야 한다 (값의 언더스코어는 무관)
     def _keys(obj):
@@ -62,7 +67,13 @@ def test_internal_fields_only_when_requested():
     assert d["debug"] == []
 
 
-def test_to_json_is_spec_only():
-    parsed = json.loads(_result().to_json())
-    assert "samples" not in parsed
-    assert parsed["keyframes"][0]["videoOffsetMs"] == 0
+def test_crop_geometry_follows_the_source_resolution():
+    """1920×1080 고정이 아니다 — 720p 소스면 창과 X 범위가 함께 줄어든다."""
+    window = CropSpec(406, 720).resolve(1280, 720)
+    result = build_crop_result(
+        [TargetSample(0, 640.0, "ball", 0.9)], [Keyframe(0, 437, "ball", 0.9)], window
+    )
+    d = result.to_dict()
+    assert d["source"]["width"] == 1280
+    assert d["crop"]["width"] == 406
+    assert window.x_max == 1280 - 406

@@ -1,6 +1,6 @@
-"""Crop-window rendering from a precomputed trackcrop trajectory.
+"""Crop-window rendering from a precomputed adaptive-crop trajectory.
 
-Pure cv2/CPU. Given the ``TargetSample`` list from ``app.ml.trackcrop`` (the 100ms
+Pure cv2/CPU. Given the ``TargetSample`` list from ``adaptive_crop`` (the 100ms
 target-centre trajectory), this module either
 
   - **draws** the moving vertical 9:16 crop window onto a frame as an overlay
@@ -49,10 +49,10 @@ def crop_width_for(height: int, frame_width: int) -> int:
 
 
 def build_trajectory(samples: list, frame_width: int) -> Trajectory:
-    """trackcrop samples -> (ms_list, center_x_list) for per-frame interpolation.
+    """crop samples -> (ms_list, center_x_list) for per-frame interpolation.
 
-    The 'center' fallback stores 1920/2=960 (trackcrop's fixed source width); remap
-    it to the actual frame centre so the window is correct at any resolution.
+    The 'center' fallback stores the source centre; pass the source width to keep
+    it aligned (callers scale to the preview afterwards).
     """
     ms_list: list[int] = []
     cx_list: list[float] = []
@@ -105,7 +105,7 @@ def draw_window(
 
 
 def build_types(samples: list) -> tuple[list[int], list[str]]:
-    """trackcrop samples -> (ms_list, target_type_list) — 타입 라벨용 step 조회 소스."""
+    """crop samples -> (ms_list, target_type_list) — 타입 라벨용 step 조회 소스."""
     return [s.video_offset_ms for s in samples], [s.target_type for s in samples]
 
 
@@ -211,7 +211,7 @@ def draw_selection_overlay(
     frame_width: int,
     frame_height: int,
 ) -> None:
-    """디버그 — trackcrop이 실제로 고른 공(빨강)·소유선수(초록) bbox를 강조한다."""
+    """디버그 — 플래너가 실제로 고른 공(빨강)·소유선수(초록) bbox를 강조한다."""
     entry = _debug_at(ms, lookup)
     if entry is None:
         return

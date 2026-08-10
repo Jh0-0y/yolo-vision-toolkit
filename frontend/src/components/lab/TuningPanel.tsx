@@ -36,14 +36,14 @@ const CORE: Knob[] = [
 
 // Advanced — track stitching/scoring & path-optimization internals
 const ADVANCED: Knob[] = [
-  { key: 'ball_max_speed_px_s', label: 'Ball max speed (px/s)', def: 3000, step: 100, min: 0 },
-  { key: 'split_base_px', label: 'Split: base jump (px)', def: 80, step: 10, min: 0 },
+  { key: 'ball_max_speed_px_s', label: 'Ball max speed (px/s)', def: 2000, step: 100, min: 0 },
+  { key: 'split_base_px', label: 'Split: base jump (px)', def: 40, step: 10, min: 0 },
   { key: 'stitch_base_px', label: 'Stitch: base dist (px)', def: 150, step: 10, min: 0 },
   { key: 'stitch_velocity_cap_ms', label: 'Stitch: extrapolate cap (ms)', def: 500, step: 50, min: 0 },
-  { key: 'w_travel', label: 'Score: travel weight', def: 0.4, step: 0.05, min: 0, max: 1 },
-  { key: 'w_interaction', label: 'Score: interaction weight', def: 0.4, step: 0.05, min: 0, max: 1 },
-  { key: 'w_span', label: 'Score: span weight', def: 0.2, step: 0.05, min: 0, max: 1 },
-  { key: 'travel_norm_px', label: 'Score: travel norm (px)', def: 1920, step: 100, min: 1 },
+  { key: 'w_travel', label: 'Score: travel weight', def: 0.5, step: 0.05, min: 0, max: 1 },
+  { key: 'w_interaction', label: 'Score: interaction weight', def: 0.3, step: 0.05, min: 0, max: 1 },
+  { key: 'w_span', label: 'Score: span weight', def: 0.1, step: 0.05, min: 0, max: 1 },
+  { key: 'travel_norm_px', label: 'Score: travel norm (px)', def: 3840, step: 100, min: 1 },
   { key: 'absorb_allow_scale', label: 'Absorb-merge scale', def: 2, step: 0.5, min: 1 },
   { key: 'prune_dev_px', label: 'Prune deviation (px)', def: 200, step: 25, min: 50 },
   { key: 'possession_margin', label: 'Possession margin (×height)', def: 0.15, step: 0.05, min: 0 },
@@ -63,7 +63,8 @@ interface Props {
   exclude?: (keyof TrackcropOverrides)[]
 }
 
-/** trackcrop clip-planner tuning knobs — leaving a field empty omits it, so the default is used. */
+/** adaptive-crop 플래너 노브 — 비워두면 그 키를 안 보내므로 라이브러리 기본값(ClipPlanConfig)이 쓰인다.
+ *  placeholder에 적힌 default 값은 ClipPlanConfig의 기본값과 같아야 한다. */
 export default function TuningPanel({ value, onChange, disabled, exclude }: Props) {
   const [showTuning, setShowTuning] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)

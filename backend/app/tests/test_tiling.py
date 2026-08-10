@@ -107,11 +107,11 @@ def test_tile_stem_naming():
 
 
 # ---------------------------------------------------------------------------
-# 타일 추론 병합 (detection.merge_tile_boxes)
+# 타일 추론 병합 (adaptive_crop.detect.detector.merge_tile_boxes)
 
 
 def test_merge_tile_boxes_dedupes_overlap_region():
-    from app.ml.trackcrop.detection import merge_tile_boxes
+    from adaptive_crop.detect.detector import merge_tile_boxes
 
     # 겹침 구간에서 같은 공이 두 타일에 잡힘 — 온전한(고conf) 쪽이 남는다
     full = (600.0, 300.0, 640.0, 340.0, 0.9)
@@ -122,7 +122,7 @@ def test_merge_tile_boxes_dedupes_overlap_region():
 
 
 def test_merge_tile_boxes_keeps_distinct_boxes():
-    from app.ml.trackcrop.detection import merge_tile_boxes
+    from adaptive_crop.detect.detector import merge_tile_boxes
 
     a = (0.0, 0.0, 40.0, 40.0, 0.9)
     b = (100.0, 100.0, 140.0, 140.0, 0.3)

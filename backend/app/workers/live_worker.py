@@ -2,7 +2,7 @@
 raw per-sample detections, and transcode a browser-playable H.264 preview. Runs in a
 child process (torch/ultralytics + cv2). Progress → jobs_dir/{job_id}/progress.jsonl.
 
-This is the expensive half of the trackcrop pipeline (`detect_video`). The cheap
+This is the expensive half of the adaptive-crop pipeline (`detect_video`). The cheap
 half (`plan_from_detections`) runs synchronously in the API on every tuning change,
 reading the cached detections — so the crop overlay updates instantly without any
 re-inference. The frontend plays the preview and draws the crop box on a canvas.
@@ -32,8 +32,6 @@ def _emit(progress_path: Path, event: dict) -> None:
 
 
 def run_live(job_id: str, cfg: dict, jobs_dir: str) -> dict:
-    import cv2
-
     from app.core.config import resolve_device
 
     job_dir = Path(jobs_dir) / job_id
@@ -59,28 +57,24 @@ def run_live(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                 "found. Install it (Docker image ships it; locally: `brew install ffmpeg`)."
             )
 
+        # adaptive_crop pulls in cv2/ultralytics — keep the imports lazy (worker only).
+        from adaptive_crop import build_detector, detect_video, probe_video
+        from adaptive_crop.detect.io import dump_detections
+
+        from app.ml import crop as crop_adapter
+
         # probe geometry / length for progress total + client-side overlay scaling
-        cap = cv2.VideoCapture(str(src))
-        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
-        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        cap.release()
-        duration_ms = int(total_frames / fps * 1000) if fps else 0
+        video = probe_video(src)
+        w, h, fps, duration_ms = video.width, video.height, video.fps, video.duration_ms
         total_samples = max(1, duration_ms // interval + 1)
 
         _emit(progress, {"phase": "start", "total": total_samples})
 
         # ---- detection (the expensive pass) ----
-        # trackcrop pulls in cv2/ultralytics — keep the import lazy (worker only).
-        from app.ml.trackcrop.detection import build_detector
-        from app.ml.trackcrop.detection_io import dump_detections
-        from app.ml.trackcrop.pipeline import detect_video
-
         entries = cfg.get("detectors") or [
             {"pt": pt, "mode": "full", "conf": conf_cfg, "imgsz": imgsz}
         ]
-        detector = build_detector(entries, device, default_conf=conf)
+        detector = build_detector(crop_adapter.detector_entries(entries, conf), device)
 
         def on_progress(done: int) -> None:
             if cancel.exists():
@@ -108,7 +102,9 @@ def run_live(job_id: str, cfg: dict, jobs_dir: str) -> dict:
             "source_width": w,
             "source_height": h,
             "fps": fps,
-            "duration_ms": duration_ms,
+            # 컨테이너가 프레임 수를 안 들고 있으면(0) 샘플 격자의 끝을 길이로 본다 —
+            # 좌표 계산이 이 값을 클립 길이로 쓴다.
+            "duration_ms": duration_ms or (detected[-1][0] if detected else 0),
             "sampling_interval_ms": interval,
             "sample_count": len(detected),
         }
@@ -143,11 +139,11 @@ def run_live_render(job_id: str, cfg: dict, jobs_dir: str) -> dict:
     import json as _json
 
     import cv2
+    from adaptive_crop import plan_from_detections
+    from adaptive_crop.detect.io import load_detections
 
     from app.domain import crop_render
-    from app.ml.trackcrop.balltrack import resolve_clip_config
-    from app.ml.trackcrop.detection_io import load_detections
-    from app.ml.trackcrop.pipeline import plan_from_detections
+    from app.ml import crop as crop_adapter
     from app.workers.annotate_worker import _to_h264
 
     job_dir = Path(jobs_dir) / job_id
@@ -176,8 +172,18 @@ def run_live_render(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         detected = load_detections(
             _json.loads((work / "detected.json").read_text(encoding="utf-8"))
         )
+        # 좌표는 검출 당시의 원본 해상도 기준으로 계산한다 (meta.json). validate=False:
+        # 튜닝 노브 조합 하나가 렌더 잡을 죽이지 않게 — 여기 결과는 미리보기다.
+        meta = _json.loads((work / "meta.json").read_text(encoding="utf-8"))
+        video = crop_adapter.video_info_from_meta(meta)
+        cfg_resolved = crop_adapter.resolve_clip_config(overrides)
         cropres = plan_from_detections(
-            detected, overrides=overrides, collect_debug=show_highlight, validate=False
+            detected,
+            crop_adapter.crop_spec_for(video.width, video.height),
+            video,
+            config=cfg_resolved,
+            collect_debug=show_highlight,
+            validate=False,
         )
 
         cap = cv2.VideoCapture(str(src))
@@ -186,18 +192,16 @@ def run_live_render(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        # 라이브 캐시는 원본 해상도(1920 기준) 좌표 — 프리뷰 해상도에 맞게 스케일
-        meta = _json.loads((work / "meta.json").read_text(encoding="utf-8"))
-        scale = w / float(meta.get("source_width") or w)
+        # 좌표는 원본 해상도 기준 — 프리뷰가 다른 크기로 트랜스코딩됐으면 맞춰 스케일
+        scale = w / float(video.width or w)
 
-        traj = crop_render.build_trajectory(cropres.samples, int(w / scale))
+        traj = crop_render.build_trajectory(cropres.samples, video.width)
         traj = (traj[0], [x * scale for x in traj[1]])
         types = crop_render.build_types(cropres.samples)
         debug_lookup = (
             crop_render.build_debug_lookup(cropres.debug) if cropres.debug else None
         )
         crop_w = crop_render.crop_width_for(h, w)
-        cfg_resolved = resolve_clip_config(overrides)
         dead_zone_half = cfg_resolved.dead_zone_half * scale
 
         det_ms = [ms for ms, _ in detected]

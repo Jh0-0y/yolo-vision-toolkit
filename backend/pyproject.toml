@@ -15,6 +15,9 @@ dependencies = [
     "pyyaml>=6.0",
     "ultralytics>=8.3",
     "lap>=0.5.12",
+    # 크롭 좌표 계산(공·선수 추적 → 세로 크롭 X). CropWorker와 같은 라이브러리를 쓴다.
+    # 비공개 저장소 — 설치하려면 git이 GitHub에 인증할 수 있어야 한다(README 참고).
+    "adaptive-crop @ git+https://github.com/Jh0-0y/adaptive-crop@v0.1.0",
 ]
 
 [dependency-groups]

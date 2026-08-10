@@ -1,6 +1,6 @@
 // Canvas overlay drawing for the live crop preview.
 //
-// Mirrors the backend geometry (app/domain/crop_render.py + trackcrop) so the box
+// Mirrors the backend geometry (app/domain/crop_render.py + adaptive-crop) so the box
 // the client draws matches exactly what a batch render would burn in: 9:16 crop
 // width from the frame height, linear-interpolated target centre, edge clamping.
 // All trajectory coordinates are in SOURCE pixels; we scale to the displayed canvas.

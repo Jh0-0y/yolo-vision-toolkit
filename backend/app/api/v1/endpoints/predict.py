@@ -152,13 +152,13 @@ async def start_annotate(
     device: str | None = Form(None),
     project_id: str | None = Form(None),
     object_tracking: bool = Form(True),  # ByteTrack boxes + IDs + trails
-    crop_tracking: bool = Form(True),  # trackcrop vertical 9:16 crop window
+    crop_tracking: bool = Form(True),  # adaptive-crop vertical 9:16 crop window
     crop_output: str = Form("label"),  # "none" = JSON only | "label" = overlay | "video" = cut clip
     draw_crop_box: bool = Form(True),  # label: 9:16 사각형(+데드존·센터선)
     show_dead_zone: bool = Form(True),  # label: 데드존 밴드
     show_center_line: bool = Form(True),  # label: 타깃 중심선·타입 라벨
     show_target_highlight: bool = Form(False),  # label: 선택 공/소유선수 마커
-    overrides: str = Form("{}"),  # trackcrop 튜닝 오버라이드 (JSON)
+    overrides: str = Form("{}"),  # 크롭 튜닝 오버라이드 (JSON)
     detectors: str = Form("[]"),  # 검출기 엔트리 목록 (JSON)
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
@@ -229,7 +229,7 @@ def annotate_result(job_id: str):
 
 @router.get("/annotate/{job_id}/crop")
 def annotate_crop(job_id: str):
-    """trackcrop's computed crop-X coordinates (keyframes + 100ms samples) as JSON.
+    """adaptive-crop's computed crop-X coordinates (keyframes + 100ms samples) as JSON.
     Present only when the job ran with crop tracking enabled."""
     if not job_id.isalnum():  # uuid4().hex — blocks path traversal
         raise HTTPException(422, "Invalid job id")
@@ -463,7 +463,8 @@ async def live_plan(detect_id: str, body: dict = Body(default={})):
     """
     work = _live_dir(detect_id)
     det_path = work / "detected.json"
-    if not det_path.exists():
+    meta_path = work / "meta.json"
+    if not det_path.exists() or not meta_path.exists():
         raise HTTPException(404, "Detection cache not found")
     overrides = body.get("overrides") or {}
     if not isinstance(overrides, dict):
@@ -471,16 +472,25 @@ async def live_plan(detect_id: str, body: dict = Body(default={})):
     collect_debug = bool(body.get("collect_debug", False))
 
     def _compute() -> dict:
-        # trackcrop imports cv2/numpy but not torch here (Detector loads YOLO lazily).
-        from app.ml.trackcrop.detection_io import load_detections
-        from app.ml.trackcrop.pipeline import plan_from_detections
+        # adaptive_crop imports cv2/numpy but not torch on this path (좌표 계산만).
+        from adaptive_crop import plan_from_detections
+        from adaptive_crop.detect.io import load_detections
 
-        data = json.loads(det_path.read_text(encoding="utf-8"))
-        detected = load_detections(data)
-        # validate=False: non-1080p input trips the 1920/608 geometry checks (same as
-        # the batch annotate path); the client scales the overlay to the real frame.
+        from app.ml import crop as crop_adapter
+
+        detected = load_detections(json.loads(det_path.read_text(encoding="utf-8")))
+        video = crop_adapter.video_info_from_meta(
+            json.loads(meta_path.read_text(encoding="utf-8"))
+        )
+        # validate=False: 튜닝 노브를 돌릴 때마다 부르는 경로라 한 조합이 500이 되면
+        # 안 된다. 클라이언트는 원본 좌표를 실제 프레임 크기에 맞춰 스케일한다.
         result = plan_from_detections(
-            detected, overrides=overrides, collect_debug=collect_debug, validate=False,
+            detected,
+            crop_adapter.crop_spec_for(video.width, video.height),
+            video,
+            config=crop_adapter.resolve_clip_config(overrides),
+            collect_debug=collect_debug,
+            validate=False,
         )
         return result.to_dict(include_internal=True)  # 오버레이용 samples/debug 포함
 

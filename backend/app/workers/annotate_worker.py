@@ -1,12 +1,12 @@
 """Video tracking worker: run a model's object tracker (ByteTrack) over a video,
 draw per-object boxes with stable track IDs (and a short motion trail), and/or
-apply a moving vertical (9:16) crop window computed by the trackcrop pipeline,
+apply a moving vertical (9:16) crop window computed by the adaptive-crop pipeline,
 then write a browser-playable (H.264) mp4. Runs in a child process (torch/
 ultralytics + cv2). Progress → jobs_dir/{job_id}/progress.jsonl.
 
 Two independent overlays, each toggled by cfg:
   - object_tracking: ByteTrack boxes + IDs + motion trails (per-frame model.track).
-  - crop_tracking:   the trackcrop pipeline (100ms predict pass, separate from
+  - crop_tracking:   the adaptive-crop pipeline (100ms predict pass, separate from
                      ByteTrack by design) yields a target-center trajectory. Its
                      crop X coordinates are always written to crop.json. What we do
                      with that trajectory depends on cfg["crop_output"]:
@@ -84,7 +84,7 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
     show_dead_zone = bool(cfg.get("show_dead_zone", True))
     show_center_line = bool(cfg.get("show_center_line", True))
     show_target_highlight = bool(cfg.get("show_target_highlight", False))
-    overrides = cfg.get("overrides") or None  # trackcrop 튜닝 오버라이드 (dict)
+    overrides = cfg.get("overrides") or None  # 크롭 튜닝 오버라이드 (dict)
 
     from app.domain import crop_render  # cv2-only geometry (no torch) — safe here
 
@@ -125,38 +125,53 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         crop_traj: crop_render.Trajectory | None = None
         crop_types: tuple[list, list] | None = None  # 디버그 HUD 타입 라벨용
         crop_debug: tuple[list, list] | None = None  # 대상 하이라이트 조회 lookup
-        dead_zone_half: float | None = None  # 데드존 밴드 반폭 (없는 버전이면 None)
+        dead_zone_half: float | None = None  # 데드존 밴드 반폭 (crop_tracking일 때만)
         if crop_tracking:
             _emit(progress, {"phase": "crop_analyze", "total": total})
-            # trackcrop pulls in cv2/ultralytics — keep the import lazy (worker only)
-            from app.ml.trackcrop import analyze_video
-            from app.ml.trackcrop.detection import build_detector
+            # adaptive_crop pulls in cv2/ultralytics — keep the imports lazy (worker only)
+            from adaptive_crop import (
+                VideoInfo,
+                build_detector,
+                detect_video,
+                plan_from_detections,
+            )
 
-            # trackcrop is tuned for ball recall (low conf, large imgsz) and its own
-            # 1920/608 constants; validate=False so non-1080p input doesn't trip the
-            # geometry checks. overrides = runtime tuning; collect_debug = highlight bboxes.
+            from app.ml import crop as crop_adapter
+
+            # 검출은 공 재현율에 맞춘 설정(낮은 conf, 큰 imgsz)으로 따로 한 패스 돈다.
+            # 영상 규격은 위에서 이미 읽었으므로 다시 열지 않고 그대로 넘긴다(출처 하나).
             entries = cfg.get("detectors") or [
                 {"pt": pt, "mode": "full", "conf": conf_cfg, "imgsz": imgsz}
             ]
-            crop_detector = build_detector(entries, device, default_conf=crop_conf)
-            cropres = analyze_video(
-                str(src), detector=crop_detector,
-                validate=False, overrides=overrides,
+            crop_detector = build_detector(
+                crop_adapter.detector_entries(entries, crop_conf), device
+            )
+            crop_cfg = crop_adapter.resolve_clip_config(overrides)
+            detected = detect_video(
+                str(src),
+                detector=crop_detector,
+                sampling_interval_ms=crop_cfg.sampling_interval_ms,
+            )
+            # 컨테이너가 프레임 수를 안 들고 있으면(total=0) 샘플 격자의 끝을 길이로 본다.
+            duration_ms = int(total / fps * 1000) if total > 0 and fps else 0
+            if duration_ms <= 0 and detected:
+                duration_ms = detected[-1][0]
+            video = VideoInfo(width=w, height=h, fps=fps, duration_ms=duration_ms)
+            cropres = plan_from_detections(
+                detected,
+                crop_adapter.crop_spec_for(w, h),
+                video,
+                config=crop_cfg,
                 collect_debug=show_target_highlight and not crop_json_only,
             )
             crop_traj = crop_render.build_trajectory(cropres.samples, w)
             crop_types = crop_render.build_types(cropres.samples)
             if cropres.debug:
                 crop_debug = crop_render.build_debug_lookup(cropres.debug)
-            try:  # 데드존 상수는 버전(브랜치)에 따라 없을 수 있음
-                from app.ml.trackcrop.constants import DEAD_ZONE_WIDTH
-
-                dead_zone_half = DEAD_ZONE_WIDTH / 2
-                if overrides and overrides.get("dead_zone_width"):
-                    dead_zone_half = float(overrides["dead_zone_width"]) / 2
-            except ImportError:
-                dead_zone_half = None
-            (out.parent / "crop.json").write_text(cropres.to_json(), encoding="utf-8")
+            dead_zone_half = crop_cfg.dead_zone_half
+            (out.parent / "crop.json").write_text(
+                crop_adapter.crop_plan_json(cropres), encoding="utf-8"
+            )
 
         # ---- JSON-only: crop.json은 위에서 썼다. 영상 렌더/인코딩 스킵 ----
         if crop_json_only:

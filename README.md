@@ -51,15 +51,15 @@ YOLO 모델을 실제로 쓰려면 늘 같은 반복 작업이 필요합니다 �
        ▲                                                          │
        │                                                          ▼
        │            ┌──────────┐         ┌──────────────────┐  ┌──────────┐
-       └────────────│  테스트   │←────────│  모델 레지스트리  │←─│ best.pt  │
-       재라벨링에    │Track/    │         │ 학습 결과 등록    │  │ 등록      │
+       └────────────│  검증     │←────────│  모델 레지스트리  │←─│ best.pt  │
+       재라벨링에    │Crop /    │         │ 학습 결과 등록    │  │ 등록      │
        더 좋은 모델   │Compare   │         └──────────────────┘  └──────────┘
                     └──────────┘
 ```
 
 앱은 좌측 사이드바가 **데이터(Data)** 그룹과 **모델(Model)** 그룹으로 나뉩니다.
 - **데이터**: Upload · Dataset · Classes · Exports
-- **모델**: Train · Training History · Models · Test
+- **모델**: Train · Training History · Models · Crop
 
 ---
 
@@ -81,8 +81,8 @@ YOLO 모델을 실제로 쓰려면 늘 같은 반복 작업이 필요합니다 �
 | | 실시간 모니터링 | 에폭별 mAP/loss/LR 차트, 클래스별 지표, 결과 이미지, 실시간 로그 |
 | | 학습 이력 | 프로젝트별 전체 학습 기록, 상태 배지, 중지/삭제 |
 | **모델** | 모델 레지스트리 | 공식 모델 다운로드 · `.pt` 업로드 · 학습결과 등록 · 다운로드 |
-| **검증** | Track (객체 추적 · 크롭 추적) | 영상에 ByteTrack 추적(ID·궤적) + 세로 9:16 크롭 프레임 추적을 각각 켜고 끄며 오버레이한 영상 반환. 크롭 좌표는 JSON 다운로드 |
-| | Compare (모델 비교) | 라벨(GT) 대비 여러 모델을 P/R/F1로 채점 + 박스 오버레이 비교 |
+| **검증** | Crop (크롭 랩) | 가로 영상 → 세로 9:16 크롭 X 좌표. crop.json 다운로드 · 브라우저 실시간 오버레이+튜닝 · 세로 클립 컷 (좌표 계산은 `adaptive-crop` 패키지) |
+| | Compare (모델 비교) | 라벨(GT) 대비 여러 모델을 P/R/F1로 채점 + 박스 오버레이 비교 (Models 페이지) |
 | **CLI** | 오토라벨링 CLI | 웹 없이 커맨드라인으로 폴더 단위 앙상블 라벨링 |
 | **공통** | 전역 작업 인디케이터 | 업로드·추출·오토라벨·내보내기 진행률을 우상단 패널에서 통합 표시·취소 |
 
@@ -157,13 +157,19 @@ YOLO 모델을 실제로 쓰려면 늘 같은 반복 작업이 필요합니다 �
 - **모델 추가**: **공식 모델 다운로드**(yolo26/12/11 × n~x 카탈로그, 클수록 정확하지만 느림) 또는 **`.pt` 업로드**(로드해서 클래스명·태스크 검증).
 - **표**: 이름 · 출처 배지(Official/Uploaded/Trained) · 클래스 수 · 등록일. 행 메뉴에서 `.pt` 다운로드·이름변경·삭제.
 
-### 테스트 (Test) — 데이터셋을 건드리지 않는 플레이그라운드
-두 탭으로 모델을 실험합니다(DB에 아무것도 안 씀).
-- **Track (객체 추적 · 크롭 추적)**: 모델 선택 → 신뢰도·이미지 크기 설정 → **오버레이 2종을 체크박스로 선택**(기본 둘 다 ON) → 영상 드롭. 결과는 항상 원본 가로 영상 1개(브라우저 재생용 H.264로 트랜스코딩)이며, 임시 저장되어 **1시간 후 자동 삭제**.
-  - **객체 추적**: **ByteTrack**으로 추적해 객체별 지속 ID와 이동 궤적을 박스로 그립니다.
-  - **크롭 추적**: `trackcrop` 파이프라인(공·선수를 100ms 격자로 추적)이 계산한 목표 지점을 따라 **세로 9:16 크롭 프레임**을 사각형으로 오버레이하고, 그 **크롭 X 좌표(keyframe·sample)를 JSON으로 다운로드**할 수 있습니다. `ball` 클래스가 있는 모델(예: 스포츠 영상)이 필요합니다.
-  - 둘 중 하나만 켜면 해당 오버레이만, 둘 다 켜면 함께 그려집니다(둘 다 끄면 실행 불가).
-- **Compare (모델 비교)**: 비교할 모델 다중선택 → 신뢰도·매칭 IoU·이미지 크기 → 라벨된 이미지 **9~27장 선택** → 실행. 결과: 모델별 지표 카드(P/R/F1, TP/FP/FN, "Best F1" 배지), P/R/F1 막대차트, **이미지별 박스 오버레이**(GT=녹색 점선, 모델별 색상 실선).
+### Crop (크롭 랩) — 데이터셋을 건드리지 않는 플레이그라운드
+가로 영상에서 **세로 9:16 크롭 창이 따라갈 X 좌표**를 뽑고, 그 결과를 눈으로 확인하는 페이지입니다(DB에 아무것도 안 씀). 산출물은 임시 저장되어 **1시간 후 자동 삭제**됩니다. 좌표 계산은 [adaptive-crop](https://github.com/Jh0-0y/adaptive-crop) 패키지가 하며, `ball` 클래스가 있는 모델(스포츠 영상)이 필요합니다 → [docs/crop-pipeline.md](docs/crop-pipeline.md).
+
+세 탭으로 나뉩니다.
+
+- **Crop JSON**: 영상 드롭 → 검출 1회 → **crop.json 다운로드**(영상 렌더 없음, 제일 빠름). 공·선수 추적 커버리지 요약도 함께 보여줍니다.
+- **Crop Draw**: 영상 드롭 → 검출 1회를 캐시해두고, 브라우저에서 **재생하며 오버레이를 실시간으로** 봅니다. 데드존·경로 가중치 등 **튜닝 노브를 돌리면 추론 없이 좌표만 다시 계산**되어 즉시 반영됩니다(검출 캐시 재사용). 검출 박스·궤적·크롭 창·데드존·중심선·타깃 마커를 개별 토글할 수 있고, 현재 튜닝 그대로 **오버레이를 구운 영상**을 내려받을 수도 있습니다.
+- **Crop Video**: 추론 없이 세로 클립만 만듭니다 — 업로드한 **crop.json 좌표를 따라** 컷하거나, **화면 중앙 고정**으로 컷합니다.
+
+객체 추적(ByteTrack 박스·ID·궤적) 오버레이는 Crop JSON/Draw 탭의 검출 설정에서 함께 켤 수 있습니다.
+
+### 모델 비교 (Models 페이지 안)
+비교할 모델 다중선택 → 신뢰도·매칭 IoU·이미지 크기 → 라벨된 이미지 **9~27장 선택** → 실행. 결과: 모델별 지표 카드(P/R/F1, TP/FP/FN, "Best F1" 배지), P/R/F1 막대차트, **이미지별 박스 오버레이**(GT=녹색 점선, 모델별 색상 실선).
 
 ### 전역 작업 인디케이터
 업로드·영상추출·오토라벨링·내보내기 등 오래 걸리는 작업의 진행률을 우상단 패널 하나로 통합 표시합니다. 단계별 진행바, **실행 중 작업 취소**, 완료 시 토스트·데이터 새로고침, 새로고침 후 재연결(SSE), 작업 중 페이지 이탈 방지.
@@ -200,12 +206,15 @@ YOLO 모델을 실제로 쓰려면 늘 같은 반복 작업이 필요합니다 �
 
 > ⚠️ **이미지는 어디서 빌드하든 항상 윈도우(`linux/amd64`) 기준으로 만들어져야 합니다.** 빌드하는 컴퓨터는 맥일 수도, 윈도우일 수도 있지만 **실행 대상은 언제나 윈도우 GPU PC**이기 때문입니다. `build.sh`는 이 플랫폼을 `linux/amd64`로 **하드코딩**해 어떤 호스트에서 돌려도 항상 윈도우용 이미지가 나오도록 강제합니다 — 그래서 맥(arm64)에서 빌드해도 안전합니다. (직접 `docker build`로 굽지 말고 반드시 `build.sh`를 쓰세요. 맨 아래 수동 방법을 쓰더라도 `--platform linux/amd64`를 반드시 붙여야 합니다.)
 
+> ⚠️ **백엔드 이미지 빌드에는 GitHub 토큰이 필요합니다.** 크롭 좌표 계산에 쓰는 [adaptive-crop](https://github.com/Jh0-0y/adaptive-crop)이 비공개 저장소라, 빌드 중 pip이 그걸 받아와야 합니다. 토큰은 `--secret`으로 넘깁니다 — **설치 URL에 박으면 안 됩니다**(pip이 `.dist-info/direct_url.json`에 URL을 그대로 기록해서 이미지에 토큰이 남습니다). 필요한 권한은 그 저장소에 대한 읽기(fine-grained PAT의 Contents: Read)뿐입니다.
+
 ```bash
 # 1) GHCR 로그인 (최초 1회) — PAT 는 write:packages 권한 필요
 echo <GITHUB_TOKEN> | docker login ghcr.io -u jh0-0y --password-stdin
 
 # 2) 빌드 + 푸시 (한 방에) — 호스트가 맥이든 윈도우든 결과는 항상 linux/amd64 이미지
-TAG=v1.2.3 scripts/build.sh   # 버전 태그 지정 (생략 시 latest)
+#    GH_PAT: adaptive-crop 저장소 읽기 권한이 있는 토큰
+GH_PAT=<GITHUB_TOKEN> TAG=v1.2.3 scripts/build.sh   # 버전 태그 지정 (생략 시 latest)
 ```
 - 플랫폼은 `build.sh` 안에서 `--platform linux/amd64`로 **고정**됩니다 — 맥(arm64)에서 빌드해도 윈도우용 이미지가 나옵니다. *(맥 등 non-amd64 호스트의 첫 빌드는 에뮬레이션이라 다소 느림)*
 - 만들어지는 이미지: `ghcr.io/jh0-0y/yvt-backend:${TAG}` 와 `ghcr.io/jh0-0y/yvt-frontend:${TAG}`.
@@ -215,11 +224,13 @@ TAG=v1.2.3 scripts/build.sh   # 버전 태그 지정 (생략 시 latest)
 <details>
 <summary>build.sh 없이 수동으로 빌드·푸시하려면 (⚠️ --platform 필수)</summary>
 
-`--platform linux/amd64`를 빠뜨리면 맥에서는 arm64 이미지가 나와 윈도우 서버에서 실행되지 않습니다.
+`--platform linux/amd64`를 빠뜨리면 맥에서는 arm64 이미지가 나와 윈도우 서버에서 실행되지 않습니다. 백엔드는 `--secret id=gh_pat`도 빠뜨리면 안 됩니다(비공개 adaptive-crop 설치 실패).
 
 ```bash
-docker buildx build --platform linux/amd64 -f docker/backend.Dockerfile  -t ghcr.io/jh0-0y/yvt-backend:v1.2.3  --push .
-docker buildx build --platform linux/amd64 -f docker/frontend.Dockerfile -t ghcr.io/jh0-0y/yvt-frontend:v1.2.3 --push .
+GH_PAT=<GITHUB_TOKEN> docker buildx build --platform linux/amd64 --secret id=gh_pat,env=GH_PAT \
+  -f docker/backend.Dockerfile  -t ghcr.io/jh0-0y/yvt-backend:v1.2.3  --push .
+docker buildx build --platform linux/amd64 \
+  -f docker/frontend.Dockerfile -t ghcr.io/jh0-0y/yvt-frontend:v1.2.3 --push .
 ```
 </details>
 
@@ -266,6 +277,7 @@ cd backend && uv sync && cd ../frontend && npm install && cd ..
 ```
 - 백엔드 `http://localhost:8010` · 프론트 `http://localhost:5173` (프론트가 API를 8010으로 프록시)
 - 가속: 맥=MPS, 그 외=CUDA, 없으면 CPU 자동.
+- 크롭 좌표 계산은 비공개 저장소의 [adaptive-crop](https://github.com/Jh0-0y/adaptive-crop) 패키지를 씁니다. `uv sync`가 이걸 git에서 받아오므로 GitHub 인증이 되어 있어야 합니다(SSH 키로 clone 중이라면 `git config --global url."git@github.com:".insteadOf "https://github.com/"` 한 줄이면 됩니다).
 
 <details>
 <summary>따로 실행하려면</summary>
@@ -334,7 +346,9 @@ cd backend && uv run pytest
 
 **프론트엔드**: React 19 · TypeScript · Vite · Mantine(UI) · TanStack Query · Zustand · React Router · Konva(라벨 캔버스) · Recharts(차트).
 
-**백엔드**: Python 3.12 · FastAPI · SQLModel(SQLite) · Ultralytics(YOLO) · PyTorch · SSE(진행 스트리밍) · uv(패키지).
+**백엔드**: Python 3.12 · FastAPI · SQLModel(SQLite) · Ultralytics(YOLO) · PyTorch · SSE(진행 스트리밍) · uv(패키지) · [adaptive-crop](https://github.com/Jh0-0y/adaptive-crop)(세로 크롭 좌표 계산).
+
+**크롭 파이프라인은 외부 라이브러리다.** 공·선수를 추적해 세로 크롭 X 좌표를 내는 계산은 이 저장소에 없고 `adaptive-crop` 패키지가 한다 — 운영 CropWorker와 **같은 코드로 같은 좌표**를 내야 여기서 맞춘 튜닝을 믿을 수 있기 때문이다. 툴킷이 갖는 것은 그 좌표를 화면에 그리고(`domain/crop_render.py`·`liveOverlay.ts`) 파일로 내보내는 부분, 그리고 둘을 잇는 얇은 어댑터(`ml/crop.py`)뿐이다. 자세한 경계·업그레이드 절차는 [docs/crop-pipeline.md](docs/crop-pipeline.md).
 
 **계층 경계 (백엔드 대원칙)**:
 > **API·services = 비즈니스·상태·결정·DB / workers = 순수 계산(별도 프로세스, torch·CUDA는 여기서만) / ml·domain = 순수 함수(프로세스·DB 모름).**
@@ -344,7 +358,7 @@ cd backend && uv run pytest
 - 장시간 작업은 **파일 기반 IPC**: 진행상황은 `progress.jsonl` tail을 SSE로 스트리밍, 취소는 `CANCEL` 센티넬 파일.
 - 모든 HTTP 경로는 `/api/v1/...` (인프라 프로브 `GET /api/health`만 예외).
 
-자세한 구조·컨벤션은 [backend/CLAUDE.md](backend/CLAUDE.md) 참고.
+- 크롭 좌표 계산만 외부 패키지(`adaptive_crop`)에 있고, 워커·API는 그것을 부르기만 한다 — 계층 경계는 동일하게 적용된다(패키지 import도 워커/함수 안 lazy import).
 
 ---
 
@@ -379,7 +393,6 @@ DATA_DIR/
 
 ## 9. 참고 문서
 
-- [AGENTS.md](AGENTS.md) — 에이전트 진입점·기능→문서 라우팅.
-- [backend/CLAUDE.md](backend/CLAUDE.md) — 백엔드 아키텍처·계층 경계·API 컨벤션·주의할 커플링.
-- [backend/agents/](backend/agents/) — 기능별 요구사항·처리 흐름·엣지케이스 문서.
+- [docs/crop-pipeline.md](docs/crop-pipeline.md) — 크롭 파이프라인과 `adaptive-crop` 패키지의 경계, 어댑터 규칙, 튜닝 노브, 패키지 업그레이드 절차.
+- [adaptive-crop README](https://github.com/Jh0-0y/adaptive-crop) — 크롭 좌표 계산 알고리즘·API·튜닝 필드 전체 목록(비공개 저장소).
 - API 문서: 백엔드 실행 후 `http://<host>/docs`(Swagger UI) 또는 `/openapi.json` (FastAPI 자동 생성). 모든 리소스 경로는 `/api/v1/...` 프리픽스를 가집니다.
