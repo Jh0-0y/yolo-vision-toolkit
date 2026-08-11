@@ -158,7 +158,7 @@ YOLO 모델을 실제로 쓰려면 늘 같은 반복 작업이 필요합니다 �
 - **표**: 이름 · 출처 배지(Official/Uploaded/Trained) · 클래스 수 · 등록일. 행 메뉴에서 `.pt` 다운로드·이름변경·삭제.
 
 ### Crop (크롭 랩) — 데이터셋을 건드리지 않는 플레이그라운드
-가로 영상에서 **세로 9:16 크롭 창이 따라갈 X 좌표**를 뽑고, 그 결과를 눈으로 확인하는 페이지입니다(DB에 아무것도 안 씀). 산출물은 임시 저장되어 **1시간 후 자동 삭제**됩니다. 좌표 계산은 [adaptive-crop](https://github.com/Jh0-0y/adaptive-crop) 패키지가 하며, `ball` 클래스가 있는 모델(스포츠 영상)이 필요합니다 → [docs/crop-pipeline.md](docs/crop-pipeline.md).
+가로 영상에서 **세로 9:16 크롭 창이 따라갈 X 좌표**를 뽑고, 그 결과를 눈으로 확인하는 페이지입니다(DB에 아무것도 안 씀). 산출물은 임시 저장되어 **1시간 후 자동 삭제**됩니다. 좌표 계산은 [adaptive-crop](https://github.com/Jh0-0y/adaptive-crop) 패키지가 하며, `ball` 클래스가 있는 모델(스포츠 영상)이 필요합니다.
 
 세 탭으로 나뉩니다.
 
@@ -348,7 +348,7 @@ cd backend && uv run pytest
 
 **백엔드**: Python 3.12 · FastAPI · SQLModel(SQLite) · Ultralytics(YOLO) · PyTorch · SSE(진행 스트리밍) · uv(패키지) · [adaptive-crop](https://github.com/Jh0-0y/adaptive-crop)(세로 크롭 좌표 계산).
 
-**크롭 파이프라인은 외부 라이브러리다.** 공·선수를 추적해 세로 크롭 X 좌표를 내는 계산은 이 저장소에 없고 `adaptive-crop` 패키지가 한다 — 운영 CropWorker와 **같은 코드로 같은 좌표**를 내야 여기서 맞춘 튜닝을 믿을 수 있기 때문이다. 툴킷이 갖는 것은 그 좌표를 화면에 그리고(`domain/crop_render.py`·`liveOverlay.ts`) 파일로 내보내는 부분, 그리고 둘을 잇는 얇은 어댑터(`ml/crop.py`)뿐이다. 자세한 경계·업그레이드 절차는 [docs/crop-pipeline.md](docs/crop-pipeline.md).
+**크롭 파이프라인은 외부 라이브러리다.** 공·선수를 추적해 세로 크롭 X 좌표를 내는 계산은 이 저장소에 없고 `adaptive-crop` 패키지가 한다 — 운영 CropWorker와 **같은 코드로 같은 좌표**를 내야 여기서 맞춘 튜닝을 믿을 수 있기 때문이다. 툴킷이 갖는 것은 그 좌표를 화면에 그리고(`domain/crop_render.py`·`liveOverlay.ts`) 파일로 내보내는 부분, 그리고 둘을 잇는 얇은 어댑터(`ml/crop.py`)뿐이다.
 
 **계층 경계 (백엔드 대원칙)**:
 > **API·services = 비즈니스·상태·결정·DB / workers = 순수 계산(별도 프로세스, torch·CUDA는 여기서만) / ml·domain = 순수 함수(프로세스·DB 모름).**
@@ -393,6 +393,5 @@ DATA_DIR/
 
 ## 9. 참고 문서
 
-- [docs/crop-pipeline.md](docs/crop-pipeline.md) — 크롭 파이프라인과 `adaptive-crop` 패키지의 경계, 어댑터 규칙, 튜닝 노브, 패키지 업그레이드 절차.
 - [adaptive-crop README](https://github.com/Jh0-0y/adaptive-crop) — 크롭 좌표 계산 알고리즘·API·튜닝 필드 전체 목록(비공개 저장소).
 - API 문서: 백엔드 실행 후 `http://<host>/docs`(Swagger UI) 또는 `/openapi.json` (FastAPI 자동 생성). 모든 리소스 경로는 `/api/v1/...` 프리픽스를 가집니다.
