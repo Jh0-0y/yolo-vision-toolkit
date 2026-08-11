@@ -23,13 +23,19 @@ COPY backend/pyproject.toml ./
 # 주입하고 설정 파일은 같은 레이어에서 지운다:
 #   GH_PAT=... docker buildx build --secret id=gh_pat,env=GH_PAT .
 # (fine-grained PAT 의 Contents: Read 권한이면 충분하다)
+#
+# --break-system-packages: Ubuntu 24.04 의 시스템 파이썬은 PEP 668 로 "외부 관리"
+# 표시가 붙어 있어 이 플래그 없이는 설치가 거부된다(exit 2). 컨테이너라 보호할
+# 배포판 파이썬 환경이 따로 없고, 베이스의 torch 도 같은 site-packages 에 있어서
+# 여기 설치해야 uv 가 그 torch 를 이미 있는 것으로 인식한다 — 안 그러면 CUDA 휠을
+# 통째로 다시 받는다.
 RUN --mount=type=secret,id=gh_pat \
     if [ -f /run/secrets/gh_pat ]; then \
       git config --global \
         url."https://x-access-token:$(cat /run/secrets/gh_pat)@github.com/".insteadOf \
         "https://github.com/"; \
     fi && \
-    uv pip install --system -r pyproject.toml && \
+    uv pip install --system --break-system-packages -r pyproject.toml && \
     rm -f /root/.gitconfig
 
 COPY backend/ ./
