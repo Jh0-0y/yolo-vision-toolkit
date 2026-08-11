@@ -8,7 +8,7 @@ resolution-markers = [
 
 [[package]]
 name = "adaptive-crop"
-version = "0.1.0"
+version = "0.0.1"
 source = { git = "https://github.com/Jh0-0y/adaptive-crop?rev=0.0.1-rc1-20260811#f5d0c3f00081018a99a664556cbd4ac2b1a64992" }
 dependencies = [
     { name = "lap" },
