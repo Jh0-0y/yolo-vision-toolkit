@@ -226,12 +226,15 @@ export default function CropDrawMode({ projectId, models }: Props) {
 
   useEffect(() => {
     if (!result) return
+    let stopped = false
     let raf = 0
-    const loop = () => {
-      raf = requestAnimationFrame(loop)
-      const video = videoRef.current
+    let vfc = 0
+    let synced: HTMLVideoElement | null = null // rVFC를 건 video (지원 시)
+
+    /** 화면에 표시 중인 프레임의 시각(ms) 기준으로 오버레이를 다시 그린다. */
+    const paint = (ms: number) => {
       const canvas = canvasRef.current
-      if (!video || !canvas) return
+      if (!canvas) return
       const cw = canvas.clientWidth
       const ch = canvas.clientHeight
       if (!cw || !ch) return
@@ -253,7 +256,7 @@ export default function CropDrawMode({ projectId, models }: Props) {
         canvasH: ch,
         sourceW: st.result.source_width,
         sourceH: st.result.source_height,
-        ms: video.currentTime * 1000,
+        ms,
         detections: st.result.detections,
         detOffsets: st.detOffsets,
         plan: st.plan,
@@ -261,8 +264,36 @@ export default function CropDrawMode({ projectId, models }: Props) {
         deadZoneWidth: st.deadZoneWidth,
       })
     }
-    raf = requestAnimationFrame(loop)
-    return () => cancelAnimationFrame(raf)
+
+    // 재생 중에는 requestVideoFrameCallback으로 그린다. 콜백이 주는 mediaTime은
+    // "지금 화면에 올라간 그 프레임"의 시각이라, currentTime 폴링과 달리 오버레이가
+    // 한 프레임 뒤처지지 않는다 (빠른 공 기준 수십 px 오차의 원인).
+    const onFrame: VideoFrameRequestCallback = (_now, meta) => {
+      if (stopped || !synced) return
+      paint(meta.mediaTime * 1000)
+      vfc = synced.requestVideoFrameCallback(onFrame)
+    }
+
+    // rAF는 (a) video 마운트 대기, (b) rVFC 미지원 폴백, (c) 일시정지·탐색·리사이즈
+    // 중 갱신을 맡는다. 재생 중 rVFC가 그리고 있을 때는 중복으로 그리지 않는다.
+    const tick = () => {
+      if (stopped) return
+      raf = requestAnimationFrame(tick)
+      const video = videoRef.current
+      if (!video) return
+      if (!synced && 'requestVideoFrameCallback' in video) {
+        synced = video
+        vfc = video.requestVideoFrameCallback(onFrame)
+      }
+      if (!synced || video.paused || video.seeking) paint(video.currentTime * 1000)
+    }
+    raf = requestAnimationFrame(tick)
+
+    return () => {
+      stopped = true
+      cancelAnimationFrame(raf)
+      if (synced && vfc) synced.cancelVideoFrameCallback(vfc)
+    }
   }, [result])
 
   const error = job.error || loadError
