@@ -192,7 +192,7 @@ YOLO 모델을 실제로 쓰려면 늘 같은 반복 작업이 필요합니다 �
 
 #### 사전 준비 (서버, 1회)
 1. **Docker Desktop** 설치 → Settings에서 **WSL2 기반 엔진** 활성화.
-2. 최신 **NVIDIA 드라이버** 설치.
+2. 최신 **NVIDIA 드라이버** 설치. *(백엔드 이미지는 CUDA 12.6 런타임 기준입니다. CUDA 12.x는 마이너 버전 호환이라 12.x를 지원하는 드라이버면 대체로 동작하지만, 드라이버가 오래됐다면 갱신하세요.)*
 3. GPU 인식 확인:
    ```bash
    docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi

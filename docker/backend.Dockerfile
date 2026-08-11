@@ -1,6 +1,11 @@
 # CUDA runtime base — also runs fine on CPU-only hosts.
 # Torch/CUDA already included; uv only adds the remaining deps.
-FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+#
+# 태그를 고를 때 파이썬 버전을 먼저 본다. pytorch 공식 이미지는 2.8.0 이하가 conda
+# 기반 Python 3.11, **2.10.0부터 system Python 3.12**다. 이 프로젝트는 3.12 기준이고
+# (backend/pyproject.toml의 requires-python) 의존성 중 adaptive-crop이 >=3.12를
+# 강제하므로, 3.11 베이스에서는 설치 자체가 거부된다.
+FROM pytorch/pytorch:2.10.0-cuda12.6-cudnn9-runtime
 
 # OpenCV runtime libs required by ultralytics + ffmpeg for H.264 video encoding
 # (the Test page's object-tracking output is transcoded to browser-playable H.264).
