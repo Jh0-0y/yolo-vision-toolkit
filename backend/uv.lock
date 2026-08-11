@@ -9,7 +9,7 @@ resolution-markers = [
 [[package]]
 name = "adaptive-crop"
 version = "0.1.0"
-source = { git = "https://github.com/Jh0-0y/adaptive-crop?rev=v0.1.0#e9ba3ae7d0461210ffa27e5b4d958ff080030211" }
+source = { git = "https://github.com/Jh0-0y/adaptive-crop?rev=0.0.1-rc1-20260811#f5d0c3f00081018a99a664556cbd4ac2b1a64992" }
 dependencies = [
     { name = "lap" },
     { name = "numpy" },
@@ -1235,7 +1235,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "adaptive-crop", git = "https://github.com/Jh0-0y/adaptive-crop?rev=v0.1.0" },
+    { name = "adaptive-crop", git = "https://github.com/Jh0-0y/adaptive-crop?rev=0.0.1-rc1-20260811" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "lap", specifier = ">=0.5.12" },
     { name = "numpy", specifier = ">=1.26" },

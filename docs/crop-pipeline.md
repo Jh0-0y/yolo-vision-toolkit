@@ -87,7 +87,7 @@ UI(`TuningPanel.tsx`) → `overrides` JSON → `resolve_clip_config` → `ClipPl
 비공개 저장소라 git 인증이 필요하다. 버전은 `backend/pyproject.toml`에 태그로 고정한다:
 
 ```toml
-"adaptive-crop @ git+https://github.com/Jh0-0y/adaptive-crop@v0.1.0",
+"adaptive-crop @ git+https://github.com/Jh0-0y/adaptive-crop@0.0.1-rc1-20260811",
 ```
 
 - **로컬**: SSH 키로 clone 중이면 한 번만 `git config --global url."git@github.com:".insteadOf "https://github.com/"`
