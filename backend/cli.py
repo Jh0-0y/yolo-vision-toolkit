@@ -11,6 +11,7 @@ import argparse
 import json
 from pathlib import Path
 
+from app.core.config import resolve_device
 from app.ml.labeling import LabelJobConfig, run_labeling
 
 
@@ -37,7 +38,7 @@ def main() -> None:
             out_dir=Path(args.out),
             conf=args.conf,
             iou_wbf=args.iou_wbf,
-            device=args.device,
+            device=resolve_device(args.device),
             batch_size=args.batch,
             imgsz=args.imgsz,
         )

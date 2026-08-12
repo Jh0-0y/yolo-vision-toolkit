@@ -48,7 +48,7 @@ class LabelJobConfig:
     model_names: list[str] | None = None
     conf: float = 0.4
     iou_wbf: float = 0.55
-    device: str | None = None
+    device: str = "cpu"  # 이미 해석된 장치 문자열 — "auto" 를 넘기지 않는다
     batch_size: int = 16
     imgsz: int = 640
     # restrict to these file names (None = all images in images_dir)
@@ -105,9 +105,7 @@ def run_labeling(
 ) -> LabelJobResult:
     from ultralytics import YOLO
 
-    from app.core.config import resolve_device
-
-    device = resolve_device(cfg.device)
+    device = cfg.device
 
     models: list[tuple[str, "YOLO", dict[int, int]]] = []
     registry = _load_registry(cfg.out_dir)

@@ -2,6 +2,8 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from lib import device as device_lib
+
 # repo root (config.py lives at backend/app/core/config.py) — anchored here so
 # the default data dir does not depend on the process CWD
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -102,16 +104,13 @@ settings = Settings()
 
 
 def resolve_device(device: str | None = None) -> str:
-    dev = device or settings.device
-    if dev != "auto":
-        return dev
-    import torch
+    """요청 디바이스를 실제 장치 문자열로 해석한다.
 
-    if torch.cuda.is_available():
-        return "0"
-    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-        return "mps"
-    return "cpu"
+    앱이 하는 일은 **기본값을 채우는 것**뿐이고(요청에 값이 없으면 `settings.device`),
+    "auto" 를 무엇으로 볼지는 `lib.device` 가 정한다. 순수 계산 쪽은 이 함수를
+    부르지 않는다 — 이미 해석된 문자열을 인자로 받는다.
+    """
+    return device_lib.resolve(device or settings.device)
 
 
 def _cpu_brand() -> str:

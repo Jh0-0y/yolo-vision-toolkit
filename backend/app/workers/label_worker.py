@@ -11,6 +11,7 @@ from infra import jobs
 
 
 def run_label_job(job_id: str, cfg_dict: dict, jobs_dir: str) -> dict:
+    from app.core.config import resolve_device
     from app.ml.labeling import JobCancelled, LabelJobConfig, run_labeling
 
     job = jobs.at(Path(jobs_dir), job_id).ensure()
@@ -23,7 +24,8 @@ def run_label_job(job_id: str, cfg_dict: dict, jobs_dir: str) -> dict:
         out_dir=Path(cfg_dict["out_dir"]),
         conf=cfg_dict.get("conf", 0.4),
         iou_wbf=cfg_dict.get("iou_wbf", 0.55),
-        device=cfg_dict.get("device"),
+        # 순수 계산 쪽은 설정을 모른다 — 여기서 해석해 넘긴다
+        device=resolve_device(cfg_dict.get("device")),
         batch_size=cfg_dict.get("batch_size", 16),
         imgsz=cfg_dict.get("imgsz", 640),
         image_names=cfg_dict.get("image_names"),
