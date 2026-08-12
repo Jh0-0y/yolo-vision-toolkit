@@ -122,7 +122,7 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                 plan_from_detections,
             )
 
-            from app.ml import crop as crop_adapter
+            from lib.crop import plan as crop_adapter
 
             # 검출은 공 재현율에 맞춘 설정(낮은 conf, 큰 imgsz)으로 따로 한 패스 돈다.
             # 영상 규격은 위에서 이미 읽었으므로 다시 열지 않고 그대로 넘긴다(출처 하나).

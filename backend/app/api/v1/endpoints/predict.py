@@ -475,7 +475,7 @@ async def live_plan(detect_id: str, body: dict = Body(default={})):
         from adaptive_crop import plan_from_detections
         from adaptive_crop.detect.io import load_detections
 
-        from app.ml import crop as crop_adapter
+        from lib.crop import plan as crop_adapter
 
         detected = load_detections(json.loads(det_path.read_text(encoding="utf-8")))
         video = crop_adapter.video_info_from_meta(

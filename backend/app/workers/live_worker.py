@@ -49,7 +49,7 @@ def run_live(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         from adaptive_crop import build_detector, detect_video, probe_video
         from adaptive_crop.detect.io import dump_detections
 
-        from app.ml import crop as crop_adapter
+        from lib.crop import plan as crop_adapter
 
         # probe geometry / length for progress total + client-side overlay scaling
         vinfo = probe_video(src)
@@ -130,7 +130,7 @@ def run_live_render(job_id: str, cfg: dict, jobs_dir: str) -> dict:
     from adaptive_crop import plan_from_detections
     from adaptive_crop.detect.io import load_detections
 
-    from app.ml import crop as crop_adapter
+    from lib.crop import plan as crop_adapter
 
     job = jobs.at(Path(jobs_dir), job_id)
     progress = job.progress_path

@@ -1,4 +1,4 @@
-"""adaptive-crop 어댑터(app.ml.crop) 검증 — 번역이 맞는지만 본다.
+"""adaptive-crop 어댑터(lib.crop.plan) 검증 — 번역이 맞는지만 본다.
 
 크롭 알고리즘 자체는 라이브러리 쪽 테스트가 담당한다. 여기서 확인하는 것은
 "UI가 보내는 형태"를 라이브러리가 받는 형태로 옮기는 규칙이다.
@@ -7,13 +7,13 @@
 import pytest
 from adaptive_crop import ClipPlanConfig
 
-from app.ml.crop import (
+from lib.crop.geometry import crop_width_for
+from lib.crop.plan import (
     crop_spec_for,
     detector_entries,
     resolve_clip_config,
     video_info_from_meta,
 )
-from lib.crop.geometry import crop_width_for
 
 # ---------------------------------------------------------------------------
 # 튜닝 오버라이드

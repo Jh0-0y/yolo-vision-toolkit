@@ -1,7 +1,7 @@
 """crop.json 계약 스키마(camelCase) 직렬화 검증.
 
 좌표·규격은 adaptive-crop이 내고(`CropResult.to_dict`), 이 툴킷은 계약이 요구하는
-id 컬럼을 얹어 파일로 쓴다(`app.ml.crop.crop_plan_json`). 여기서 보는 것은 그
+id 컬럼을 얹어 파일로 쓴다(`lib.crop.plan.crop_plan_json`). 여기서 보는 것은 그
 합성 결과다: schemaVersion·id 컬럼(플레이스홀더)·source/crop 중첩·
 keyframes(videoOffsetMs/targetType UPPER)·summary(camelCase).
 samples/debug는 내부 확장이라 include_internal=True에서만 담긴다.
@@ -11,7 +11,7 @@ import json
 
 from adaptive_crop import CropSpec, Keyframe, TargetSample, build_crop_result
 
-from app.ml.crop import crop_plan_json
+from lib.crop.plan import crop_plan_json
 
 WINDOW = CropSpec(608, 1080).resolve(1920, 1080)
 

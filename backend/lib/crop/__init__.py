@@ -4,6 +4,7 @@
 `adaptive_crop` 패키지가 한다. 이 패키지는 그 결과(100ms 격자 샘플)를 받아
 프레임마다 조회하고, 화면에 표시하거나 실제로 잘라낸다.
 
+    plan       adaptive_crop 어댑터 — 튜닝 해석 · CropSpec · crop.json
     geometry   시각 -> 중심 X · 창 폭 · 왼쪽 끝        (그리지 않음)
     window     크롭 창 사각형                          (표시용)
     hud        중심선 · 데드존 · 타입 라벨              (튜닝용)
@@ -18,7 +19,7 @@
         crop.window.draw(frame, cx, crop_w, w, h)
 """
 
-from lib.crop import cut, geometry, highlight, hud, window
+from lib.crop import cut, geometry, highlight, hud, plan, window
 from lib.crop.geometry import Trajectory
 
-__all__ = ["Trajectory", "cut", "geometry", "highlight", "hud", "window"]
+__all__ = ["Trajectory", "cut", "geometry", "highlight", "hud", "plan", "window"]
