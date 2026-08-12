@@ -84,8 +84,8 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         match_for_ap,
         match_frame,
     )
-    from app.ml.labeling import IMAGE_EXTS
     from app.ml.predict import PredictConfig, predict_image
+    from lib.formats import IMAGE_EXTS
     from lib.labels.io import read_label_file
     from lib.labels.registry import normalize
 

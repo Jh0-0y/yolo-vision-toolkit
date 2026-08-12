@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from app.core.config import settings
-from app.domain.thumbnails import get_thumbnail
+from lib.media.thumbnails import get_thumbnail
 
 router = APIRouter(prefix="/files", tags=["files"])
 

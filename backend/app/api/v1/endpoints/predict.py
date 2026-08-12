@@ -22,8 +22,6 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.core.config import settings
 from app.db import get_session
-from app.domain.video import VIDEO_EXTS
-from app.ml.labeling import IMAGE_EXTS
 from app.models import ModelEntry
 from app.schemas.predict import PredictResponse, ResidentModel, TestJobStart
 from app.services.infer_manager import infer_manager
@@ -34,6 +32,7 @@ from app.services.test_jobs import (
     test_job_manager,
 )
 from infra import jobs
+from lib.formats import IMAGE_EXTS, VIDEO_EXTS
 
 router = APIRouter(prefix="/predict", tags=["predict"])
 

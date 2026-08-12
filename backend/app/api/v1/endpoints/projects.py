@@ -16,8 +16,6 @@ from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.db import get_session
-from app.domain.tiling import TilingParams, clip_boxes_to_tile, tile_grid, tile_stem
-from app.ml.labeling import IMAGE_EXTS
 from app.models import ModelEntry, Project, TrainRun, iso_utc
 from app.schemas.project import (
     DeleteImagesIn,
@@ -26,6 +24,7 @@ from app.schemas.project import (
     ReviewedIn,
     StatsOut,
 )
+from lib.formats import IMAGE_EXTS
 from lib.labels.io import atomic_write_text, read_label_file, write_label_file
 from lib.labels.registry import ClassRegistry
 from lib.labels.store import (
@@ -36,6 +35,7 @@ from lib.labels.store import (
     set_reviewed,
     write_reviewed,
 )
+from lib.media.tiling import TilingParams, clip_boxes_to_tile, tile_grid, tile_stem
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 

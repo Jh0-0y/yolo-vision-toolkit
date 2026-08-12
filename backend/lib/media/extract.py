@@ -13,9 +13,7 @@ from pathlib import Path
 
 import cv2
 
-from app.domain.tiling import TilingParams, tile_grid, tile_stem
-
-VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
+from lib.media.tiling import TilingParams, tile_grid, tile_stem
 
 
 @dataclass

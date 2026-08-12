@@ -18,10 +18,9 @@ from pathlib import Path
 from typing import Callable
 
 from app.ml.ensemble import Detection, FusedBox, merge_detections
+from lib.formats import IMAGE_EXTS
 from lib.labels.io import atomic_write_text, write_box_meta, write_label_file
 from lib.labels.registry import ClassRegistry, normalize
-
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 
 # Models run at this confidence floor so weighted-box fusion sees low-confidence
 # candidates; the user's `cfg.conf` is then applied as a hard filter on the

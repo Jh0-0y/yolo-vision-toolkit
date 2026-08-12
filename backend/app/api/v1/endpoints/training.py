@@ -22,11 +22,11 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.core.config import settings
 from app.db import get_session, session_scope
-from app.ml.labeling import IMAGE_EXTS
 from app.models import ModelEntry, Project, TrainRun, iso_utc
 from app.schemas.training import DatasetPatch, RegisterIn, RunCreate, RunOut
 from app.services.train_manager import train_manager
 from infra import jobs
+from lib.formats import IMAGE_EXTS
 from lib.labels.io import atomic_write_text
 
 router = APIRouter(prefix="/training", tags=["training"])

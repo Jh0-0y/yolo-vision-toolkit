@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from app.ml.labeling import IMAGE_EXTS
+from lib.formats import IMAGE_EXTS
 from lib.labels.io import atomic_write_text, write_data_yaml
 
 # export kind -> human "type" token used in the name/filename

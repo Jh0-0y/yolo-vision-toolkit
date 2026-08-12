@@ -18,7 +18,9 @@ backend/
 ├── cli.py                   웹 UI 없이 폴더 단위 오토라벨링
 ├── scripts/                 일회성 마이그레이션 스크립트
 ├── lib/                     순수 기능 — app·infra 를 import 하지 않는다
+│   ├── formats.py           IMAGE_EXTS · VIDEO_EXTS — 어디서든 읽는 공용 어휘
 │   ├── video/               probe(규격 읽기) · to_h264 · require_ffmpeg
+│   ├── media/               extract(프레임 추출) · tiling · thumbnails
 │   ├── crop/                geometry(좌표 조회) · window · hud · highlight · cut
 │   └── labels/              io(라벨 파일) · store(프로젝트 라벨) · classes · registry
 ├── infra/                   시스템 배관 — 기능이 아니다

@@ -1,10 +1,10 @@
-"""Unit tests for 이미지 타일링 (domain/tiling).
+"""Unit tests for 이미지 타일링 (lib/media/tiling).
 
 1920×1080 기준 스펙 검증: 640/480 → 4×2 = 8타일, 겹침 160px, 마지막 타일 클램프,
 라벨 자동 처리(min_visibility 클립/삭제, 기본 0.6).
 """
 
-from app.domain.tiling import (
+from lib.media.tiling import (
     TilingParams,
     clip_boxes_to_tile,
     tile_grid,

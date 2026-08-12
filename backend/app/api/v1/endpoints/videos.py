@@ -14,11 +14,12 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.core.config import settings
 from app.db import get_session
-from app.domain.tiling import TilingParams
-from app.domain.video import VIDEO_EXTS, ExtractParams
 from app.models import Project
 from app.services.video_manager import task_dir, video_manager
 from infra import jobs
+from lib.formats import VIDEO_EXTS
+from lib.media.extract import ExtractParams
+from lib.media.tiling import TilingParams
 
 router = APIRouter(prefix="/projects/{project_id}/videos", tags=["videos"])
 
