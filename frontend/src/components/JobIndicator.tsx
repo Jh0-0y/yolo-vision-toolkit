@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react'
-import { CloseButton, Group, Paper, Progress, Text } from '@mantine/core'
-import { IconFileExport, IconFileZip, IconMovie, IconWand } from '@tabler/icons-react'
+import { Anchor, CloseButton, Group, Paper, Progress, Text } from '@mantine/core'
+import { IconCrop, IconFileExport, IconFileZip, IconMovie, IconWand } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import { useJobStore, type Job } from '../stores/jobStore'
 
 // Mounted once at the app root: renders every background job's phased progress
@@ -42,27 +43,36 @@ export default function JobIndicator() {
           queryClient.invalidateQueries({ queryKey: ['images', j.projectId] })
           queryClient.invalidateQueries({ queryKey: ['stats', j.projectId] })
           notifications.show({ message: `Auto-labeling done: ${j.title}`, color: 'green' })
+        } else if (j.kind === 'crop') {
+          queryClient.invalidateQueries({ queryKey: ['crop-runs', j.projectId] })
+          notifications.show({ message: `Crop done: ${j.title} — saved to Crop Runs`, color: 'green' })
         } else {
           // export: finished export now appears in the list; download on the Exports page
           queryClient.invalidateQueries({ queryKey: ['exports', j.projectId] })
           queryClient.invalidateQueries({ queryKey: ['train-datasets'] })
           notifications.show({ message: `Export ready: ${j.title} — download on the Exports page`, color: 'green' })
         }
-        setTimeout(() => dismiss(id), 4000)
+        // a sticky card is the handle to its own result — the user closes it
+        if (!j.sticky) setTimeout(() => dismiss(id), 4000)
       } else if (j.status === 'error') {
         const sig = `error:${id}`
         if (handled.current.has(sig)) continue
         handled.current.add(sig)
         notifications.show({ message: j.error ?? 'Job failed', color: 'red' })
-        setTimeout(() => dismiss(id), 5000)
+        if (!j.sticky) setTimeout(() => dismiss(id), 5000)
       }
     }
   }, [jobs, order, dismiss, queryClient])
 
-  // block full-page reload / tab close while ANY job is running — reload would
-  // drop the progress UI (server jobs do reconnect via SSE, but a refresh still
-  // makes the bar flash out), so guarding outright is the better UX.
-  const blocking = order.some((id) => jobs[id]?.status === 'running')
+  // Only guard reloads that would actually lose work: the browser owns the
+  // bytes during a client upload. Pure server jobs re-attach on their own
+  // (crop runs from the server's own list, the rest from localStorage), so
+  // blocking those would be a lie about what a refresh costs.
+  const blocking = order.some((id) => {
+    const j = jobs[id]
+    if (!j || j.status !== 'running') return false
+    return j.kind === 'dataset' || (j.kind === 'video' && j.phaseIndex === 0)
+  })
   useEffect(() => {
     if (!blocking) return
     const handler = (e: BeforeUnloadEvent) => {
@@ -126,6 +136,8 @@ function JobCard({
             <IconWand size={16} stroke={1.5} />
           ) : job.kind === 'export' ? (
             <IconFileExport size={16} stroke={1.5} />
+          ) : job.kind === 'crop' ? (
+            <IconCrop size={16} stroke={1.5} />
           ) : (
             <IconFileZip size={16} stroke={1.5} />
           )}
@@ -154,6 +166,11 @@ function JobCard({
                 cur?.detail ? ` — ${cur.detail}` : cur && !cur.indeterminate ? ` (${cur.value}%)` : ''
               }`}
       </Text>
+      {!running && job.resultHref && (
+        <Anchor component={Link} to={job.resultHref} size="xs" mt={4} display="block" onClick={onDismiss}>
+          {job.resultLabel ?? 'Open result'}
+        </Anchor>
+      )}
     </Paper>
   )
 }

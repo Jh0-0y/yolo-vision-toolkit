@@ -1,83 +1,43 @@
-import { useEffect, useRef, useState } from 'react'
-import {
-  startAnnotate,
-  subscribeAnnotateEvents,
-  type AnnotateProgress,
-} from '../../api/client'
+import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { startAnnotate } from '../../api/client'
+import { useJobStore } from '../../stores/jobStore'
 
 // Inference image size — usually matched to the model's training size (multiples of 32).
 export const IMGSZ_OPTIONS = ['640', '960', '1280', '1600', '1920']
 export const DEFAULT_IMGSZ = 1280
 
-export const PHASE_LABEL: Record<string, string> = {
-  start: 'Preparing…',
-  crop_analyze: 'Analyzing crop trajectory…',
-  annotate: 'Rendering video…',
-  encoding: 'Encoding video…',
-  done: 'Done',
-}
-
 type StartOpts = Parameters<typeof startAnnotate>[0]
 
-/** Shared hook for the annotate job lifecycle (drop → start → SSE progress → done/error/cancel).
- *  Reused by both Lab pages (Crop Result / Crop Draw Tool). */
-export function useAnnotateJob() {
-  const [fileName, setFileName] = useState<string | null>(null)
-  const [jobId, setJobId] = useState<string | null>(null)
-  const [progress, setProgress] = useState<AnnotateProgress | null>(null)
-  const [running, setRunning] = useState(false)
+/** 크롭 잡을 **시작**만 하는 훅.
+ *
+ * 진행률과 결과는 이 화면이 들고 있지 않다 — 시작하자마자 `jobStore` 에 넘기면
+ * 전역 카드가 진행률을 보여주고, 산출물은 서버의 크롭 런 목록에 남는다. 그래서
+ * 탭을 옮기든 새로고침하든 잡이 사라지지 않는다. */
+export function useAnnotateJob(projectId: string) {
+  const trackCrop = useJobStore((s) => s.trackCrop)
+  const queryClient = useQueryClient()
+  const [starting, setStarting] = useState(false)
+  const [startedName, setStartedName] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [done, setDone] = useState(false)
-  const unsub = useRef<(() => void) | null>(null)
-
-  useEffect(() => () => unsub.current?.(), [])
 
   // Generic launcher — takes a display name and a starter that returns { job_id }.
   async function launch(name: string, starter: () => Promise<{ job_id: string }>) {
-    unsub.current?.()
-    setFileName(name)
     setError(null)
-    setDone(false)
-    setJobId(null)
-    setProgress({ phase: 'start' })
-    setRunning(true)
+    setStarting(true)
     try {
       const { job_id } = await starter()
-      setJobId(job_id)
-      unsub.current = subscribeAnnotateEvents(job_id, (ev) => {
-        setProgress(ev)
-        if (ev.phase === 'done') {
-          setDone(true)
-          setRunning(false)
-        } else if (ev.phase === 'error') {
-          setError(ev.msg || 'Tracking failed')
-          setRunning(false)
-        } else if (ev.phase === 'cancelled') {
-          setRunning(false)
-        }
-      })
+      trackCrop(projectId, job_id, name)
+      setStartedName(name)
+      queryClient.invalidateQueries({ queryKey: ['crop-runs', projectId] })
     } catch (e) {
       setError((e as Error).message)
-      setRunning(false)
+    } finally {
+      setStarting(false)
     }
   }
 
   const run = (opts: StartOpts) => launch(opts.file.name, () => startAnnotate(opts))
 
-  function reset() {
-    unsub.current?.()
-    setFileName(null)
-    setJobId(null)
-    setProgress(null)
-    setRunning(false)
-    setError(null)
-    setDone(false)
-  }
-
-  const pct =
-    progress?.total && progress.done != null
-      ? Math.round((progress.done / progress.total) * 100)
-      : 0
-
-  return { fileName, jobId, progress, running, error, done, pct, setError, run, launch, reset }
+  return { starting, startedName, error, setError, run, launch }
 }

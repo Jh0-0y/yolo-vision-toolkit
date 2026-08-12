@@ -5,6 +5,7 @@ import ClassesPage from './pages/ClassesPage'
 import DatasetPage from './pages/DatasetPage'
 import ExportsPage from './pages/ExportsPage'
 import CropPage from './pages/CropPage'
+import CropRunsPage from './pages/CropRunsPage'
 import HomePage from './pages/HomePage'
 import LabelEditorPage from './pages/LabelEditorPage'
 import ModelsPage from './pages/ModelsPage'
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="history/:runId" element={<TrainRunDetailPage />} />
         <Route path="models" element={<ModelsPage />} />
         <Route path="lab/crop" element={<CropPage />} />
+        <Route path="lab/crops" element={<CropRunsPage />} />
         {/* 옛 경로 → 통합 Crop 페이지로 리다이렉트 (링크 깨짐 방지) */}
         <Route path="lab/crop-result" element={<Navigate to="../lab/crop" replace />} />
         <Route path="lab/crop-draw" element={<Navigate to="../lab/crop" replace />} />

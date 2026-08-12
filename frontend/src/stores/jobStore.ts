@@ -1,13 +1,17 @@
 import { create } from 'zustand'
 import {
   cancelAutoLabel,
+  cancelCropRun,
   cancelExport,
   cancelVideo,
+  listCropRuns,
+  subscribeCropEvents,
   subscribeExportEvents,
   subscribeJobEvents,
   subscribeVideoEvents,
   uploadTrainDataset,
   uploadVideo,
+  type CropProgressEvent,
   type ExportProgressEvent,
   type JobProgressEvent,
   type VideoProgressEvent,
@@ -18,13 +22,17 @@ import {
 // across page navigation (the XHR / SSE live here, not in a page component) and
 // server jobs reconnect after a full reload.
 //
-// Two shapes:
+// Three shapes:
 //  - client uploads (dataset zip, video file): a browser-driven upload phase,
 //    then a server phase. Survives in-app nav; a full reload aborts the upload.
 //  - server jobs (video-extract after upload, auto-label, export): pure SSE with
 //    a progress.jsonl the server replays from the start, so they survive a full
 //    reload too — we persist the job ref and re-subscribe on hydrate.
-export type JobKind = 'dataset' | 'video' | 'autolabel' | 'export'
+//  - crop runs: the same SSE, but the server ALSO lists what is running
+//    (GET /crops derives status from progress.jsonl), so nothing is persisted
+//    here — `syncCropRuns` asks the server instead. That survives a different
+//    browser, a different machine, and a cleared localStorage.
+export type JobKind = 'dataset' | 'video' | 'autolabel' | 'export' | 'crop'
 export type JobStatus = 'running' | 'done' | 'error'
 
 export interface JobPhase {
@@ -45,8 +53,13 @@ export interface Job {
   phases: JobPhase[]
   error?: string
   seq: number // bumps once on done, so consumers react exactly once
-  refId?: string // server-side id: videoId / autolabel jobId / exportId
+  refId?: string // server-side id: videoId / autolabel jobId / exportId / cropId
   resultToken?: string // dataset jobs: the created "upload:{id}" token
+  // The card IS the handle to this job's result, so it waits for the user
+  // instead of auto-closing after a few seconds.
+  sticky?: boolean
+  resultHref?: string // in-app route to the finished result
+  resultLabel?: string
 }
 
 interface JobStore {
@@ -56,9 +69,11 @@ interface JobStore {
   startVideoJob: (projectId: string, file: File, params: VideoUploadParams) => string
   trackAutoLabel: (projectId: string, jobId: string, title: string) => string
   trackExport: (projectId: string, exportId: string, title: string) => string
+  trackCrop: (projectId: string, cropId: string, title: string) => string
   cancel: (id: string) => void
   dismiss: (id: string) => void
   hydrate: () => void
+  syncCropRuns: (projectId: string) => Promise<void>
 }
 
 // abort handles for in-flight client uploads (not part of serializable state)
@@ -167,6 +182,34 @@ function mapExport(ev: ExportProgressEvent): Mapped {
   if (ev.phase === 'done') return { phase, status: 'done' }
   if (ev.phase === 'error' || ev.phase === 'cancelled')
     return { phase, status: 'error', error: ev.msg || 'Cancelled' }
+  return { phase, status: 'running' }
+}
+
+const CROP_PHASE_DETAIL: Record<string, string> = {
+  start: 'Preparing…',
+  crop_analyze: 'Analyzing crop trajectory…',
+  annotate: 'Rendering video…',
+  encoding: 'Encoding video…',
+}
+
+function mapCrop(ev: CropProgressEvent): Mapped {
+  const pct =
+    ev.total && ev.done != null
+      ? Math.min(100, Math.round((ev.done / ev.total) * 100))
+      : ev.phase === 'done'
+        ? 100
+        : 0
+  const phase: JobPhase = {
+    key: 'crop',
+    label: 'Crop',
+    // only the render pass reports done/total; the rest have no measurable length
+    indeterminate: ev.phase !== 'annotate' && ev.phase !== 'done',
+    value: pct,
+    detail: ev.phase === 'done' ? 'Saved' : (CROP_PHASE_DETAIL[ev.phase] ?? 'Working…'),
+  }
+  if (ev.phase === 'done') return { phase, status: 'done' }
+  if (ev.phase === 'error' || ev.phase === 'cancelled')
+    return { phase, status: 'error', error: ev.msg || 'Crop job stopped' }
   return { phase, status: 'running' }
 }
 
@@ -344,6 +387,44 @@ export const useJobStore = create<JobStore>((set, get) => {
       return id
     },
 
+    trackCrop: (projectId, cropId, title) => {
+      const id = newId()
+      addJob({
+        id,
+        kind: 'crop',
+        title,
+        projectId,
+        status: 'running',
+        phaseIndex: 0,
+        phases: [{ key: 'crop', label: 'Crop', indeterminate: true, value: 0, detail: 'Preparing…' }],
+        seq: 0,
+        refId: cropId,
+        // nothing in localStorage: syncCropRuns re-finds this from the server
+        sticky: true,
+        resultHref: `/projects/${projectId}/lab/crops`,
+        resultLabel: 'Open Crop Runs',
+      })
+      attachServerJob(id, (onEv, onErr) => subscribeCropEvents(projectId, cropId, onEv, onErr), mapCrop)
+      return id
+    },
+
+    syncCropRuns: async (projectId) => {
+      let runs
+      try {
+        runs = await listCropRuns(projectId)
+      } catch {
+        return // offline / project gone — the Crop Runs page reports it properly
+      }
+      const { jobs, order, trackCrop } = get()
+      const tracked = new Set(
+        order.map((i) => jobs[i]).filter((j) => j?.kind === 'crop').map((j) => j.refId),
+      )
+      for (const run of runs) {
+        if (run.status !== 'running' || tracked.has(run.id)) continue
+        trackCrop(projectId, run.id, run.name)
+      }
+    },
+
     cancel: (id) => {
       const j = get().jobs[id]
       if (!j || j.status !== 'running') return
@@ -352,6 +433,7 @@ export const useJobStore = create<JobStore>((set, get) => {
         if (j.kind === 'video') cancelVideo(j.projectId, j.refId).catch(() => {})
         else if (j.kind === 'autolabel') cancelAutoLabel(j.refId).catch(() => {})
         else if (j.kind === 'export') cancelExport(j.projectId, j.refId).catch(() => {})
+        else if (j.kind === 'crop') cancelCropRun(j.projectId, j.refId).catch(() => {})
       }
       // reflect immediately; the SSE / upload rejection will also settle it
       patch(id, (jj) => ({ ...jj, status: 'error', error: 'Cancelled' }))

@@ -65,7 +65,7 @@ export default function CropPage() {
           <CropDrawMode projectId={projectId} models={models} />
         </Tabs.Panel>
         <Tabs.Panel value="video" pt="md">
-          <CropVideoMode />
+          <CropVideoMode projectId={projectId} />
         </Tabs.Panel>
       </Tabs>
     </Stack>

@@ -24,13 +24,14 @@ DATA_DIR/                     # 기본 <repo>/data — git 이 추적하지 않�
 │   ├── videos/               # 업로드 영상
 │   ├── labels/               # 이미지별 YOLO 라벨 (.txt)
 │   ├── exports/              # 내보낸 데이터셋 zip
+│   ├── crops/{crop_id}/      # 크롭 랩 산출물 — run.json · crop.json · out.mp4(만료됨)
 │   ├── models/ · runs/       # 프로젝트 스코프 모델·학습 결과
 │   ├── classes.json          # 클래스 레지스트리
 │   ├── reviewed.json         # 검수 완료 플래그
 │   └── project.json
 ├── jobs/{job_id}/            # progress.jsonl · CANCEL
 ├── datasets/                 # 업로드된 학습 데이터셋 전개
-└── test/                     # Crop 랩 임시 산출물 — DB에 기록하지 않고 자동 정리된다
+└── test/                     # 라이브 프리뷰·모델비교 캐시 — 순수 임시물, 자동 정리된다
 ```
 
 ## 경로는 반드시 `settings` 에서 파생시킨다
@@ -50,7 +51,7 @@ pt = settings.model_dir(project_id, model_id) / "model.pt"   # ○
 
 | DB (SQLite) | 파일 |
 |---|---|
-| `Project` · `ModelEntry` · `Job` · `TrainRun` — 이 넷뿐 | 라벨 · 클래스 · 검수 플래그 · 내보내기 · 잡 진행상황 |
+| `Project` · `ModelEntry` · `Job` · `TrainRun` — 이 넷뿐 | 라벨 · 클래스 · 검수 플래그 · 내보내기 · 크롭 런 · 잡 진행상황 |
 
 - 새 상태를 만들 때 **먼저 파일로 둘 수 있는지 본다.** 지금까지 DB는 "목록에 뜨고 상태가 바뀌는 것"만 담았다.
 - DB 접근은 **API 프로세스에서만** 한다. 워커는 값을 받아 값을 돌려준다 → [계층 경계](conventions/layer-boundaries.md)
@@ -60,3 +61,18 @@ pt = settings.model_dir(project_id, model_id) / "model.pt"   # ○
 
 - **`data/` 아래 실제 데이터를 검증용으로 지우거나 덮어쓰지 않는다.** git 이 추적하지 않아 되돌릴 수 없다.
 - 임시 산출물이 필요하면 `settings.test_dir` 아래에 만든다(자동 정리 대상).
+
+## 크롭 런
+
+`projects/{project_id}/crops/{crop_id}/` 하나가 랩에서 돌린 크롭 잡 하나다. `crop_id` 는 **잡 id 로도 그대로** 쓰므로 진행률은 `jobs/{crop_id}/progress.jsonl` 에 있다.
+
+| 파일 | 수명 |
+|---|---|
+| `run.json` | 영구. 잡을 **던지기 전에** 쓴다 — 실패한 시도도 목록에 남는다 |
+| `crop.json` | 영구. 커버리지 요약도 이 안에 있어 따로 저장하지 않는다 |
+| `out.mp4` | `VIDEO_TTL_SEC` 뒤 삭제. `run.json` 에 `video_expired` 만 남는다 |
+| `source.*` | 잡이 끝나면 삭제 |
+
+**상태는 저장하지 않는다.** `running` / `done` / `error` 는 `progress.jsonl` 의 마지막 이벤트에서 파생한다 → [잡과 진행률](conventions/jobs-and-progress.md)
+
+자리·정리·상태 파생은 전부 `services/crop_runs.py` 하나가 안다. 경로를 직접 조립하지 않는다.

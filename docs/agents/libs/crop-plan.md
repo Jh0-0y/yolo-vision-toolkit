@@ -26,6 +26,9 @@ related:
 | `workers/live_worker.run_live_render` | 같은 좌표를 preview.mp4 위에 굽는다 | `False` — 미리보기 |
 | `workers/annotate_worker` | `detect_video` → `plan_from_detections` → crop.json + 영상 | **`True`** — 파일로 나가는 결과라 규칙 위반이면 실패시킨다 |
 
+annotate 워커의 산출물은 임시 폴더가 아니라 **프로젝트 아래 크롭 런**(`projects/{pid}/crops/{crop_id}/`)에
+바로 쓴다 — 자리와 수명은 [데이터 배치](../data-layout.md) 를 본다.
+
 **파일로 나가는 경로는 `validate=True` 를 유지한다.** 미리보기용으로 껐다고 해서 산출 경로까지 끄지 않는다.
 
 ## 튜닝 노브
@@ -43,6 +46,7 @@ related:
 
 - 이 파일은 **외부 계약 스키마**라 키가 camelCase 다. 백엔드 DTO 의 snake_case 규칙이 여기엔 적용되지 않는다.
 - `samples`·`debug` 는 스펙 외 내부 확장이라 파일에는 담기지 않는다. 라이브 오버레이용 `/plan` 응답에만 `include_internal=True` 로 담긴다.
+- `summary` 는 이 파일 안에 있다. 크롭 런 목록은 여기서 읽으므로 **커버리지를 따로 저장하지 않는다.**
 
 ## 알려진 차이
 

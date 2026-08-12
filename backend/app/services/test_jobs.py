@@ -6,6 +6,10 @@ kill a multi-minute job mid-run. So this manager owns its OWN
 `ProcessPoolExecutor(max_workers=1)` with no reaper and no DB bookkeeping
 (Test is a playground). Progress is streamed via `jobs_dir/{job_id}/progress.jsonl`
 (reuses `read_progress` + the existing SSE endpoints pattern).
+
+annotate 잡의 **산출물**은 여기가 아니라 프로젝트 아래 크롭 런 디렉터리에 남는다
+— 자리와 정리는 `services/crop_runs.py` 를 본다. 여기 sweep 은 compare·live 처럼
+`test_dir` 에만 남는 순수 임시물용이다.
 """
 
 from __future__ import annotations
@@ -20,8 +24,7 @@ from pathlib import Path
 from app.core.config import settings
 from infra import jobs
 
-# annotated videos live here transiently; swept after this age (playground = no
-# permanent storage).
+# compare 업로드와 live 프리뷰 캐시는 순수 임시물 — 이 나이를 넘으면 지운다.
 ANNOTATE_TTL_SEC = 3600
 
 
@@ -36,11 +39,6 @@ def _sweep_dir(root: Path, ttl_sec: int) -> None:
                 shutil.rmtree(d, ignore_errors=True)
         except OSError:
             continue
-
-
-def sweep_old_annotations() -> None:
-    """Delete annotate work dirs older than the TTL so nothing accumulates."""
-    _sweep_dir(settings.test_dir / "annotate", ANNOTATE_TTL_SEC)
 
 
 def sweep_old_compare() -> None:

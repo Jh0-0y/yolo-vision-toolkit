@@ -8,6 +8,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     classes,
+    crops,
     exports,
     files,
     jobs,
@@ -35,6 +36,7 @@ for _router in (
     predict.router,
     jobs.router,
     exports.router,
+    crops.router,
     training.router,
     files.router,
     system.router,

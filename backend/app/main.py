@@ -14,9 +14,11 @@ async def lifespan(app: FastAPI):
     from app.services.train_manager import train_manager
 
     train_manager.reconcile_on_boot()
-    from app.services.test_jobs import sweep_old_annotations
+    from app.services import crop_runs
 
-    sweep_old_annotations()  # clear stale annotated videos from a previous run
+    # 크롭 워커 풀은 이 프로세스가 소유한다 — 재시작하면 돌던 런은 죽었다.
+    crop_runs.reconcile_on_boot()
+    crop_runs.sweep_expired()
     yield
     # release the warm inference worker (and its framework context) on shutdown
     from app.services.infer_manager import infer_manager

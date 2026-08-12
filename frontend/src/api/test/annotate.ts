@@ -1,18 +1,14 @@
-// 영상 오버레이 렌더와 크롭 컷.
+// 영상 오버레이 렌더와 크롭 컷 — **시작**만 여기 있다.
+//
+// 시작하고 나면 그 잡은 크롭 런이 된다. 진행률·결과·삭제는 전부 `crops.ts` 를
+// 쓴다 (`job_id` 가 곧 crop run id 다).
 
-import { BASE, api } from '../http'
+import { api } from '../http'
 import type { PredictParams } from './predict'
 
 
 export interface TestJobStart {
   job_id: string
-}
-
-export interface AnnotateProgress {
-  phase: 'start' | 'crop_analyze' | 'annotate' | 'encoding' | 'done' | 'error' | 'cancelled'
-  done?: number
-  total?: number
-  msg?: string
 }
 
 // "none" = JSON만 | "label" = 오버레이 그리기 | "video" = 세로 크롭 컷
@@ -111,29 +107,16 @@ export function startAnnotate(opts: {
 
 // Crop-cut: make a vertical crop clip with NO inference.
 //   mode="json"  → follow an uploaded crop.json / mode="center" → fixed centre.
-// Reuses the annotate events/result endpoints (same job dir).
 export function startCropCut(opts: {
   file: File
+  projectId: string
   mode: 'json' | 'center'
   cropJson?: File
 }): Promise<TestJobStart> {
   const form = new FormData()
   form.append('file', opts.file)
+  form.append('project_id', opts.projectId)
   form.append('mode', opts.mode)
   if (opts.cropJson) form.append('crop_json', opts.cropJson)
   return api.upload<TestJobStart>('/predict/crop-cut', form)
 }
-
-export function subscribeAnnotateEvents(jobId: string, onEvent: (ev: AnnotateProgress) => void): () => void {
-  const source = new EventSource(`${BASE}/predict/annotate/${jobId}/events`)
-  source.addEventListener('progress', (e) => {
-    const ev = JSON.parse((e as MessageEvent).data) as AnnotateProgress
-    onEvent(ev)
-    if (ev.phase === 'done' || ev.phase === 'error' || ev.phase === 'cancelled') source.close()
-  })
-  return () => source.close()
-}
-
-export const annotateResultUrl = (jobId: string) => `${BASE}/predict/annotate/${jobId}/result`
-
-export const annotateCropUrl = (jobId: string) => `${BASE}/predict/annotate/${jobId}/crop`

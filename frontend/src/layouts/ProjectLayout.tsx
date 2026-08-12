@@ -16,6 +16,7 @@ import {
   IconFolder,
   IconHistory,
   IconLibraryPhoto,
+  IconListDetails,
   IconPackageExport,
   IconPlayerPlay,
   IconTag,
@@ -23,8 +24,10 @@ import {
   IconUpload,
 } from '@tabler/icons-react'
 import { useQuery } from '@tanstack/react-query'
+import { useEffect } from 'react'
 import { Link, Outlet, useLocation, useParams } from 'react-router-dom'
 import { api, type DeviceInfo, type Health, type ProjectOut } from '../api/client'
+import { useJobStore } from '../stores/jobStore'
 
 const NAV_SECTIONS = [
   {
@@ -48,6 +51,7 @@ const NAV_SECTIONS = [
     label: 'Lab',
     items: [
       { to: 'lab/crop', label: 'Crop', icon: IconCrop },
+      { to: 'lab/crops', label: 'Crop Runs', icon: IconListDetails },
     ],
   },
 ]
@@ -55,6 +59,14 @@ const NAV_SECTIONS = [
 export default function ProjectLayout() {
   const { projectId } = useParams()
   const location = useLocation()
+  const syncCropRuns = useJobStore((s) => s.syncCropRuns)
+
+  // 크롭 런의 진행 상태는 서버가 안다 — 프로젝트에 들어올 때마다 물어보고
+  // 아직 도는 것이 있으면 전역 잡 카드에 다시 붙인다. 브라우저에 남겨 둔
+  // 기억에 기대지 않으므로 다른 기기·시크릿창에서 열어도 똑같이 보인다.
+  useEffect(() => {
+    if (projectId) void syncCropRuns(projectId)
+  }, [projectId, syncCropRuns])
 
   const project = useQuery({
     queryKey: ['project', projectId],
@@ -114,7 +126,8 @@ export default function ProjectLayout() {
                     to={to}
                     label={item.label}
                     leftSection={<item.icon size={18} stroke={1.6} />}
-                    active={location.pathname.startsWith(to)}
+                    // `lab/crop` 이 `lab/crops` 의 접두사라 경로 경계까지 봐야 한다
+                    active={location.pathname === to || location.pathname.startsWith(`${to}/`)}
                     style={{ borderRadius: 6 }}
                   />
                 )
