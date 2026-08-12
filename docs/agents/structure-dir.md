@@ -37,7 +37,7 @@ backend/
     ├── schemas/             요청·응답 DTO (리소스별 파일)
     ├── api/v1/
     │   ├── router.py        라우터 배선 단 한 곳
-    │   └── endpoints/       리소스별 HTTP 경로
+    │   └── endpoints/       리소스별 HTTP 경로 (predict/ 는 계열별 패키지)
     ├── services/            *_manager.py — 잡 수명·프로세스 풀·DB 갱신
     ├── workers/             *_worker.py · train_runner.py — 별도 프로세스 엔트리
     └── tests/               test_*.py
@@ -66,6 +66,7 @@ data/                        런타임 데이터 (git 추적 안 함) → data-l
 | 여러 기능이 쓰는 순수 계산 | `lib/<주제>/` | `tests/test_lib_<주제>.py` — `app/`·`infra/` import 금지 |
 | 잡·프로세스 배관 | `infra/<주제>/` | `tests/test_infra_<주제>.py` — `app/` import 금지 |
 | HTTP 엔드포인트 | `app/api/v1/endpoints/<리소스>.py` | `router.py` 의 import 목록과 include 목록 **양쪽**에 등록 |
+| 리소스 하나가 300줄을 넘을 때 | `endpoints/<리소스>/` 패키지 + `__init__.py` 에서 묶기 | `router.py` 는 그대로 — 밖에서 보면 모듈 하나다 |
 | 요청·응답 DTO | `app/schemas/<리소스>.py` | 엔드포인트의 `response_model` 로 연결 |
 | DB 테이블 | `app/models/__init__.py` (새 파일 만들지 않는다) | — |
 | 별도 프로세스 엔트리 | `app/workers/<도메인>_worker.py` | 모듈 최상단 함수 + picklable 인자 |
@@ -87,8 +88,8 @@ data/                        런타임 데이터 (git 추적 안 함) → data-l
 **두 폴더 모두 비워져 사라졌다** — 순수 계산은 전부 `lib/` 의 주제 패키지에 있고, `app/` 에는
 HTTP·DB·프로세스 관리만 남았다.
 
-다음 단계는 `app/` 안이다. `api/v1/endpoints/predict.py`(603줄)에 네 가지 잡 계열이 섞여 있고,
-워커가 아직 계산과 조립을 함께 들고 있다.
+다음 단계는 워커다. `run_annotate` 가 아직 설정 파싱·검출·렌더 루프 3분기를 한 함수에
+들고 있다 — 계산은 `lib/` 로 빠졌지만 조립이 아직 안 갈렸다.
 
 무관한 변경에서 나머지를 함께 옮기지 않는다. 새 코드는 새 자리에 두고, 기존 코드는 그 기능을
 손볼 때 같이 옮긴다.

@@ -83,8 +83,12 @@ def normalize_data_yaml(yaml_path: Path) -> dict:
     }
 
 
-def _find_data_yaml(dest: Path) -> Path | None:
-    """루트, 없으면 한 단계 아래에서 data.yaml(또는 .yml)을 찾는다."""
+def find_data_yaml(dest: Path) -> Path | None:
+    """루트, 없으면 한 단계 아래에서 data.yaml(또는 .yml)을 찾는다. 없으면 None.
+
+    zip 이 폴더 하나를 감싸고 있는 형태가 흔해서 두 단계를 본다. 압축 해제된
+    YOLO 데이터셋이면 무엇이든 쓰므로 학습 전용은 아니다 — 모델 비교의 테스트셋도
+    이 함수를 쓴다."""
     for candidate in ("data.yaml", "data.yml"):
         if (dest / candidate).exists():
             return dest / candidate
@@ -114,7 +118,7 @@ def extract_zip(
         except zipfile.BadZipFile as e:
             raise DatasetError("Corrupted zip file") from e
 
-        yaml_path = _find_data_yaml(dest)
+        yaml_path = find_data_yaml(dest)
         if yaml_path is None:
             raise DatasetError(
                 "data.yaml not found in the zip (a YOLO-format dataset is required)"

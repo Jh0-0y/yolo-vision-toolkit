@@ -26,6 +26,23 @@ router = APIRouter(prefix="/projects/{project_id}/videos", tags=["videos"])
 - 프로젝트에 속한 리소스는 `/projects/{project_id}/<리소스>` 아래 둔다.
 - `tags` 는 리소스명 하나.
 
+## 리소스가 커지면 패키지로 나눈다
+
+한 리소스가 300줄을 넘고 안에서 **서로 관계없는 계열**로 갈리면 파일 대신 패키지를 만든다.
+`predict/` 가 그 예다 — 단발추론 · annotate · live · compare 넷이 `/predict` 아래 함께 산다.
+
+```
+endpoints/predict/
+├── __init__.py    router = APIRouter(); 하위 라우터를 include 만 한다
+├── common.py      계열들이 함께 쓰는 조각
+└── <계열>.py       router = APIRouter(prefix="/predict", tags=["predict"])
+```
+
+- **접두사·태그는 하위 라우터가 든다.** 묶는 `__init__.py` 의 라우터는 비워 둔다 —
+  `@router.post("")` 처럼 경로가 빈 라우트는 접두사 없는 라우터에 실을 수 없다.
+- `router.py` 는 **그대로 둔다.** 밖에서 보면 여전히 모듈 하나이므로 등록도 한 줄이다.
+- 나눠도 **경로와 OpenAPI 태그는 그대로여야 한다.** 나눈 뒤 `/openapi.json` 을 비교해 확인한다.
+
 ## 규칙
 
 - 응답은 **`schemas/` 의 DTO** 를 `response_model` 로 지정한다. dict 를 그대로 돌려주지 않는다.
