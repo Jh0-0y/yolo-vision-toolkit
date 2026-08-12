@@ -7,13 +7,13 @@
 import pytest
 from adaptive_crop import ClipPlanConfig
 
-from lib.crop.geometry import crop_width_for
 from app.ml.crop import (
     crop_spec_for,
     detector_entries,
     resolve_clip_config,
     video_info_from_meta,
 )
+from lib.crop.geometry import crop_width_for
 
 # ---------------------------------------------------------------------------
 # 튜닝 오버라이드

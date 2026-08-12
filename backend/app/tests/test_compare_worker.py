@@ -14,8 +14,8 @@ import yaml
 from PIL import Image
 
 from app.core.config import settings
-from app.domain.yolo_io import write_label_file
 from app.workers.compare_worker import run_compare
+from lib.labels.io import write_label_file
 
 
 class _Arr:

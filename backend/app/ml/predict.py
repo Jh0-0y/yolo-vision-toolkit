@@ -15,9 +15,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.domain.class_registry import ClassRegistry
 from app.ml.ensemble import Detection, merge_detections
 from app.ml.labeling import DETECT_FLOOR
+from lib.labels.registry import ClassRegistry
 
 
 @dataclass

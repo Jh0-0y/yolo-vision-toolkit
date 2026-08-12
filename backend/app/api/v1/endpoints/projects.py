@@ -12,6 +12,13 @@ from pathlib import Path
 import yaml
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
+from sqlmodel import Session, select
+
+from app.core.config import settings
+from app.db import get_session
+from app.domain.tiling import TilingParams, clip_boxes_to_tile, tile_grid, tile_stem
+from app.ml.labeling import IMAGE_EXTS
+from app.models import ModelEntry, Project, TrainRun, iso_utc
 from app.schemas.project import (
     DeleteImagesIn,
     ProjectCreate,
@@ -19,12 +26,9 @@ from app.schemas.project import (
     ReviewedIn,
     StatsOut,
 )
-from sqlmodel import Session, select
-
-from app.core.config import settings
-from app.domain.class_registry import ClassRegistry
-from app.ml.labeling import IMAGE_EXTS
-from app.domain.labels import (
+from lib.labels.io import atomic_write_text, read_label_file, write_label_file
+from lib.labels.registry import ClassRegistry
+from lib.labels.store import (
     label_classes,
     label_path,
     read_boxes,
@@ -32,10 +36,6 @@ from app.domain.labels import (
     set_reviewed,
     write_reviewed,
 )
-from app.domain.tiling import TilingParams, clip_boxes_to_tile, tile_grid, tile_stem
-from app.domain.yolo_io import atomic_write_text, read_label_file, write_label_file
-from app.db import get_session
-from app.models import ModelEntry, Project, TrainRun, iso_utc
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 

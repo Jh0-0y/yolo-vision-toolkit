@@ -5,19 +5,19 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
-from app.schemas.class_ import ClassIn
 from sqlmodel import Session
 
 from app.core.config import settings
-from app.domain.classes import (
+from app.db import get_session
+from app.models import Project
+from app.schemas.class_ import ClassIn
+from lib.labels.classes import (
     add_class,
     count_boxes_with_class,
     delete_class,
     read_classes,
     rename_class,
 )
-from app.db import get_session
-from app.models import Project
 
 router = APIRouter(prefix="/projects/{project_id}/classes", tags=["classes"])
 

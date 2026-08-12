@@ -17,9 +17,8 @@ import time
 from concurrent.futures import Future, ProcessPoolExecutor
 from pathlib import Path
 
-from infra import jobs
-
 from app.core.config import settings
+from infra import jobs
 
 # annotated videos live here transiently; swept after this age (playground = no
 # permanent storage).

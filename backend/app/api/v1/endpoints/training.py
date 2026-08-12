@@ -16,19 +16,18 @@ import yaml
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
-from app.schemas.training import DatasetPatch, RegisterIn, RunCreate, RunOut
 from sqlalchemy import or_
-from sse_starlette.sse import EventSourceResponse
 from sqlmodel import Session, select
-
-from infra import jobs
+from sse_starlette.sse import EventSourceResponse
 
 from app.core.config import settings
-from app.ml.labeling import IMAGE_EXTS
-from app.domain.yolo_io import atomic_write_text
 from app.db import get_session, session_scope
-from app.services.train_manager import train_manager
+from app.ml.labeling import IMAGE_EXTS
 from app.models import ModelEntry, Project, TrainRun, iso_utc
+from app.schemas.training import DatasetPatch, RegisterIn, RunCreate, RunOut
+from app.services.train_manager import train_manager
+from infra import jobs
+from lib.labels.io import atomic_write_text
 
 router = APIRouter(prefix="/training", tags=["training"])
 
@@ -630,7 +629,8 @@ def download_weights(run_id: str, which: str, session: Session = Depends(get_ses
 
 @router.post("/runs/{run_id}/register", status_code=201)
 def register_weights(run_id: str, req: RegisterIn, session: Session = Depends(get_session)):
-    from app.api.v1.endpoints.models import _register, _to_out as model_out
+    from app.api.v1.endpoints.models import _register
+    from app.api.v1.endpoints.models import _to_out as model_out
 
     run = session.get(TrainRun, run_id)
     if run is None:

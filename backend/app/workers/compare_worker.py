@@ -76,7 +76,6 @@ def _gather_pairs(dataset_dir: Path, image_exts: set[str]) -> list[tuple[Path, P
 
 def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
     from app.core.config import resolve_device, settings
-    from app.domain.class_registry import normalize
     from app.ml.evaluate import (
         IOU_THRESHOLDS,
         accumulate,
@@ -87,7 +86,8 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
     )
     from app.ml.labeling import IMAGE_EXTS
     from app.ml.predict import PredictConfig, predict_image
-    from app.domain.yolo_io import read_label_file
+    from lib.labels.io import read_label_file
+    from lib.labels.registry import normalize
 
     job = jobs.at(Path(jobs_dir), job_id)
     progress = job.progress_path

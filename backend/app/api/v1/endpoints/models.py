@@ -9,13 +9,13 @@ from datetime import timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
-from app.schemas.model import ModelOut, ModelPatch, OfficialRequest
 from sqlalchemy import or_
 from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.db import get_session
 from app.models import ModelEntry, iso_utc
+from app.schemas.model import ModelOut, ModelPatch, OfficialRequest
 
 router = APIRouter(prefix="/models", tags=["models"])
 

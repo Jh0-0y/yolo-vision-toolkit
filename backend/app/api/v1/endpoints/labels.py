@@ -6,13 +6,13 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
-from app.schemas.label import LabelsIn
 from sqlmodel import Session
 
 from app.core.config import settings
-from app.domain.labels import read_boxes, read_reviewed, write_boxes
 from app.db import get_session
 from app.models import Project
+from app.schemas.label import LabelsIn
+from lib.labels.store import read_boxes, read_reviewed, write_boxes
 
 router = APIRouter(prefix="/projects/{project_id}/labels", tags=["labels"])
 

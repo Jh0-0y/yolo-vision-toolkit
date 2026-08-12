@@ -1,7 +1,7 @@
 import pytest
 import yaml
 
-from app.domain.yolo_io import (
+from lib.labels.io import (
     read_label_file,
     write_data_yaml,
     write_label_file,

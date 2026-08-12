@@ -6,16 +6,15 @@ import asyncio
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
-from app.schemas.job import JobCreate, JobOut
-from sse_starlette.sse import EventSourceResponse
 from sqlmodel import Session, select
-
-from infra import jobs
+from sse_starlette.sse import EventSourceResponse
 
 from app.core.config import settings
 from app.db import get_session, session_scope
-from app.services.label_manager import job_manager
 from app.models import Job, ModelEntry, Project, iso_utc
+from app.schemas.job import JobCreate, JobOut
+from app.services.label_manager import job_manager
+from infra import jobs
 
 router = APIRouter(prefix="", tags=["jobs"])
 

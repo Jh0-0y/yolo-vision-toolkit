@@ -12,13 +12,12 @@ import multiprocessing
 from concurrent.futures import Future, ProcessPoolExecutor
 from datetime import datetime, timezone
 
-from infra import jobs
-
 from app.core.config import settings
-from app.domain.labels import read_reviewed, write_reviewed
 from app.db import session_scope
-from app.workers.label_worker import run_label_job
 from app.models import Job
+from app.workers.label_worker import run_label_job
+from infra import jobs
+from lib.labels.store import read_reviewed, write_reviewed
 
 
 class JobManager:

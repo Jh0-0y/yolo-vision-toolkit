@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.domain.yolo_io import (
+from lib.labels.io import (
     atomic_write_text,
     read_box_meta,
     read_label_file,

@@ -12,10 +12,9 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
-from infra import jobs
-
 from app.core.config import settings
 from app.domain.export_build import ExportCancelled, build_export
+from infra import jobs
 
 
 def task_dir(export_id: str) -> Path:

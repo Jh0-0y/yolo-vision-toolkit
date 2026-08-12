@@ -10,10 +10,9 @@ from __future__ import annotations
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
-from infra import jobs
-
 from app.core.config import settings
 from app.domain.video import ExtractParams, extract_frames
+from infra import jobs
 
 
 def task_dir(video_id: str) -> Path:

@@ -173,7 +173,7 @@ def fake_ball(monkeypatch):
 
 
 def _read_label(out, stem):
-    from app.domain.yolo_io import read_box_meta
+    from lib.labels.io import read_box_meta
 
     label = out / "labels" / f"{stem}.txt"
     lines = [ln for ln in label.read_text().splitlines() if ln.strip()]

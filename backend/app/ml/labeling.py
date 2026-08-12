@@ -17,9 +17,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from app.domain.class_registry import ClassRegistry, normalize
 from app.ml.ensemble import Detection, FusedBox, merge_detections
-from app.domain.yolo_io import atomic_write_text, write_box_meta, write_label_file
+from lib.labels.io import atomic_write_text, write_box_meta, write_label_file
+from lib.labels.registry import ClassRegistry, normalize
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 

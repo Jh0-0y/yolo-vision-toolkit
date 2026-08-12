@@ -9,17 +9,16 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
-from sse_starlette.sse import EventSourceResponse
 from sqlmodel import Session
-
-from infra import jobs
+from sse_starlette.sse import EventSourceResponse
 
 from app.core.config import settings
+from app.db import get_session
 from app.domain.tiling import TilingParams
 from app.domain.video import VIDEO_EXTS, ExtractParams
-from app.db import get_session
-from app.services.video_manager import task_dir, video_manager
 from app.models import Project
+from app.services.video_manager import task_dir, video_manager
+from infra import jobs
 
 router = APIRouter(prefix="/projects/{project_id}/videos", tags=["videos"])
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.domain.yolo_io import atomic_write_text, read_box_meta, write_box_meta
+from lib.labels.io import atomic_write_text, read_box_meta, write_box_meta
 
 
 def _classes_path(pdir: Path) -> Path:

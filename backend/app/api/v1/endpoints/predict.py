@@ -20,8 +20,6 @@ from fastapi.responses import FileResponse
 from sqlmodel import Session
 from sse_starlette.sse import EventSourceResponse
 
-from infra import jobs
-
 from app.core.config import settings
 from app.db import get_session
 from app.domain.video import VIDEO_EXTS
@@ -35,6 +33,7 @@ from app.services.test_jobs import (
     sweep_old_live,
     test_job_manager,
 )
+from infra import jobs
 
 router = APIRouter(prefix="/predict", tags=["predict"])
 
