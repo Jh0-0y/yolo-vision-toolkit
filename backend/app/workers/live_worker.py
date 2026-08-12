@@ -17,7 +17,7 @@ import json
 from pathlib import Path
 
 from infra import jobs
-from lib import video
+from lib import crop, video
 
 
 class _Cancelled(Exception):
@@ -130,7 +130,6 @@ def run_live_render(job_id: str, cfg: dict, jobs_dir: str) -> dict:
     from adaptive_crop import plan_from_detections
     from adaptive_crop.detect.io import load_detections
 
-    from app.domain import crop_render
     from app.ml import crop as crop_adapter
 
     job = jobs.at(Path(jobs_dir), job_id)
@@ -178,13 +177,26 @@ def run_live_render(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         # 좌표는 원본 해상도 기준 — 프리뷰가 다른 크기로 트랜스코딩됐으면 맞춰 스케일
         scale = w / float(vinfo.width or w)
 
-        traj = crop_render.build_trajectory(cropres.samples, vinfo.width)
+        traj = crop.geometry.build_trajectory(cropres.samples, vinfo.width)
         traj = (traj[0], [x * scale for x in traj[1]])
-        types = crop_render.build_types(cropres.samples)
-        debug_lookup = (
-            crop_render.build_debug_lookup(cropres.debug) if cropres.debug else None
-        )
-        crop_w = crop_render.crop_width_for(h, w)
+        types = crop.geometry.build_types(cropres.samples)
+        crop_w = crop.geometry.crop_width_for(h, w)
+
+        # 디버그 bbox 도 프리뷰 해상도로 맞춰 둔다 — 프레임마다 다시 계산하지 않게
+        # 루프 밖에서 한 번만 (ms 에 의존하지 않는 변환이다).
+        debug_lookup = None
+        if cropres.debug:
+            entries = cropres.debug
+            if abs(scale - 1.0) > 1e-6:
+                entries = [
+                    {
+                        "video_offset_ms": e["video_offset_ms"],
+                        "ball_bbox": [v * scale for v in e["ball_bbox"]] if e.get("ball_bbox") else None,
+                        "carrier_bbox": [v * scale for v in e["carrier_bbox"]] if e.get("carrier_bbox") else None,
+                    }
+                    for e in cropres.debug
+                ]
+            debug_lookup = crop.geometry.build_debug_lookup(entries)
         dead_zone_half = cfg_resolved.dead_zone_half * scale
 
         det_ms = [ms for ms, _ in detected]
@@ -268,26 +280,20 @@ def run_live_render(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2, cv2.LINE_AA,
                         )
 
-                if draw_crop_box:
-                    crop_render.draw_window(frame, ms, traj, crop_w, w, h)
-                    crop_render.draw_target_overlay(
-                        frame, ms, traj, types, dead_zone_half, w, h,
+                cx = crop.geometry.center_at(ms, traj)  # 보간은 프레임당 한 번
+                if draw_crop_box and cx is not None:
+                    crop.window.draw(frame, cx, crop_w, w, h)
+                    crop.hud.draw(
+                        frame, cx, w, h,
+                        target_type=crop.geometry.type_at(ms, types),
+                        dead_zone_half=dead_zone_half,
                         show_dead_zone=show_dead_zone,
                         show_center_line=show_center_line,
                     )
                 if debug_lookup is not None:
-                    scaled = crop_render.build_debug_lookup(
-                        [
-                            {
-                                "video_offset_ms": e["video_offset_ms"],
-                                "ball_bbox": [v * scale for v in e["ball_bbox"]] if e.get("ball_bbox") else None,
-                                "carrier_bbox": [v * scale for v in e["carrier_bbox"]] if e.get("carrier_bbox") else None,
-                            }
-                            for e in cropres.debug
-                        ]
-                    ) if abs(scale - 1.0) > 1e-6 else debug_lookup
-                    crop_render.draw_selection_overlay(frame, ms, scaled, w, h)
-                    debug_lookup = scaled  # 스케일 재계산 1회로 제한
+                    crop.highlight.draw(
+                        frame, crop.geometry.debug_at(ms, debug_lookup), w, h
+                    )
 
                 writer.write(frame)
                 idx += 1

@@ -3,7 +3,7 @@ title: adaptive-crop
 scope:
   - backend/app/ml/crop.py
   - backend/app/workers/*.py
-  - backend/app/domain/crop_render.py
+  - backend/lib/crop/**
   - frontend/src/components/lab/**
 applies_to: 크롭 좌표 계산·어댑터·오버레이를 다룰 때
 related:
@@ -24,7 +24,7 @@ related:
 | | adaptive-crop | 툴킷 |
 |---|---|---|
 | 공·선수 검출, 궤적 조립, 크롭 X 좌표 | ✅ | ❌ **사본을 두지 않는다** |
-| 크롭 창·데드존·박스 그리기, 세로 컷 | ❌ | ✅ `domain/crop_render.py` · `liveOverlay.ts` |
+| 크롭 창·데드존·박스 그리기, 세로 컷 | ❌ | ✅ `lib/crop/` · `liveOverlay.ts` |
 | 잡 관리·진행률·취소·파일 저장 | ❌ | ✅ `workers/` · `services/` |
 | 잡 ID·게임 ID 같은 비즈니스 필드 | ❌ | ✅ `crop_plan_json` 이 얹는다 |
 
@@ -37,7 +37,7 @@ related:
 | 함수 | 하는 일 |
 |---|---|
 | `resolve_clip_config(overrides)` | UI 노브 dict → `ClipPlanConfig`. 모르는 키·`None` 은 버린다(라이브러리는 오타에 `TypeError`) |
-| `crop_spec_for(w, h)` | 실제 해상도 → `CropSpec`. 폭은 `crop_render.crop_width_for` 와 **같은 규칙** |
+| `crop_spec_for(w, h)` | 실제 해상도 → `CropSpec`. 폭은 `lib.crop.geometry.crop_width_for` 와 **같은 규칙** |
 | `video_info_from_meta(meta)` | 라이브 세션 `meta.json` → `VideoInfo` |
 | `detector_entries(entries, conf)` | `conf` 기본값 채우기, `merge_iou` → `tile_merge_iou`, **첫 full 엔트리만** `track_ids=True` |
 | `crop_plan_json(result)` | `CropResult` → crop.json 문자열 (계약용 플레이스홀더 id 를 얹는다) |

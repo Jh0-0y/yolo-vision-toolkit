@@ -44,7 +44,12 @@ api/v1/endpoints  →  services  →  workers  ─┐
 
 - `lib/` 가 진행률을 알려야 하면 **콜백으로 받는다** (`emit`·`on_progress`·`cancel_check`).
   그래야 웹 없이 CLI·배치에서 같은 계산을 쓸 수 있다.
-- `lib/` 모듈끼리도 서로 import 하지 않는다 — 연결은 호출자가 데이터를 넘겨 한다.
+- **주제 패키지끼리는 서로 import 하지 않는다** — `lib/crop` 이 `lib/detect` 를 부르지 않고,
+  검출 결과를 **인자로 받는다**. 연결은 호출자(파이프라인)가 한다. 그래서 층을 나눌 필요가 없고
+  순환도 안 생긴다.
+- 한 패키지 **안에서는** 자유롭게 나눈다. `lib/crop/` 은 `geometry` 를 바닥에 두고
+  `window`·`hud`·`highlight`·`cut` 이 그 좌표를 받아 쓴다 — 시각(ms)을 아는 건 `geometry` 뿐이라
+  보간이 프레임당 한 번만 돈다.
 
 | 계층 (`app/` 안) | 담는 것 |
 |---|---|

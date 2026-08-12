@@ -15,7 +15,7 @@ Two independent overlays, each toggled by cfg:
                        "video" — actually cut each frame down to the vertical 9:16
                                  window and output that clean crop clip (no boxes,
                                  no rectangle; object_tracking is ignored).
-    The cut/draw geometry lives in app.domain.crop_render.
+    The cut/draw geometry lives in lib.crop.
 
 cv2.VideoWriter H.264 support is unreliable across OpenCV builds, so we always
 write an mp4v intermediate then transcode to H.264 with ffmpeg. ffmpeg is REQUIRED
@@ -30,7 +30,7 @@ from collections import defaultdict, deque
 from pathlib import Path
 
 from infra import jobs
-from lib import video
+from lib import crop, video
 
 # BGR palette (matches the frontend BoxOverlay hue order closely enough).
 _PALETTE = [
@@ -80,7 +80,6 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
     show_target_highlight = bool(cfg.get("show_target_highlight", False))
     overrides = cfg.get("overrides") or None  # 크롭 튜닝 오버라이드 (dict)
 
-    from app.domain import crop_render  # cv2-only geometry (no torch) — safe here
 
     # crop_source: 추론 없이 컷만 하는 모드 ("json" = 업로드 좌표 따라, "center" = 중앙 고정)
     crop_source = cfg.get("crop_source")
@@ -102,14 +101,14 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
 
         # crop-cut output is narrower (the vertical 9:16 window); the overlay/box
         # outputs keep the source size.
-        crop_w = crop_render.crop_width_for(h, w) if crop_tracking else 0
+        crop_w = crop.geometry.crop_width_for(h, w) if crop_tracking else 0
         out_w, out_h = (crop_w, h) if crop_cut else (w, h)
         writer = cv2.VideoWriter(str(tmp), cv2.VideoWriter_fourcc(*"mp4v"), fps, (out_w, out_h))
 
         jobs.emit(progress, {"phase": "start", "total": total})
 
         # ---- crop trajectory (separate predict pass) ----
-        crop_traj: crop_render.Trajectory | None = None
+        crop_traj: crop.Trajectory | None = None
         crop_types: tuple[list, list] | None = None  # 디버그 HUD 타입 라벨용
         crop_debug: tuple[list, list] | None = None  # 대상 하이라이트 조회 lookup
         dead_zone_half: float | None = None  # 데드존 밴드 반폭 (crop_tracking일 때만)
@@ -151,10 +150,10 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                 config=crop_cfg,
                 collect_debug=show_target_highlight and not crop_json_only,
             )
-            crop_traj = crop_render.build_trajectory(cropres.samples, w)
-            crop_types = crop_render.build_types(cropres.samples)
+            crop_traj = crop.geometry.build_trajectory(cropres.samples, w)
+            crop_types = crop.geometry.build_types(cropres.samples)
             if cropres.debug:
-                crop_debug = crop_render.build_debug_lookup(cropres.debug)
+                crop_debug = crop.geometry.build_debug_lookup(cropres.debug)
             dead_zone_half = crop_cfg.dead_zone_half
             (out.parent / "crop.json").write_text(
                 crop_adapter.crop_plan_json(cropres), encoding="utf-8"
@@ -171,14 +170,18 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
             """그리기 토글에 따라 크롭 박스(+데드존·센터선)·대상 하이라이트를 그린다."""
             if crop_traj is None:
                 return
-            if draw_crop_box:
-                crop_render.draw_window(frame, ms, crop_traj, crop_w, w, h)
-                crop_render.draw_target_overlay(
-                    frame, ms, crop_traj, crop_types, dead_zone_half, w, h,
+            # 보간은 프레임당 한 번 — 그리기 함수는 좌표만 받는다
+            cx = crop.geometry.center_at(ms, crop_traj)
+            if draw_crop_box and cx is not None:
+                crop.window.draw(frame, cx, crop_w, w, h)
+                crop.hud.draw(
+                    frame, cx, w, h,
+                    target_type=crop.geometry.type_at(ms, crop_types) if crop_types else None,
+                    dead_zone_half=dead_zone_half,
                     show_dead_zone=show_dead_zone, show_center_line=show_center_line,
                 )
             if crop_debug is not None:  # 대상 하이라이트 (독립 토글)
-                crop_render.draw_selection_overlay(frame, ms, crop_debug, w, h)
+                crop.highlight.draw(frame, crop.geometry.debug_at(ms, crop_debug), w, h)
 
         idx = 0
         cancelled = False
@@ -195,8 +198,11 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                     ok, frame = cap.read()
                     if not ok:
                         break
+                    ms = idx / fps * 1000.0
                     writer.write(
-                        crop_render.cut_window(frame, idx / fps * 1000.0, crop_traj, crop_w, w)
+                        crop.cut.window(
+                            frame, crop.geometry.center_at(ms, crop_traj), crop_w, w
+                        )
                     )
                     idx += 1
                     if idx % 5 == 0 or idx == total:
@@ -312,8 +318,6 @@ def _run_crop_cut(cfg, src, out, tmp, job, mode: str) -> dict:
     """
     import cv2
 
-    from app.domain import crop_render
-
     progress = job.progress_path
 
     video.require_ffmpeg()
@@ -321,12 +325,12 @@ def _run_crop_cut(cfg, src, out, tmp, job, mode: str) -> dict:
     meta = video.probe(src)
     fps, total, w, h = meta.fps, meta.frame_count, meta.width, meta.height
 
-    crop_w = crop_render.crop_width_for(h, w)
+    crop_w = crop.geometry.crop_width_for(h, w)
     writer = cv2.VideoWriter(str(tmp), cv2.VideoWriter_fourcc(*"mp4v"), fps, (crop_w, h))
     jobs.emit(progress, {"phase": "start", "total": total})
 
     # 궤적: json → 좌표 따라 / center → 빈 궤적(cut_window이 중앙 fallback)
-    traj: crop_render.Trajectory = ([], [])
+    traj: crop.Trajectory = ([], [])
     if mode == "json":
         data = json.loads(Path(cfg["crop_json_path"]).read_text(encoding="utf-8"))
         keyframes = data.get("keyframes") or []
@@ -361,7 +365,8 @@ def _run_crop_cut(cfg, src, out, tmp, job, mode: str) -> dict:
             ok, frame = cap.read()
             if not ok:
                 break
-            writer.write(crop_render.cut_window(frame, idx / fps * 1000.0, traj, crop_w, w))
+            ms = idx / fps * 1000.0
+            writer.write(crop.cut.window(frame, crop.geometry.center_at(ms, traj), crop_w, w))
             idx += 1
             if idx % 5 == 0 or idx == total:
                 jobs.emit(progress, {"phase": "annotate", "done": idx, "total": total})

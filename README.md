@@ -348,7 +348,7 @@ cd backend && uv run pytest
 
 **백엔드**: Python 3.12 · FastAPI · SQLModel(SQLite) · Ultralytics(YOLO) · PyTorch · SSE(진행 스트리밍) · uv(패키지) · [adaptive-crop](https://github.com/Jh0-0y/adaptive-crop)(세로 크롭 좌표 계산).
 
-**크롭 파이프라인은 외부 라이브러리다.** 공·선수를 추적해 세로 크롭 X 좌표를 내는 계산은 이 저장소에 없고 `adaptive-crop` 패키지가 한다 — 운영 CropWorker와 **같은 코드로 같은 좌표**를 내야 여기서 맞춘 튜닝을 믿을 수 있기 때문이다. 툴킷이 갖는 것은 그 좌표를 화면에 그리고(`domain/crop_render.py`·`liveOverlay.ts`) 파일로 내보내는 부분, 그리고 둘을 잇는 얇은 어댑터(`ml/crop.py`)뿐이다.
+**크롭 파이프라인은 외부 라이브러리다.** 공·선수를 추적해 세로 크롭 X 좌표를 내는 계산은 이 저장소에 없고 `adaptive-crop` 패키지가 한다 — 운영 CropWorker와 **같은 코드로 같은 좌표**를 내야 여기서 맞춘 튜닝을 믿을 수 있기 때문이다. 툴킷이 갖는 것은 그 좌표를 화면에 그리고(`lib/crop/`·`liveOverlay.ts`) 파일로 내보내는 부분, 그리고 둘을 잇는 얇은 어댑터(`ml/crop.py`)뿐이다.
 
 **계층 경계 (백엔드 대원칙)**:
 > **API·services = 비즈니스·상태·결정·DB / workers = 순수 계산(별도 프로세스, torch·CUDA는 여기서만) / ml·domain = 순수 함수(프로세스·DB 모름).**

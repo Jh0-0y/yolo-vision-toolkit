@@ -18,7 +18,8 @@ backend/
 ├── cli.py                   웹 UI 없이 폴더 단위 오토라벨링
 ├── scripts/                 일회성 마이그레이션 스크립트
 ├── lib/                     순수 기능 — app·infra 를 import 하지 않는다
-│   └── video/               probe(규격 읽기) · to_h264 · require_ffmpeg
+│   ├── video/               probe(규격 읽기) · to_h264 · require_ffmpeg
+│   └── crop/                geometry(좌표 조회) · window · hud · highlight · cut
 ├── infra/                   시스템 배관 — 기능이 아니다
 │   └── jobs/                progress.jsonl · CANCEL · JobDir
 ├── tests/                   lib·infra 테스트 (app 테스트는 app/tests/)
@@ -78,7 +79,7 @@ data/                        런타임 데이터 (git 추적 안 함) → data-l
 
 `lib/` 과 `infra/` 는 `app/domain/`·`app/ml/` 의 잡탕 상태를 걷어내려고 새로 만든 자리다.
 **아직 옮기지 않은 것이 많다** — `app/domain/`·`app/ml/` 는 그대로 살아 있고, 지금까지 옮긴 건
-영상 프로브·H.264 인코딩(`lib/video/`)과 진행률·취소(`infra/jobs/`)뿐이다.
+영상 프로브·H.264 인코딩(`lib/video/`), 진행률·취소(`infra/jobs/`), 크롭 렌더(`lib/crop/`)뿐이다.
 
 무관한 변경에서 나머지를 함께 옮기지 않는다. 새 코드는 새 자리에 두고, 기존 코드는 그 기능을
 손볼 때 같이 옮긴다.

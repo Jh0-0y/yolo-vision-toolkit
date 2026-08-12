@@ -8,7 +8,7 @@
     detectors(엔트리)     → 라이브러리 엔트리 (conf 기본값·IoU 이름·track_ids 정리)
     실제 영상 해상도       → CropSpec        (고정 1920/608 상수는 더 이상 없다)
 
-크롭 창 폭은 렌더러(`app.domain.crop_render`)와 같은 규칙으로 정한다 — 좌표를 낸
+크롭 창 폭은 렌더러(`lib.crop`)와 같은 규칙으로 정한다 — 좌표를 낸
 쪽과 화면에 그리는 쪽이 어긋나면 크롭 박스가 실제 잘리는 영역과 달라진다.
 """
 
@@ -19,7 +19,7 @@ from dataclasses import fields
 
 from adaptive_crop import ClipPlanConfig, CropSpec, VideoInfo
 
-from app.domain.crop_render import crop_width_for
+from lib.crop.geometry import crop_width_for
 
 # 공 검출 기본 임계값 — 낮게 잡고 트랙 단계에서 거른다 (라이브러리는 기본값을 두지 않는다).
 DEFAULT_CROP_CONF = 0.10
@@ -53,7 +53,7 @@ def resolve_clip_config(overrides: dict | None) -> ClipPlanConfig:
 def crop_spec_for(source_width: int, source_height: int) -> CropSpec:
     """소스 해상도에 맞는 세로 9:16 크롭 창 규격.
 
-    폭은 `crop_render.crop_width_for`와 같은 값이다 — 좌표(라이브러리)와 렌더링
+    폭은 `lib.crop.geometry.crop_width_for`와 같은 값이다 — 좌표(라이브러리)와 렌더링
     (cv2)이 같은 창을 가리키게 하려면 규칙이 하나여야 한다.
     """
     return CropSpec(crop_width_for(source_height, source_width), source_height)

@@ -7,7 +7,7 @@
 import pytest
 from adaptive_crop import ClipPlanConfig
 
-from app.domain.crop_render import crop_width_for
+from lib.crop.geometry import crop_width_for
 from app.ml.crop import (
     crop_spec_for,
     detector_entries,
