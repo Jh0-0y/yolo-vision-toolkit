@@ -13,8 +13,23 @@ related:
 
 ## `src/api/client.ts` 가 유일한 출입구
 
-컴포넌트에서 `fetch` 를 직접 부르지 **않는다.** 새 경로가 생기면 `client.ts` 에
-호출 함수와 응답 인터페이스를 함께 둔다.
+컴포넌트에서 `fetch` 를 직접 부르지 **않는다.** 화면은 언제나 `from '../api/client'`
+하나만 알면 된다.
+
+`client.ts` 자체는 **재수출만** 한다. 실제 구현은 리소스별 파일에 있다:
+
+```
+api/http.ts        BASE · ApiError · api 래퍼 · xhrUpload   (fetch/XHR 을 아는 유일한 파일)
+api/<리소스>.ts     projects · labels · classes · jobs · exports · training · videos · models
+api/test/          predict · annotate · live · compare      (백엔드 endpoints/predict 와 같은 갈래)
+api/client.ts      전부 재수출하는 배럴
+```
+
+새 경로는 해당 리소스 파일에 함수와 응답 인터페이스를 함께 두고, 새 리소스라면
+파일을 만들어 `client.ts` 에 `export *` 한 줄을 더한다.
+
+- **이름이 겹치면 안 된다.** `export *` 는 두 파일이 같은 이름을 내보내면 그 이름을
+  조용히 빼버린다. 나눈 뒤에는 `npm run build` 로 확인한다.
 
 ```ts
 export const cancelAutoLabel = (jobId: string) => api.post(`/jobs/${jobId}/cancel`)
