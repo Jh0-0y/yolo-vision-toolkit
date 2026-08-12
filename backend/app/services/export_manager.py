@@ -13,8 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.core.config import settings
-from app.domain.export_build import ExportCancelled, build_export
 from infra import jobs
+from lib.labels.export import ExportCancelled, build_export
 
 
 def task_dir(export_id: str) -> Path:

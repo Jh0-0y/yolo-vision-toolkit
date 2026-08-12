@@ -17,12 +17,12 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.core.config import settings
 from app.db import get_session
-from app.domain.export_build import safe_token, target_images
 from app.models import Project
 from app.schemas.export import ExportCreate, ExportOut, ExportRename
 from app.services.export_manager import export_manager
 from app.services.export_manager import task_dir as export_task_dir
 from infra import jobs
+from lib.labels.export import safe_token, target_images
 from lib.labels.io import atomic_write_text
 
 router = APIRouter(prefix="/projects/{project_id}/exports", tags=["exports"])

@@ -3,6 +3,7 @@
     io         라벨 .txt · box meta · data.yaml 읽고 쓰기 (좌표 변환 포함)
     store      프로젝트 디렉터리 기준 박스 · 검수 상태
     classes    프로젝트 클래스 목록 CRUD (추가 · 이름변경 · 삭제)
+    export     선택 이미지 -> YOLO train/val 데이터셋 빌드
     registry   여러 모델의 클래스 이름을 하나로 합치기 (앙상블 · 비교)
 
 `io` 가 바닥이다 — `store` 와 `classes` 가 그 위에 프로젝트 규약(labels/{stem}.txt ·
@@ -12,6 +13,6 @@ reviewed.json · classes.json)을 얹는다. `registry` 는 파일을 모른다.
 읽는 일이 없어야 하기 때문이다.
 """
 
-from lib.labels import classes, io, registry, store
+from lib.labels import classes, export, io, registry, store
 
-__all__ = ["classes", "io", "registry", "store"]
+__all__ = ["classes", "export", "io", "registry", "store"]
