@@ -22,7 +22,8 @@ backend/
 │   ├── video/               probe(규격 읽기) · to_h264 · require_ffmpeg
 │   ├── media/               extract(프레임 추출) · tiling · thumbnails
 │   ├── crop/                geometry(좌표 조회) · window · hud · highlight · cut
-│   └── labels/              io(라벨 파일) · store(프로젝트 라벨) · classes · registry
+│   ├── labels/              io · store · classes · registry · export
+│   └── train/               uploads(업로드 데이터셋) · staging(SSD 복사)
 ├── infra/                   시스템 배관 — 기능이 아니다
 │   └── jobs/                progress.jsonl · CANCEL · JobDir
 ├── tests/                   lib·infra 테스트 (app 테스트는 app/tests/)
@@ -37,8 +38,7 @@ backend/
     │   └── endpoints/       리소스별 HTTP 경로
     ├── services/            *_manager.py — 잡 수명·프로세스 풀·DB 갱신
     ├── workers/             *_worker.py · train_runner.py — 별도 프로세스 엔트리
-    ├── ml/                  모델을 쓰는 순수 계산
-    ├── domain/              모델을 쓰지 않는 순수 계산
+    ├── ml/                  모델을 쓰는 순수 계산 (앙상블·평가·추론·크롭 어댑터)
     └── tests/               test_*.py
 
 frontend/src/
@@ -75,15 +75,17 @@ data/                        런타임 데이터 (git 추적 안 함) → data-l
 
 ## 자리가 애매하면 묻는다
 
-`services/` vs `workers/`, `domain/` vs `ml/` 의 경계는 **아직 확정되지 않았다**([아키텍처](architecture.md) 참고).
-새 모듈이 이 둘 중 하나로 애매하면 **추측해서 두지 말고 사용자에게 묻는다.**
+`services/` vs `workers/` 의 경계는 **아직 확정되지 않았다**([아키텍처](architecture.md) 참고).
+새 장시간 잡의 자리가 애매하면 **추측해서 두지 말고 사용자에게 묻는다.**
+
+`domain/` vs `ml/` 은 해소됐다 — 모델을 쓰면 `app/ml/`, 안 쓰면 `lib/` 의 주제 패키지다.
 
 ## 이행 중이다
 
 `lib/` 과 `infra/` 는 `app/domain/`·`app/ml/` 의 잡탕 상태를 걷어내려고 새로 만든 자리다.
-**아직 옮기지 않은 것이 많다** — `app/domain/`·`app/ml/` 는 그대로 살아 있고, 지금까지 옮긴 건
-영상 프로브·H.264 인코딩(`lib/video/`), 진행률·취소(`infra/jobs/`), 크롭 렌더(`lib/crop/`),
-라벨·클래스(`lib/labels/`)뿐이다.
+**`app/domain/` 은 비워져 사라졌다.** 그 안에 있던 것은 전부 `lib/` 의 주제 패키지로 갔다.
+`app/ml/` 은 아직 남아 있다 — 앙상블·평가·추론·크롭 어댑터 다섯 파일이고, `ml/labeling.py` 가
+`app.core.config` 에 묶여 있어 통째로는 못 옮긴다.
 
 무관한 변경에서 나머지를 함께 옮기지 않는다. 새 코드는 새 자리에 두고, 기존 코드는 그 기능을
 손볼 때 같이 옮긴다.

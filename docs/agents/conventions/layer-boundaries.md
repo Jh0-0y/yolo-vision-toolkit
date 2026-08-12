@@ -42,17 +42,18 @@ def run_labeling(cfg, progress, cancel_check):
 - 인자는 **평범한 dict·str·int** 로 넘긴다. `Path` 는 문자열로 바꿔 넘기고 워커 안에서 되살린다.
 - 워커가 던지는 예외도 picklable 이어야 한다. 커스텀 예외에 복잡한 객체를 담지 않는다.
 
-## `ml/` · `domain/` 은 순수 계산이다
+## `ml/` · `lib/` 은 순수 계산이다
 
 - 프로세스·DB·HTTP·FastAPI 를 **모른다.** `HTTPException` 을 던지지 않는다.
-- 진행상황이 필요하면 `progress` 콜백을, 취소가 필요하면 `cancel_check` 콜백을 **인자로 받는다.** 파일을 직접 들여다보지 않는다.
-- 둘의 차이: `ml/` 은 모델을 쓰는 계산, `domain/` 은 모델을 쓰지 않는 계산. **이 경계가 애매한 새 모듈은 사용자에게 묻는다.**
+- 진행상황이 필요하면 `progress`(또는 `emit`) 콜백을, 취소가 필요하면 `cancel_check` 콜백을 **인자로 받는다.** 파일을 직접 들여다보지 않는다.
+- 둘의 차이는 하나다 — **모델을 쓰면 `app/ml/`, 안 쓰면 `lib/`.** (옛 `app/domain/` 은 없어졌다)
+- `lib/` 은 한 발 더 나간다: `app/` 과 `infra/` 를 **import 하지 않는다.** 그래서 웹 없이 CLI·배치가 그대로 쓴다.
 
 ## 예외를 던지는 자리
 
 | 계층 | 던지는 것 |
 |---|---|
 | `api/` | `HTTPException(404, "...")` · `HTTPException(422, "...")` |
-| `services/` · `workers/` · `ml/` · `domain/` | 자기 예외 또는 표준 예외. **`HTTPException` 은 여기서 던지지 않는다** |
+| `services/` · `workers/` · `ml/` · `lib/` | 자기 예외 또는 표준 예외. **`HTTPException` 은 여기서 던지지 않는다** |
 
 워커가 실패하면 `progress.jsonl` 에 `{"phase": "error", "msg": ...}` 를 남기고 다시 raise 한다 — 스트림을 보는 쪽과 부모 프로세스 양쪽이 알아야 한다.

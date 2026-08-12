@@ -16,10 +16,10 @@ from sqlmodel import select
 
 from app.core.config import settings
 from app.db import session_scope
-from app.domain.datasets import delete_upload, is_auto_delete, upload_base
-from app.domain.staging import stage_dataset, unstage
 from app.models import TrainRun
 from infra import jobs
+from lib.train.staging import stage_dataset, unstage
+from lib.train.uploads import delete_upload, is_auto_delete, upload_base
 
 
 class TrainManager:

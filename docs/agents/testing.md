@@ -35,8 +35,8 @@ cd frontend && npm run build && npm run lint
 | `lib/`·`infra/` | `backend/tests/` | `test_lib_<주제>.py` · `test_infra_<주제>.py` |
 
 - 두 폴더 모두 **`__init__.py` 가 있어야 한다** — 없으면 pytest 가 `backend/` 를 sys.path 에 넣지 않아 `import app` 이 깨진다.
-- 한 파일씩 돌리려면 `cd backend && uv run pytest app/tests/test_tiling.py -q`.
-- **순수 계산(`domain/`·`ml/`)을 우선 테스트한다.** 프로세스·GPU가 필요한 경로는 테스트가 어렵다.
+- 한 파일씩 돌리려면 `cd backend && uv run pytest tests/test_lib_crop.py -q`.
+- **순수 계산(`lib/`·`ml/`)을 우선 테스트한다.** 프로세스·GPU가 필요한 경로는 테스트가 어렵다.
 - 크롭 **알고리즘** 테스트는 `adaptive-crop` 저장소가 담당한다. 여기에는 **어댑터 계약 테스트만** 둔다
   (`test_crop_adapter.py` · `test_crop_spec.py`) → [adaptive-crop](libs/adaptive-crop.md)
 
