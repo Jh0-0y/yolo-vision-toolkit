@@ -20,6 +20,8 @@ from fastapi.responses import FileResponse
 from sqlmodel import Session
 from sse_starlette.sse import EventSourceResponse
 
+from infra import jobs
+
 from app.core.config import settings
 from app.db import get_session
 from app.domain.video import VIDEO_EXTS
@@ -27,7 +29,6 @@ from app.ml.labeling import IMAGE_EXTS
 from app.models import ModelEntry
 from app.schemas.predict import PredictResponse, ResidentModel, TestJobStart
 from app.services.infer_manager import infer_manager
-from app.services.label_manager import read_progress
 from app.services.test_jobs import (
     sweep_old_annotations,
     sweep_old_compare,
@@ -46,7 +47,7 @@ async def _job_event_stream(job_id: str):
     async def stream():
         offset = 0
         while True:
-            events, offset = await asyncio.to_thread(read_progress, job_id, offset)
+            events, offset = await asyncio.to_thread(jobs.at(settings.jobs_dir, job_id).read, offset)
             terminal = False
             for ev in events:
                 yield {"event": "progress", "data": json.dumps(ev)}

@@ -7,7 +7,7 @@ CPU/IO only — never touches the GPU, so it runs off the GPU-serialized executo
 
 from __future__ import annotations
 
-import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,11 +32,6 @@ class ExtractParams:
     stride: int = 480
 
 
-def _append(progress_path: Path, event: dict) -> None:
-    with open(progress_path, "a") as f:
-        f.write(json.dumps(event) + "\n")
-
-
 def _similarity(a, b) -> float:
     """1.0 == identical, 0.0 == maximally different (mean abs diff on 32x32 gray)."""
     diff = cv2.absdiff(a, b).mean() / 255.0
@@ -46,23 +41,21 @@ def _similarity(a, b) -> float:
 def extract_frames(
     video_path: Path,
     raw_dir: Path,
-    progress_path: Path,
     stem: str,
     params: ExtractParams,
+    emit: Callable[[dict], None],
     cancel_path: Path,
 ) -> dict:
     """Extract sampled frames into ``raw_dir``. Returns a summary dict.
 
-    Progress is streamed as JSONL events with a ``phase`` field so the existing
-    SSE reader (``app.services.label_manager.read_progress``) can consume it.
+    진행 상황은 ``emit`` 으로만 알린다 — 어디에 기록할지는 호출자가 정한다.
+    잡 시스템을 몰라야 웹 없이도(CLI·배치) 이 함수를 쓸 수 있다.
     """
     raw_dir.mkdir(parents=True, exist_ok=True)
-    # fresh progress log per run (so resample replays from a clean slate)
-    progress_path.write_text("")
 
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
-        _append(progress_path, {"phase": "error", "msg": "Cannot open video"})
+        emit({"phase": "error", "msg": "Cannot open video"})
         raise ValueError("Cannot open video")
 
     src_fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
@@ -76,15 +69,12 @@ def extract_frames(
         else total_frames or None
     )
 
-    _append(
-        progress_path,
-        {
-            "phase": "start",
-            "src_fps": round(src_fps, 2),
-            "total_frames": total_frames,
-            "step": step,
-        },
-    )
+    emit({
+        "phase": "start",
+        "src_fps": round(src_fps, 2),
+        "total_frames": total_frames,
+        "step": step,
+    })
 
     idx = 0
     saved = 0
@@ -134,16 +124,13 @@ def extract_frames(
                         cv2.imwrite(str(raw_dir / f"{frame_stem}.jpg"), frame)
                     saved += 1
                     if saved % 10 == 0 or saved == 1:
-                        _append(
-                            progress_path,
-                            {
-                                "phase": "extract",
-                                "saved": saved,
-                                "scanned": idx + 1,
-                                "total_frames": total_frames,
-                                "skipped_dup": skipped_dup,
-                            },
-                        )
+                        emit({
+                            "phase": "extract",
+                            "saved": saved,
+                            "scanned": idx + 1,
+                            "total_frames": total_frames,
+                            "skipped_dup": skipped_dup,
+                        })
                     if saved >= params.max_frames:
                         break
             idx += 1
@@ -151,11 +138,8 @@ def extract_frames(
         cap.release()
 
     if cancelled:
-        _append(progress_path, {"phase": "cancelled", "saved": saved, "tiles": tiles})
+        emit({"phase": "cancelled", "saved": saved, "tiles": tiles})
         return {"status": "cancelled", "saved": saved, "tiles": tiles, "skipped_dup": skipped_dup}
 
-    _append(
-        progress_path,
-        {"phase": "done", "saved": saved, "tiles": tiles, "scanned": idx, "skipped_dup": skipped_dup},
-    )
+    emit({"phase": "done", "saved": saved, "tiles": tiles, "scanned": idx, "skipped_dup": skipped_dup})
     return {"status": "done", "saved": saved, "tiles": tiles, "skipped_dup": skipped_dup, "scanned": idx}

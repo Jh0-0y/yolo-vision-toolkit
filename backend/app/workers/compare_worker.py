@@ -21,17 +21,13 @@ Overlay images are served by index via jobs manifest — see
 from __future__ import annotations
 
 import json
-import time
 from pathlib import Path
+
+from infra import jobs
 
 # sentinel class id for predictions whose class isn't defined in the dataset;
 # it never matches any GT box, so it is correctly counted as a false positive.
 _OTHER = -1
-
-
-def _emit(progress_path: Path, event: dict) -> None:
-    with open(progress_path, "a") as f:
-        f.write(json.dumps({"ts": time.time(), **event}) + "\n")
 
 
 def _read_yaml_names(dataset_dir: Path) -> dict[int, str]:
@@ -93,9 +89,8 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
     from app.ml.predict import PredictConfig, predict_image
     from app.domain.yolo_io import read_label_file
 
-    job_dir = Path(jobs_dir) / job_id
-    progress = job_dir / "progress.jsonl"
-    cancel = job_dir / "CANCEL"
+    job = jobs.at(Path(jobs_dir), job_id)
+    progress = job.progress_path
 
     dataset_dir = Path(cfg["dataset_dir"])
     conf_thr = float(cfg.get("conf", 0.4))
@@ -142,11 +137,11 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         gt_by_cls: dict[int, int] = {}  # identical across models (same dataset)
         images: list[dict] = []
         manifest: dict[str, str] = {}  # image index -> absolute path (served by route)
-        _emit(progress, {"phase": "start", "total": len(pairs)})
+        jobs.emit(progress, {"phase": "start", "total": len(pairs)})
 
         for i, (img_path, label_path) in enumerate(pairs):
-            if cancel.exists():
-                _emit(progress, {"phase": "cancelled", "done": i, "total": len(pairs)})
+            if job.cancelled():
+                jobs.emit(progress, {"phase": "cancelled", "done": i, "total": len(pairs)})
                 return {"status": "cancelled"}
 
             gt = [{"cls": cls, "xyxy_n": list(xyxy)} for cls, xyxy in read_label_file(label_path)]
@@ -193,7 +188,7 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                 })
             images.append(entry)
             if (i + 1) % 3 == 0 or i + 1 == len(pairs):
-                _emit(progress, {"phase": "analyze", "done": i + 1, "total": len(pairs)})
+                jobs.emit(progress, {"phase": "analyze", "done": i + 1, "total": len(pairs)})
 
         per_model = []
         for model_id, _ in specs:
@@ -213,7 +208,7 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                 "map": ap["map"],
             })
 
-        (job_dir / "images_manifest.json").write_text(json.dumps(manifest))
+        (job.path / "images_manifest.json").write_text(json.dumps(manifest))
         result = {
             "per_model": per_model,
             "images": images,
@@ -222,9 +217,9 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
             "iou": iou_match,
             "warning": warning,
         }
-        (job_dir / "result.json").write_text(json.dumps(result))
-        _emit(progress, {"phase": "done", "done": len(pairs), "total": len(pairs)})
+        (job.path / "result.json").write_text(json.dumps(result))
+        jobs.emit(progress, {"phase": "done", "done": len(pairs), "total": len(pairs)})
         return {"status": "done", "images": len(images)}
     except Exception as e:
-        _emit(progress, {"phase": "error", "msg": str(e)})
+        jobs.emit(progress, {"phase": "error", "msg": str(e)})
         raise

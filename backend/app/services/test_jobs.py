@@ -17,6 +17,8 @@ import time
 from concurrent.futures import Future, ProcessPoolExecutor
 from pathlib import Path
 
+from infra import jobs
+
 from app.core.config import settings
 
 # annotated videos live here transiently; swept after this age (playground = no
@@ -79,11 +81,7 @@ class TestJobManager:
             return executor
 
     def _prepare(self, job_id: str):
-        job_dir = settings.jobs_dir / job_id
-        job_dir.mkdir(parents=True, exist_ok=True)
-        (job_dir / "progress.jsonl").touch()
-        (job_dir / "CANCEL").unlink(missing_ok=True)
-        return job_dir
+        return jobs.at(settings.jobs_dir, job_id).prepare()
 
     def submit_annotate(self, job_id: str, cfg: dict) -> None:
         from app.workers import annotate_worker
@@ -129,7 +127,7 @@ class TestJobManager:
         return future is not None and not future.done()
 
     def cancel(self, job_id: str) -> None:
-        (settings.jobs_dir / job_id / "CANCEL").touch()
+        jobs.at(settings.jobs_dir, job_id).request_cancel()
 
     def shutdown(self) -> None:
         with self._lock:

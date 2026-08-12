@@ -12,6 +12,8 @@ import multiprocessing
 from concurrent.futures import Future, ProcessPoolExecutor
 from datetime import datetime, timezone
 
+from infra import jobs
+
 from app.core.config import settings
 from app.domain.labels import read_reviewed, write_reviewed
 from app.db import session_scope
@@ -32,9 +34,7 @@ class JobManager:
         return self._executor
 
     def submit_label_job(self, job_id: str, project_id: str, cfg: dict) -> None:
-        job_dir = settings.jobs_dir / job_id
-        job_dir.mkdir(parents=True, exist_ok=True)
-        (job_dir / "progress.jsonl").touch()
+        jobs.at(settings.jobs_dir, job_id).prepare()
 
         future = self._get_executor().submit(
             run_label_job, job_id, cfg, str(settings.jobs_dir)
@@ -51,7 +51,7 @@ class JobManager:
             self._mark_status(job_id, "cancelled")
             return True
         # running: signal the worker via sentinel file
-        (settings.jobs_dir / job_id / "CANCEL").touch()
+        jobs.at(settings.jobs_dir, job_id).request_cancel()
         return True
 
     def _mark_status(self, job_id: str, status: str, **fields) -> None:
@@ -99,21 +99,3 @@ def reset_reviewed(project_id: str, stems: list[str]) -> None:
 
 
 job_manager = JobManager()
-
-
-def read_progress(job_id: str, offset: int = 0) -> tuple[list[dict], int]:
-    """Read progress events from byte offset; returns (events, new_offset)."""
-    path = settings.jobs_dir / job_id / "progress.jsonl"
-    if not path.exists():
-        return [], offset
-    events = []
-    with open(path, "rb") as f:
-        f.seek(offset)
-        chunk = f.read()
-    consumed = chunk.rfind(b"\n") + 1  # leave any partial trailing line for next poll
-    for line in chunk[:consumed].splitlines():
-        try:
-            events.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-    return events, offset + consumed

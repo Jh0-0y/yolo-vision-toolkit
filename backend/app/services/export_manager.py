@@ -8,23 +8,19 @@ The API process validates first and owns the DB; this only runs the build.
 
 from __future__ import annotations
 
-import json
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+
+from infra import jobs
 
 from app.core.config import settings
 from app.domain.export_build import ExportCancelled, build_export
 
 
 def task_dir(export_id: str) -> Path:
-    """Progress dir; reuses jobs_dir so read_progress(export_id) works."""
+    """Progress dir; reuses jobs_dir so the shared SSE reader finds it."""
     return settings.jobs_dir / export_id
-
-
-def _emit(path: Path, event: dict) -> None:
-    with open(path, "a") as f:
-        f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
 
 def _run(
@@ -36,8 +32,7 @@ def _run(
     val_split: float,
     seed: int,
 ) -> None:
-    tdir = task_dir(export_id)
-    progress_path = tdir / "progress.jsonl"
+    job = jobs.at(settings.jobs_dir, export_id)
     try:
         meta = build_export(
             pdir=pdir,
@@ -48,14 +43,14 @@ def _run(
             seed=seed,
             export_id=export_id,
             now=datetime.now(timezone.utc),
-            emit=lambda ev: _emit(progress_path, ev),
-            cancel_path=tdir / "CANCEL",
+            emit=job.emit,
+            cancel_path=job.cancel_path,
         )
-        _emit(progress_path, {"phase": "done", **meta})
+        job.emit({"phase": "done", **meta})
     except ExportCancelled:
-        _emit(progress_path, {"phase": "cancelled", "msg": "Cancelled"})
+        job.emit({"phase": "cancelled", "msg": "Cancelled"})
     except Exception as e:  # noqa: BLE001 — surface any failure to the stream
-        _emit(progress_path, {"phase": "error", "msg": str(e)})
+        job.emit({"phase": "error", "msg": str(e)})
 
 
 class ExportManager:
@@ -80,10 +75,7 @@ class ExportManager:
         val_split: float,
         seed: int,
     ) -> None:
-        tdir = task_dir(export_id)
-        tdir.mkdir(parents=True, exist_ok=True)
-        (tdir / "progress.jsonl").touch()
-        (tdir / "CANCEL").unlink(missing_ok=True)  # clear any stale cancel
+        jobs.at(settings.jobs_dir, export_id).prepare()
 
         future = self._get_executor().submit(
             _run, export_id, pdir, project_name, kind, names, val_split, seed
@@ -95,7 +87,7 @@ class ExportManager:
         future = self._futures.get(export_id)
         if future is not None and future.cancel():  # still queued — never started
             return True
-        (task_dir(export_id) / "CANCEL").touch()  # running: signal the build loop
+        jobs.at(settings.jobs_dir, export_id).request_cancel()  # running: signal the build loop
         return True
 
     def is_active(self, export_id: str) -> bool:

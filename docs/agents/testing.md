@@ -27,7 +27,14 @@ cd frontend && npm run build && npm run lint
 
 ## 백엔드 테스트
 
-- 자리는 `backend/app/tests/`, 이름은 `test_<대상>.py` (`pyproject.toml` 의 `testpaths` 가 이 폴더만 본다).
+자리가 둘이다 (`pyproject.toml` 의 `testpaths` 가 이 둘만 본다).
+
+| 대상 | 자리 | 이름 |
+|---|---|---|
+| `app/` 안의 것 | `backend/app/tests/` | `test_<대상>.py` |
+| `lib/`·`infra/` | `backend/tests/` | `test_lib_<주제>.py` · `test_infra_<주제>.py` |
+
+- 두 폴더 모두 **`__init__.py` 가 있어야 한다** — 없으면 pytest 가 `backend/` 를 sys.path 에 넣지 않아 `import app` 이 깨진다.
 - 한 파일씩 돌리려면 `cd backend && uv run pytest app/tests/test_tiling.py -q`.
 - **순수 계산(`domain/`·`ml/`)을 우선 테스트한다.** 프로세스·GPU가 필요한 경로는 테스트가 어렵다.
 - 크롭 **알고리즘** 테스트는 `adaptive-crop` 저장소가 담당한다. 여기에는 **어댑터 계약 테스트만** 둔다

@@ -14,29 +14,21 @@ Unlike annotate_worker, the source is NOT rendered here; we keep a playable copy
 from __future__ import annotations
 
 import json
-import shutil
-import time
 from pathlib import Path
 
-# Reuse the annotate worker's H.264 transcode (ffmpeg) — same browser-playability need.
-from app.workers.annotate_worker import _to_h264
+from infra import jobs
+from lib import video
 
 
 class _Cancelled(Exception):
     """Raised from the progress callback when a CANCEL sentinel appears."""
 
 
-def _emit(progress_path: Path, event: dict) -> None:
-    with open(progress_path, "a") as f:
-        f.write(json.dumps({"ts": time.time(), **event}) + "\n")
-
-
 def run_live(job_id: str, cfg: dict, jobs_dir: str) -> dict:
     from app.core.config import resolve_device
 
-    job_dir = Path(jobs_dir) / job_id
-    progress = job_dir / "progress.jsonl"
-    cancel = job_dir / "CANCEL"
+    job = jobs.at(Path(jobs_dir), job_id)
+    progress = job.progress_path
 
     work = Path(cfg["work"])  # test_dir/live/{job_id} — cache + preview live here
     work.mkdir(parents=True, exist_ok=True)
@@ -51,11 +43,7 @@ def run_live(job_id: str, cfg: dict, jobs_dir: str) -> dict:
     _, pt = cfg["specs"][0]  # detection is single-model — use the first selected model
 
     try:
-        if shutil.which("ffmpeg") is None:
-            raise RuntimeError(
-                "ffmpeg is required to encode a browser-playable preview but was not "
-                "found. Install it (Docker image ships it; locally: `brew install ffmpeg`)."
-            )
+        video.require_ffmpeg()
 
         # adaptive_crop pulls in cv2/ultralytics — keep the imports lazy (worker only).
         from adaptive_crop import build_detector, detect_video, probe_video
@@ -64,11 +52,11 @@ def run_live(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         from app.ml import crop as crop_adapter
 
         # probe geometry / length for progress total + client-side overlay scaling
-        video = probe_video(src)
-        w, h, fps, duration_ms = video.width, video.height, video.fps, video.duration_ms
+        vinfo = probe_video(src)
+        w, h, fps, duration_ms = vinfo.width, vinfo.height, vinfo.fps, vinfo.duration_ms
         total_samples = max(1, duration_ms // interval + 1)
 
-        _emit(progress, {"phase": "start", "total": total_samples})
+        jobs.emit(progress, {"phase": "start", "total": total_samples})
 
         # ---- detection (the expensive pass) ----
         entries = cfg.get("detectors") or [
@@ -77,17 +65,17 @@ def run_live(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         detector = build_detector(crop_adapter.detector_entries(entries, conf), device)
 
         def on_progress(done: int) -> None:
-            if cancel.exists():
+            if job.cancelled():
                 raise _Cancelled()
             if done % 10 == 0 or done >= total_samples:
-                _emit(progress, {"phase": "detect", "done": done, "total": total_samples})
+                jobs.emit(progress, {"phase": "detect", "done": done, "total": total_samples})
 
         try:
             detected = detect_video(
                 src, detector=detector, sampling_interval_ms=interval, on_progress=on_progress
             )
         except _Cancelled:
-            _emit(progress, {"phase": "cancelled", "total": total_samples})
+            jobs.emit(progress, {"phase": "cancelled", "total": total_samples})
             return {"status": "cancelled"}
 
         (work / "detected.json").write_text(
@@ -95,8 +83,8 @@ def run_live(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         )
 
         # ---- browser-playable preview (transcode; source may be an odd codec) ----
-        _emit(progress, {"phase": "encoding", "done": total_samples, "total": total_samples})
-        _to_h264(src, preview)
+        jobs.emit(progress, {"phase": "encoding", "done": total_samples, "total": total_samples})
+        video.to_h264(src, preview)
 
         meta = {
             "source_width": w,
@@ -110,10 +98,10 @@ def run_live(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         }
         (work / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
 
-        _emit(progress, {"phase": "done", "done": total_samples, "total": total_samples})
+        jobs.emit(progress, {"phase": "done", "done": total_samples, "total": total_samples})
         return {"status": "done", "samples": len(detected)}
     except Exception as e:
-        _emit(progress, {"phase": "error", "msg": str(e)})
+        jobs.emit(progress, {"phase": "error", "msg": str(e)})
         raise
     finally:
         # keep preview.mp4; the original upload is transient
@@ -144,11 +132,9 @@ def run_live_render(job_id: str, cfg: dict, jobs_dir: str) -> dict:
 
     from app.domain import crop_render
     from app.ml import crop as crop_adapter
-    from app.workers.annotate_worker import _to_h264
 
-    job_dir = Path(jobs_dir) / job_id
-    progress = job_dir / "progress.jsonl"
-    cancel = job_dir / "CANCEL"
+    job = jobs.at(Path(jobs_dir), job_id)
+    progress = job.progress_path
 
     work = Path(cfg["work"])  # live 세션 dir — detected.json/preview.mp4 위치
     src = work / "preview.mp4"
@@ -164,8 +150,7 @@ def run_live_render(job_id: str, cfg: dict, jobs_dir: str) -> dict:
     show_highlight = bool(toggles.get("show_highlight", True))
 
     try:
-        if shutil.which("ffmpeg") is None:
-            raise RuntimeError("ffmpeg is required to encode the rendered video.")
+        video.require_ffmpeg()
         if not src.exists():
             raise RuntimeError("Preview video not found — run detection first.")
 
@@ -175,27 +160,25 @@ def run_live_render(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         # 좌표는 검출 당시의 원본 해상도 기준으로 계산한다 (meta.json). validate=False:
         # 튜닝 노브 조합 하나가 렌더 잡을 죽이지 않게 — 여기 결과는 미리보기다.
         meta = _json.loads((work / "meta.json").read_text(encoding="utf-8"))
-        video = crop_adapter.video_info_from_meta(meta)
+        vinfo = crop_adapter.video_info_from_meta(meta)
         cfg_resolved = crop_adapter.resolve_clip_config(overrides)
         cropres = plan_from_detections(
             detected,
-            crop_adapter.crop_spec_for(video.width, video.height),
-            video,
+            crop_adapter.crop_spec_for(vinfo.width, vinfo.height),
+            vinfo,
             config=cfg_resolved,
             collect_debug=show_highlight,
             validate=False,
         )
 
+        vmeta = video.probe(src)
+        fps, total, w, h = vmeta.fps, vmeta.frame_count, vmeta.width, vmeta.height
         cap = cv2.VideoCapture(str(src))
-        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
-        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
         # 좌표는 원본 해상도 기준 — 프리뷰가 다른 크기로 트랜스코딩됐으면 맞춰 스케일
-        scale = w / float(video.width or w)
+        scale = w / float(vinfo.width or w)
 
-        traj = crop_render.build_trajectory(cropres.samples, video.width)
+        traj = crop_render.build_trajectory(cropres.samples, vinfo.width)
         traj = (traj[0], [x * scale for x in traj[1]])
         types = crop_render.build_types(cropres.samples)
         debug_lookup = (
@@ -247,13 +230,13 @@ def run_live_render(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                     )
 
         writer = cv2.VideoWriter(str(tmp), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
-        _emit(progress, {"phase": "start", "total": total})
+        jobs.emit(progress, {"phase": "start", "total": total})
 
         idx = 0
         cancelled = False
         try:
             while True:
-                if cancel.exists():
+                if job.cancelled():
                     cancelled = True
                     break
                 ok, frame = cap.read()
@@ -309,21 +292,21 @@ def run_live_render(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                 writer.write(frame)
                 idx += 1
                 if idx % 10 == 0 or idx == total:
-                    _emit(progress, {"phase": "render", "done": idx, "total": total})
+                    jobs.emit(progress, {"phase": "render", "done": idx, "total": total})
         finally:
             cap.release()
             writer.release()
 
         if cancelled:
             tmp.unlink(missing_ok=True)
-            _emit(progress, {"phase": "cancelled", "done": idx, "total": total})
+            jobs.emit(progress, {"phase": "cancelled", "done": idx, "total": total})
             return {"status": "cancelled"}
 
-        _emit(progress, {"phase": "encoding", "done": idx, "total": total})
-        _to_h264(tmp, out)
+        jobs.emit(progress, {"phase": "encoding", "done": idx, "total": total})
+        video.to_h264(tmp, out)
         tmp.unlink(missing_ok=True)
-        _emit(progress, {"phase": "done", "done": idx, "total": total})
+        jobs.emit(progress, {"phase": "done", "done": idx, "total": total})
         return {"status": "done", "frames": idx}
     except Exception as e:
-        _emit(progress, {"phase": "error", "msg": str(e)})
+        jobs.emit(progress, {"phase": "error", "msg": str(e)})
         raise

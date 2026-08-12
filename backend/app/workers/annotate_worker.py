@@ -26,11 +26,11 @@ writing an unplayable mp4v file.
 from __future__ import annotations
 
 import json
-import shutil
-import subprocess
-import time
 from collections import defaultdict, deque
 from pathlib import Path
+
+from infra import jobs
+from lib import video
 
 # BGR palette (matches the frontend BoxOverlay hue order closely enough).
 _PALETTE = [
@@ -45,19 +45,13 @@ def _color(key: int) -> tuple[int, int, int]:
     return _PALETTE[key % len(_PALETTE)]
 
 
-def _emit(progress_path: Path, event: dict) -> None:
-    with open(progress_path, "a") as f:
-        f.write(json.dumps({"ts": time.time(), **event}) + "\n")
-
-
 def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
     import cv2
 
     from app.core.config import resolve_device
 
-    job_dir = Path(jobs_dir) / job_id
-    progress = job_dir / "progress.jsonl"
-    cancel = job_dir / "CANCEL"
+    job = jobs.at(Path(jobs_dir), job_id)
+    progress = job.progress_path
 
     src = Path(cfg["source"])
     out = Path(cfg["out"])
@@ -93,25 +87,18 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
 
     try:
         if crop_source in ("json", "center"):
-            return _run_crop_cut(cfg, src, out, tmp, progress, cancel, crop_source)
+            return _run_crop_cut(cfg, src, out, tmp, job, crop_source)
 
         # tracking/crop are single-model by nature — use the first selected model
         _, pt = cfg["specs"][0]
 
         # fail early if we can't produce a browser-playable file (JSON-only needs no encode)
-        if not crop_json_only and shutil.which("ffmpeg") is None:
-            raise RuntimeError(
-                "ffmpeg is required to encode a browser-playable video but was not "
-                "found. Install it (Docker image ships it; locally: `brew install ffmpeg`)."
-            )
+        if not crop_json_only:
+            video.require_ffmpeg()
 
         # probe geometry / length for the writer + progress total
-        cap = cv2.VideoCapture(str(src))
-        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
-        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        cap.release()
+        meta = video.probe(src)
+        fps, total, w, h = meta.fps, meta.frame_count, meta.width, meta.height
 
         # crop-cut output is narrower (the vertical 9:16 window); the overlay/box
         # outputs keep the source size.
@@ -119,7 +106,7 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         out_w, out_h = (crop_w, h) if crop_cut else (w, h)
         writer = cv2.VideoWriter(str(tmp), cv2.VideoWriter_fourcc(*"mp4v"), fps, (out_w, out_h))
 
-        _emit(progress, {"phase": "start", "total": total})
+        jobs.emit(progress, {"phase": "start", "total": total})
 
         # ---- crop trajectory (separate predict pass) ----
         crop_traj: crop_render.Trajectory | None = None
@@ -127,7 +114,7 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         crop_debug: tuple[list, list] | None = None  # 대상 하이라이트 조회 lookup
         dead_zone_half: float | None = None  # 데드존 밴드 반폭 (crop_tracking일 때만)
         if crop_tracking:
-            _emit(progress, {"phase": "crop_analyze", "total": total})
+            jobs.emit(progress, {"phase": "crop_analyze", "total": total})
             # adaptive_crop pulls in cv2/ultralytics — keep the imports lazy (worker only)
             from adaptive_crop import (
                 VideoInfo,
@@ -156,11 +143,11 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
             duration_ms = int(total / fps * 1000) if total > 0 and fps else 0
             if duration_ms <= 0 and detected:
                 duration_ms = detected[-1][0]
-            video = VideoInfo(width=w, height=h, fps=fps, duration_ms=duration_ms)
+            vinfo = VideoInfo(width=w, height=h, fps=fps, duration_ms=duration_ms)
             cropres = plan_from_detections(
                 detected,
                 crop_adapter.crop_spec_for(w, h),
-                video,
+                vinfo,
                 config=crop_cfg,
                 collect_debug=show_target_highlight and not crop_json_only,
             )
@@ -177,7 +164,7 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         if crop_json_only:
             writer.release()
             tmp.unlink(missing_ok=True)
-            _emit(progress, {"phase": "done", "done": 0, "total": total})
+            jobs.emit(progress, {"phase": "done", "done": 0, "total": total})
             return {"status": "done", "frames": 0, "json_only": True}
 
         def _apply_crop_overlays(frame, ms: float) -> None:
@@ -202,7 +189,7 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
             cap = cv2.VideoCapture(str(src))
             try:
                 while True:
-                    if cancel.exists():
+                    if job.cancelled():
                         cancelled = True
                         break
                     ok, frame = cap.read()
@@ -213,7 +200,7 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                     )
                     idx += 1
                     if idx % 5 == 0 or idx == total:
-                        _emit(progress, {"phase": "annotate", "done": idx, "total": total})
+                        jobs.emit(progress, {"phase": "annotate", "done": idx, "total": total})
             finally:
                 cap.release()
         elif object_tracking:
@@ -233,7 +220,7 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                 verbose=False,
             )
             for r in results:
-                if cancel.exists():
+                if job.cancelled():
                     cancelled = True
                     break
                 frame = r.orig_img
@@ -273,13 +260,13 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                 writer.write(frame)
                 idx += 1
                 if idx % 5 == 0 or idx == total:
-                    _emit(progress, {"phase": "annotate", "done": idx, "total": total})
+                    jobs.emit(progress, {"phase": "annotate", "done": idx, "total": total})
         else:
             # crop-only overlay: no ByteTrack pass — just read frames and draw the rectangle
             cap = cv2.VideoCapture(str(src))
             try:
                 while True:
-                    if cancel.exists():
+                    if job.cancelled():
                         cancelled = True
                         break
                     ok, frame = cap.read()
@@ -290,7 +277,7 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                     writer.write(frame)
                     idx += 1
                     if idx % 5 == 0 or idx == total:
-                        _emit(progress, {"phase": "annotate", "done": idx, "total": total})
+                        jobs.emit(progress, {"phase": "annotate", "done": idx, "total": total})
             finally:
                 cap.release()
 
@@ -298,25 +285,25 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
 
         if cancelled:
             tmp.unlink(missing_ok=True)
-            _emit(progress, {"phase": "cancelled", "done": idx, "total": total})
+            jobs.emit(progress, {"phase": "cancelled", "done": idx, "total": total})
             return {"status": "cancelled"}
 
         # transcode mp4v → H.264 for browser <video> playback
-        _emit(progress, {"phase": "encoding", "done": idx, "total": total})
-        _to_h264(tmp, out)
+        jobs.emit(progress, {"phase": "encoding", "done": idx, "total": total})
+        video.to_h264(tmp, out)
         tmp.unlink(missing_ok=True)
 
-        _emit(progress, {"phase": "done", "done": idx, "total": total})
+        jobs.emit(progress, {"phase": "done", "done": idx, "total": total})
         return {"status": "done", "frames": idx}
     except Exception as e:
-        _emit(progress, {"phase": "error", "msg": str(e)})
+        jobs.emit(progress, {"phase": "error", "msg": str(e)})
         raise
     finally:
         # source video is transient — never keep it around
         src.unlink(missing_ok=True)
 
 
-def _run_crop_cut(cfg, src, out, tmp, progress, cancel, mode: str) -> dict:
+def _run_crop_cut(cfg, src, out, tmp, job, mode: str) -> dict:
     """추론 없이 세로 9:16 크롭 클립만 만든다.
 
     mode="json":   업로드된 crop.json의 samples 좌표를 따라 컷.
@@ -327,22 +314,16 @@ def _run_crop_cut(cfg, src, out, tmp, progress, cancel, mode: str) -> dict:
 
     from app.domain import crop_render
 
-    if shutil.which("ffmpeg") is None:
-        raise RuntimeError(
-            "ffmpeg is required to encode a browser-playable video but was not found. "
-            "Install it (Docker image ships it; locally: `brew install ffmpeg`)."
-        )
+    progress = job.progress_path
 
-    cap = cv2.VideoCapture(str(src))
-    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
-    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    cap.release()
+    video.require_ffmpeg()
+
+    meta = video.probe(src)
+    fps, total, w, h = meta.fps, meta.frame_count, meta.width, meta.height
 
     crop_w = crop_render.crop_width_for(h, w)
     writer = cv2.VideoWriter(str(tmp), cv2.VideoWriter_fourcc(*"mp4v"), fps, (crop_w, h))
-    _emit(progress, {"phase": "start", "total": total})
+    jobs.emit(progress, {"phase": "start", "total": total})
 
     # 궤적: json → 좌표 따라 / center → 빈 궤적(cut_window이 중앙 fallback)
     traj: crop_render.Trajectory = ([], [])
@@ -374,7 +355,7 @@ def _run_crop_cut(cfg, src, out, tmp, progress, cancel, mode: str) -> dict:
     cap = cv2.VideoCapture(str(src))
     try:
         while True:
-            if cancel.exists():
+            if job.cancelled():
                 cancelled = True
                 break
             ok, frame = cap.read()
@@ -383,33 +364,18 @@ def _run_crop_cut(cfg, src, out, tmp, progress, cancel, mode: str) -> dict:
             writer.write(crop_render.cut_window(frame, idx / fps * 1000.0, traj, crop_w, w))
             idx += 1
             if idx % 5 == 0 or idx == total:
-                _emit(progress, {"phase": "annotate", "done": idx, "total": total})
+                jobs.emit(progress, {"phase": "annotate", "done": idx, "total": total})
     finally:
         cap.release()
     writer.release()
 
     if cancelled:
         tmp.unlink(missing_ok=True)
-        _emit(progress, {"phase": "cancelled", "done": idx, "total": total})
+        jobs.emit(progress, {"phase": "cancelled", "done": idx, "total": total})
         return {"status": "cancelled"}
 
-    _emit(progress, {"phase": "encoding", "done": idx, "total": total})
-    _to_h264(tmp, out)
+    jobs.emit(progress, {"phase": "encoding", "done": idx, "total": total})
+    video.to_h264(tmp, out)
     tmp.unlink(missing_ok=True)
-    _emit(progress, {"phase": "done", "done": idx, "total": total})
+    jobs.emit(progress, {"phase": "done", "done": idx, "total": total})
     return {"status": "done", "frames": idx}
-
-
-def _to_h264(src: Path, dst: Path) -> None:
-    """Transcode to H.264/yuv420p mp4 (browser-safe). ffmpeg is required — the
-    caller checks for it up front and fails the job if it's missing."""
-    subprocess.run(
-        ["ffmpeg", "-y", "-i", str(src),
-         # yuv420p needs even width/height; pad up by 1px if a crop made a dim odd
-         "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
-         "-c:v", "libx264", "-pix_fmt", "yuv420p",
-         "-movflags", "+faststart", "-an", str(dst)],
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )

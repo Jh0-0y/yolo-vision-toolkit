@@ -25,7 +25,8 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["app/tests"]
+# app/ 밖의 lib/·infra/ 테스트도 잡히도록 루트부터 훑는다
+testpaths = ["tests", "app/tests"]
 
 [tool.uv]
 package = false

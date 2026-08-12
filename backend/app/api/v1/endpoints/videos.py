@@ -12,11 +12,12 @@ from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from sse_starlette.sse import EventSourceResponse
 from sqlmodel import Session
 
+from infra import jobs
+
 from app.core.config import settings
 from app.domain.tiling import TilingParams
 from app.domain.video import VIDEO_EXTS, ExtractParams
 from app.db import get_session
-from app.services.label_manager import read_progress
 from app.services.video_manager import task_dir, video_manager
 from app.models import Project
 
@@ -178,7 +179,7 @@ async def video_events(project_id: str, video_id: str, session: Session = Depend
     async def stream():
         offset = 0
         while True:
-            events, offset = await asyncio.to_thread(read_progress, video_id, offset)
+            events, offset = await asyncio.to_thread(jobs.at(settings.jobs_dir, video_id).read, offset)
             terminal = False
             for ev in events:
                 yield {"event": "progress", "data": json.dumps(ev)}

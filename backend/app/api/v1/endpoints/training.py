@@ -21,11 +21,12 @@ from sqlalchemy import or_
 from sse_starlette.sse import EventSourceResponse
 from sqlmodel import Session, select
 
+from infra import jobs
+
 from app.core.config import settings
 from app.ml.labeling import IMAGE_EXTS
 from app.domain.yolo_io import atomic_write_text
 from app.db import get_session, session_scope
-from app.services.label_manager import read_progress
 from app.services.train_manager import train_manager
 from app.models import ModelEntry, Project, TrainRun, iso_utc
 
@@ -388,7 +389,7 @@ def get_run(run_id: str, session: Session = Depends(get_session)):
 def run_history(run_id: str, session: Session = Depends(get_session)):
     if session.get(TrainRun, run_id) is None:
         raise HTTPException(404, "Training run not found")
-    events, _ = read_progress(run_id)
+    events, _ = jobs.at(settings.jobs_dir, run_id).read()
     return [e for e in events if e.get("phase") == "epoch"]
 
 
@@ -555,7 +556,7 @@ async def run_events(run_id: str, session: Session = Depends(get_session)):
         offset = 0
         idle = 0
         while True:
-            events, offset = await asyncio.to_thread(read_progress, run_id, offset)
+            events, offset = await asyncio.to_thread(jobs.at(settings.jobs_dir, run_id).read, offset)
             terminal = False
             for ev in events:
                 yield {"event": "progress", "data": json.dumps(ev)}

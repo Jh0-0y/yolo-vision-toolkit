@@ -15,13 +15,14 @@ from app.schemas.export import ExportCreate, ExportOut, ExportRename
 from sqlmodel import Session
 from sse_starlette.sse import EventSourceResponse
 
+from infra import jobs
+
 from app.core.config import settings
 from app.domain.export_build import safe_token, target_images
 from app.domain.yolo_io import atomic_write_text
 from app.db import get_session
 from app.models import Project
 from app.services.export_manager import export_manager, task_dir as export_task_dir
-from app.services.label_manager import read_progress
 
 router = APIRouter(prefix="/projects/{project_id}/exports", tags=["exports"])
 
@@ -81,7 +82,7 @@ async def export_events(
     async def stream():
         offset = 0
         while True:
-            events, offset = await asyncio.to_thread(read_progress, export_id, offset)
+            events, offset = await asyncio.to_thread(jobs.at(settings.jobs_dir, export_id).read, offset)
             terminal = False
             for ev in events:
                 yield {"event": "progress", "data": json.dumps(ev)}

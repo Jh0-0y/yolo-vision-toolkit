@@ -30,9 +30,23 @@ related:
 api/v1/endpoints  →  services  →  workers  ─┐
        │                                     ├→  ml  ·  domain
        └──────────────→  schemas  ·  models  ┘
+
+                    app/  ──▶  infra/     (잡 배관)
+                      └──▶  lib/          (순수 기능)
 ```
 
-| 계층 | 담는 것 |
+`app/` 밖의 두 패키지는 **위를 향해 import 하지 않는다.**
+
+| 패키지 | 담는 것 | 금지 |
+|---|---|---|
+| `lib/` | 순수 기능 (영상 프로브·인코딩 등) | `app/`·`infra/` import. 잡·DB·HTTP 를 몰라야 한다 |
+| `infra/` | 잡 배관 (진행률·취소·잡 디렉터리) | `app/` import. `settings` 도 모르므로 경로를 인자로 받는다 |
+
+- `lib/` 가 진행률을 알려야 하면 **콜백으로 받는다** (`emit`·`on_progress`·`cancel_check`).
+  그래야 웹 없이 CLI·배치에서 같은 계산을 쓸 수 있다.
+- `lib/` 모듈끼리도 서로 import 하지 않는다 — 연결은 호출자가 데이터를 넘겨 한다.
+
+| 계층 (`app/` 안) | 담는 것 |
 |---|---|
 | `api/v1/endpoints/` | HTTP 경로. 입력 검증, `HTTPException`, DTO 변환 |
 | `api/v1/router.py` | **라우터 배선 단 한 곳.** 새 엔드포인트는 여기 두 목록에 등록해야 살아난다 |

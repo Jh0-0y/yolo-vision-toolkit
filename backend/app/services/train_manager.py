@@ -14,11 +14,12 @@ from pathlib import Path
 
 from sqlmodel import select
 
+from infra import jobs
+
 from app.core.config import settings
 from app.db import session_scope
 from app.domain.datasets import delete_upload, is_auto_delete, upload_base
 from app.domain.staging import stage_dataset, unstage
-from app.services.label_manager import read_progress
 from app.models import TrainRun
 
 
@@ -134,7 +135,7 @@ class TrainManager:
 
     def _watch(self, run_id: str, proc: subprocess.Popen) -> None:
         code = proc.wait()
-        events, _ = read_progress(run_id)
+        events, _ = jobs.at(settings.jobs_dir, run_id).read()
         phases = {e.get("phase") for e in events}
         last_metrics = next(
             (e.get("metrics") for e in reversed(events) if e.get("metrics")), None
@@ -168,12 +169,8 @@ class TrainManager:
 
     @staticmethod
     def _append_progress(run_id: str, event: dict) -> None:
-        import time
-
-        path = settings.jobs_dir / run_id / "progress.jsonl"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a") as f:
-            f.write(json.dumps({"ts": time.time(), **event}) + "\n")
+        """워커가 죽어서 스스로 남기지 못한 종료 이벤트를 API 프로세스가 대신 쓴다."""
+        jobs.at(settings.jobs_dir, run_id).ensure().emit(event)
 
     @staticmethod
     def _update(run_id: str, **fields) -> None:

@@ -11,13 +11,9 @@ from __future__ import annotations
 import json
 import os
 import sys
-import time
 from pathlib import Path
 
-
-def _emit(path: Path, event: dict) -> None:
-    with open(path, "a") as f:
-        f.write(json.dumps({"ts": time.time(), **event}) + "\n")
+from infra import jobs
 
 
 def _per_class_rows(box, names: dict) -> list[dict]:
@@ -52,13 +48,11 @@ def main(run_dir_arg: str) -> int:
     # us at the copy; fall back to the canonical path recorded in config.json.
     dataset_path = os.environ.get("YVT_DATASET_PATH_OVERRIDE") or cfg["dataset_path"]
 
-    job_dir = settings.jobs_dir / run_id
-    job_dir.mkdir(parents=True, exist_ok=True)
-    progress_path = job_dir / "progress.jsonl"
+    progress_path = jobs.at(settings.jobs_dir, run_id).ensure().progress_path
 
     # loading torch/ultralytics + model weights takes a few seconds — tell the UI
     # we're in the prep stage so it doesn't look frozen before epoch 1.
-    _emit(progress_path, {"phase": "preparing"})
+    jobs.emit(progress_path, {"phase": "preparing"})
 
     from ultralytics import YOLO
 
@@ -66,11 +60,11 @@ def main(run_dir_arg: str) -> int:
 
     def on_train_start(trainer) -> None:
         # dataset scanned & dataloaders built; training is about to begin
-        _emit(progress_path, {"phase": "start", "epochs": int(trainer.epochs)})
+        jobs.emit(progress_path, {"phase": "start", "epochs": int(trainer.epochs)})
 
     def on_train_epoch_start(trainer) -> None:
         # epoch N is now running (metrics only arrive when it finishes)
-        _emit(
+        jobs.emit(
             progress_path,
             {"phase": "epoch_start", "epoch": int(trainer.epoch) + 1, "epochs": int(trainer.epochs)},
         )
@@ -87,7 +81,7 @@ def main(run_dir_arg: str) -> int:
             merged = {**merged, **trainer.lr}
         except Exception:
             pass
-        _emit(
+        jobs.emit(
             progress_path,
             {
                 "phase": "epoch",
@@ -132,7 +126,7 @@ def main(run_dir_arg: str) -> int:
             **cfg.get("params", {}),
         )
     except Exception as e:
-        _emit(progress_path, {"phase": "error", "msg": str(e)})
+        jobs.emit(progress_path, {"phase": "error", "msg": str(e)})
         return 1
 
     # per-class metrics (P/R/AP) from the final validation — not in results.csv
@@ -145,7 +139,7 @@ def main(run_dir_arg: str) -> int:
     final = {}
     if results is not None and getattr(results, "results_dict", None):
         final = {k: round(float(v), 5) for k, v in results.results_dict.items()}
-    _emit(progress_path, {"phase": "done", "metrics": final})
+    jobs.emit(progress_path, {"phase": "done", "metrics": final})
     return 0
 
 

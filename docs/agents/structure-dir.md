@@ -17,6 +17,11 @@ backend/
 ├── pyproject.toml           의존성·pytest 설정 (uv)
 ├── cli.py                   웹 UI 없이 폴더 단위 오토라벨링
 ├── scripts/                 일회성 마이그레이션 스크립트
+├── lib/                     순수 기능 — app·infra 를 import 하지 않는다
+│   └── video/               probe(규격 읽기) · to_h264 · require_ffmpeg
+├── infra/                   시스템 배관 — 기능이 아니다
+│   └── jobs/                progress.jsonl · CANCEL · JobDir
+├── tests/                   lib·infra 테스트 (app 테스트는 app/tests/)
 └── app/
     ├── main.py              create_app() · CORS · lifespan
     ├── core/config.py       settings · resolve_device · get_device_info
@@ -53,6 +58,8 @@ data/                        런타임 데이터 (git 추적 안 함) → data-l
 
 | 만들 것 | 자리 | 같이 해야 하는 일 |
 |---|---|---|
+| 여러 기능이 쓰는 순수 계산 | `lib/<주제>/` | `tests/test_lib_<주제>.py` — `app/`·`infra/` import 금지 |
+| 잡·프로세스 배관 | `infra/<주제>/` | `tests/test_infra_<주제>.py` — `app/` import 금지 |
 | HTTP 엔드포인트 | `app/api/v1/endpoints/<리소스>.py` | `router.py` 의 import 목록과 include 목록 **양쪽**에 등록 |
 | 요청·응답 DTO | `app/schemas/<리소스>.py` | 엔드포인트의 `response_model` 로 연결 |
 | DB 테이블 | `app/models/__init__.py` (새 파일 만들지 않는다) | — |
@@ -66,3 +73,12 @@ data/                        런타임 데이터 (git 추적 안 함) → data-l
 
 `services/` vs `workers/`, `domain/` vs `ml/` 의 경계는 **아직 확정되지 않았다**([아키텍처](architecture.md) 참고).
 새 모듈이 이 둘 중 하나로 애매하면 **추측해서 두지 말고 사용자에게 묻는다.**
+
+## 이행 중이다
+
+`lib/` 과 `infra/` 는 `app/domain/`·`app/ml/` 의 잡탕 상태를 걷어내려고 새로 만든 자리다.
+**아직 옮기지 않은 것이 많다** — `app/domain/`·`app/ml/` 는 그대로 살아 있고, 지금까지 옮긴 건
+영상 프로브·H.264 인코딩(`lib/video/`)과 진행률·취소(`infra/jobs/`)뿐이다.
+
+무관한 변경에서 나머지를 함께 옮기지 않는다. 새 코드는 새 자리에 두고, 기존 코드는 그 기능을
+손볼 때 같이 옮긴다.

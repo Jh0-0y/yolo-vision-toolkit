@@ -353,6 +353,7 @@ cd backend && uv run pytest
 **계층 경계 (백엔드 대원칙)**:
 > **API·services = 비즈니스·상태·결정·DB / workers = 순수 계산(별도 프로세스, torch·CUDA는 여기서만) / ml·domain = 순수 함수(프로세스·DB 모름).**
 
+- `app/` 밖에 두 패키지가 더 있다: `lib/`(순수 기능 — 영상 프로브·인코딩 등, 잡·DB·HTTP를 모른다)와 `infra/`(잡 배관 — `progress.jsonl`·`CANCEL`). 둘 다 `app/`을 import하지 않아 웹 없이도 쓸 수 있다.
 - `torch`/`ultralytics`/CUDA는 `workers/`·`ml/`에서만, 그것도 함수 안 lazy import — API 프로세스가 CUDA를 로드하지 않도록.
 - DB(SQLite)는 API 프로세스에서만 접근. 워커는 값을 받아 계산하고 값을 돌려줄 뿐.
 - 장시간 작업은 **파일 기반 IPC**: 진행상황은 `progress.jsonl` tail을 SSE로 스트리밍, 취소는 `CANCEL` 센티넬 파일.

@@ -10,12 +10,14 @@ from __future__ import annotations
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
+from infra import jobs
+
 from app.core.config import settings
 from app.domain.video import ExtractParams, extract_frames
 
 
 def task_dir(video_id: str) -> Path:
-    """Progress/sentinel dir; reuses jobs_dir so read_progress(video_id) works."""
+    """Progress/sentinel dir; reuses jobs_dir so the shared SSE reader finds it."""
     return settings.jobs_dir / video_id
 
 
@@ -39,19 +41,17 @@ class VideoManager:
         stem: str,
         params: ExtractParams,
     ) -> None:
-        tdir = task_dir(video_id)
-        tdir.mkdir(parents=True, exist_ok=True)
-        (tdir / "progress.jsonl").touch()
-        (tdir / "CANCEL").unlink(missing_ok=True)  # clear any stale cancel
+        # 재추출이면 이전 이벤트가 섞이지 않게 진행률을 비우고 시작한다
+        job = jobs.at(settings.jobs_dir, video_id).reset()
 
         future = self._get_executor().submit(
             extract_frames,
             video_path,
             raw_dir,
-            tdir / "progress.jsonl",
             stem,
             params,
-            tdir / "CANCEL",
+            job.emit,
+            job.cancel_path,
         )
         self._futures[video_id] = future
         future.add_done_callback(lambda _f: self._futures.pop(video_id, None))
@@ -62,7 +62,7 @@ class VideoManager:
             return False
         if future.cancel():  # still queued — never started
             return True
-        (task_dir(video_id) / "CANCEL").touch()  # running: signal the worker
+        jobs.at(settings.jobs_dir, video_id).request_cancel()  # running: signal the worker
         return True
 
     def is_active(self, video_id: str) -> bool:

@@ -5,24 +5,16 @@ function, plain-dict arguments.
 
 from __future__ import annotations
 
-import json
-import time
 from pathlib import Path
 
-
-def _append_progress(path: Path, event: dict) -> None:
-    event = {"ts": time.time(), **event}
-    with open(path, "a") as f:
-        f.write(json.dumps(event) + "\n")
+from infra import jobs
 
 
 def run_label_job(job_id: str, cfg_dict: dict, jobs_dir: str) -> dict:
     from app.ml.labeling import JobCancelled, LabelJobConfig, run_labeling
 
-    job_dir = Path(jobs_dir) / job_id
-    job_dir.mkdir(parents=True, exist_ok=True)
-    progress_path = job_dir / "progress.jsonl"
-    cancel_path = job_dir / "CANCEL"
+    job = jobs.at(Path(jobs_dir), job_id).ensure()
+    progress_path = job.progress_path
 
     cfg = LabelJobConfig(
         model_paths=[Path(p) for p in cfg_dict["model_paths"]],
@@ -42,13 +34,13 @@ def run_label_job(job_id: str, cfg_dict: dict, jobs_dir: str) -> dict:
     try:
         result = run_labeling(
             cfg,
-            progress=lambda ev: _append_progress(progress_path, ev),
-            cancel_check=cancel_path.exists,
+            progress=lambda ev: jobs.emit(progress_path, ev),
+            cancel_check=job.cancelled,
         )
     except JobCancelled:
         return {"status": "cancelled"}
     except Exception as e:  # surface the message to the progress stream + parent
-        _append_progress(progress_path, {"phase": "error", "msg": str(e)})
+        jobs.emit(progress_path, {"phase": "error", "msg": str(e)})
         raise
 
     return {

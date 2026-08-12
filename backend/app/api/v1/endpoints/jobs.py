@@ -10,9 +10,11 @@ from app.schemas.job import JobCreate, JobOut
 from sse_starlette.sse import EventSourceResponse
 from sqlmodel import Session, select
 
+from infra import jobs
+
 from app.core.config import settings
 from app.db import get_session, session_scope
-from app.services.label_manager import job_manager, read_progress
+from app.services.label_manager import job_manager
 from app.models import Job, ModelEntry, Project, iso_utc
 
 router = APIRouter(prefix="", tags=["jobs"])
@@ -118,7 +120,7 @@ async def job_events(job_id: str, session: Session = Depends(get_session)):
         offset = 0
         idle_polls = 0
         while True:
-            events, offset = await asyncio.to_thread(read_progress, job_id, offset)
+            events, offset = await asyncio.to_thread(jobs.at(settings.jobs_dir, job_id).read, offset)
             terminal = False
             for ev in events:
                 yield {"event": "progress", "data": json.dumps(ev)}
