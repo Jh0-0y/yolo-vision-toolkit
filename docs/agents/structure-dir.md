@@ -25,7 +25,7 @@ backend/
 │   ├── media/               extract(프레임 추출) · tiling · thumbnails
 │   ├── crop/                plan(어댑터) · geometry · window · hud · highlight · cut
 │   ├── labels/              io · store · classes · registry · export
-│   └── train/               uploads(업로드 데이터셋) · staging(SSD 복사)
+│   └── train/               dataset(zip 임포트) · results(산출물 읽기) · uploads · staging
 ├── infra/                   시스템 배관 — 기능이 아니다
 │   └── jobs/                progress.jsonl · CANCEL · JobDir
 ├── tests/                   lib·infra 테스트 (app 테스트는 app/tests/)

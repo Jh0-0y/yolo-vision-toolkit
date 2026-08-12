@@ -8,11 +8,9 @@ import json
 import re
 import shutil
 import uuid
-import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-import yaml
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
@@ -26,8 +24,9 @@ from app.models import ModelEntry, Project, TrainRun, iso_utc
 from app.schemas.training import DatasetPatch, RegisterIn, RunCreate, RunOut
 from app.services.train_manager import train_manager
 from infra import jobs
-from lib.formats import IMAGE_EXTS
 from lib.labels.io import atomic_write_text
+from lib.train import dataset as train_dataset
+from lib.train import results as train_results
 
 router = APIRouter(prefix="/training", tags=["training"])
 
@@ -123,113 +122,6 @@ def list_datasets(project_id: str | None = None, session: Session = Depends(get_
     return out
 
 
-def _count_images(d: Path) -> int:
-    if not d.exists():
-        return 0
-    if d.is_file():  # train may point at a txt list file
-        return sum(1 for line in d.read_text().splitlines() if line.strip())
-    return sum(1 for p in d.rglob("*") if p.suffix.lower() in IMAGE_EXTS)
-
-
-def _normalize_data_yaml(yaml_path: Path) -> dict:
-    """Rewrite train/val to paths relative to the yaml, dropping any `path` key.
-
-    Uploaded zips come from many tools — absolute paths and `path:` roots from
-    other machines are re-resolved against what actually exists on disk.
-    """
-    root = yaml_path.parent
-    data = yaml.safe_load(yaml_path.read_text()) or {}
-    base = data.get("path")
-
-    def _resolve(key: str) -> str | None:
-        val = data.get(key)
-        if val is None:
-            return None
-        p = Path(str(val))
-        candidates: list[Path] = []
-        if not p.is_absolute():
-            candidates.append(root / p)
-            if base and not Path(str(base)).is_absolute():
-                candidates.append(root / str(base) / p)
-        # absolute or unresolvable: try tail components against the extract root
-        candidates.append(root / p.name)
-        if len(p.parts) >= 2:
-            candidates.append(root / Path(*p.parts[-2:]))
-        for c in candidates:
-            if c.exists():
-                return c.relative_to(root).as_posix()
-        return None
-
-    train = _resolve("train")
-    if train is None:
-        raise HTTPException(422, "Cannot resolve the train path in data.yaml")
-    val = _resolve("val") or train
-
-    data.pop("path", None)
-    data["train"] = train
-    data["val"] = val
-    atomic_write_text(yaml_path, yaml.safe_dump(data, sort_keys=False, allow_unicode=True))
-
-    names = data.get("names") or {}
-    n_classes = data.get("nc") or len(names)
-    return {
-        "train": _count_images(root / train),
-        "val": _count_images(root / val),
-        "classes": int(n_classes),
-    }
-
-
-def _extract_dataset(tmp_zip: Path, name: str, auto_delete: bool = False) -> dict:
-    dataset_id = f"u_{uuid.uuid4().hex[:10]}"
-    dest = settings.datasets_dir / dataset_id
-    dest.mkdir(parents=True, exist_ok=True)
-    try:
-        try:
-            with zipfile.ZipFile(tmp_zip) as zf:
-                zf.extractall(dest)
-        except zipfile.BadZipFile:
-            raise HTTPException(422, "Corrupted zip file")
-
-        # data.yaml at the root or one directory down
-        yaml_path = None
-        for candidate in ("data.yaml", "data.yml"):
-            if (dest / candidate).exists():
-                yaml_path = dest / candidate
-                break
-        if yaml_path is None:
-            found = sorted(list(dest.glob("*/data.yaml")) + list(dest.glob("*/data.yml")))
-            if found:
-                yaml_path = found[0]
-        if yaml_path is None:
-            raise HTTPException(422, "data.yaml not found in the zip (a YOLO-format dataset is required)")
-
-        # training_runner expects the file to be literally "data.yaml"
-        if yaml_path.name != "data.yaml":
-            renamed = yaml_path.with_name("data.yaml")
-            yaml_path.rename(renamed)
-            yaml_path = renamed
-
-        counts = _normalize_data_yaml(yaml_path)
-        if counts["train"] == 0:
-            raise HTTPException(422, "No train images found")
-
-        meta = {
-            "id": dataset_id,
-            "name": name,
-            "yaml_dir": yaml_path.parent.relative_to(dest).as_posix(),
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            # when True the run that consumes this dataset deletes it on success
-            # (train_manager._watch) — for one-shot external zips
-            "auto_delete": auto_delete,
-            **counts,
-        }
-        atomic_write_text(dest / "dataset.json", json.dumps(meta, ensure_ascii=False))
-        return meta
-    except Exception:
-        shutil.rmtree(dest, ignore_errors=True)
-        raise
-
-
 @router.post("/datasets", status_code=201)
 async def upload_dataset(
     file: UploadFile,
@@ -245,7 +137,19 @@ async def upload_dataset(
             while chunk := await file.read(1 << 20):
                 f.write(chunk)
         name = file.filename.rsplit("/", 1)[-1].removesuffix(".zip")
-        meta = await run_in_threadpool(_extract_dataset, tmp, name, auto_delete)
+        dataset_id = f"u_{uuid.uuid4().hex[:10]}"
+        try:
+            meta = await run_in_threadpool(
+                train_dataset.extract_zip,
+                tmp,
+                settings.datasets_dir / dataset_id,
+                dataset_id=dataset_id,
+                name=name,
+                auto_delete=auto_delete,
+                now=datetime.now(timezone.utc),
+            )
+        except train_dataset.DatasetError as e:
+            raise HTTPException(422, str(e))
     finally:
         tmp.unlink(missing_ok=True)
     return {**meta, "dataset": f"upload:{meta['id']}", "source": "upload"}
@@ -400,12 +304,7 @@ def run_per_class(run_id: str, session: Session = Depends(get_session)):
     if run is None:
         raise HTTPException(404, "Training run not found")
     path = settings.run_dir(run.project_id, run_id) / "per_class.json"
-    if not path.exists():
-        return []
-    try:
-        return json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return []
+    return train_results.read_json(path, default=[])
 
 
 @router.get("/runs/{run_id}/per-class-history")
@@ -416,18 +315,7 @@ def run_per_class_history(run_id: str, session: Session = Depends(get_session)):
     if run is None:
         raise HTTPException(404, "Training run not found")
     path = settings.run_dir(run.project_id, run_id) / "per_class_history.jsonl"
-    if not path.exists():
-        return []
-    rows = []
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            rows.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-    return rows
+    return train_results.read_jsonl(path)
 
 
 @router.get("/runs/{run_id}/results")
@@ -437,30 +325,10 @@ def run_results(run_id: str, session: Session = Depends(get_session)):
     run = session.get(TrainRun, run_id)
     if run is None:
         raise HTTPException(404, "Training run not found")
-    rdir = settings.run_dir(run.project_id, run_id)
-    csv_path = rdir / "results.csv"
-    if not csv_path.exists():
-        found = sorted(rdir.glob("*/results.csv"))
-        csv_path = found[0] if found else csv_path
-    if not csv_path.exists():
+    csv_path = train_results.find(settings.run_dir(run.project_id, run_id), "results.csv")
+    if csv_path is None:
         return []
-
-    import csv as _csv
-
-    rows: list[dict] = []
-    with open(csv_path, newline="") as f:
-        for raw in _csv.DictReader(f):
-            row: dict = {}
-            for k, v in raw.items():
-                key = (k or "").strip()
-                if not key:
-                    continue
-                try:
-                    row[key] = float(v)
-                except (TypeError, ValueError):
-                    row[key] = v
-            rows.append(row)
-    return rows
+    return train_results.read_results_csv(csv_path)
 
 
 @router.get("/runs/{run_id}/results.csv")
@@ -470,12 +338,8 @@ def download_results_csv(run_id: str, session: Session = Depends(get_session)):
     run = session.get(TrainRun, run_id)
     if run is None:
         raise HTTPException(404, "Training run not found")
-    rdir = settings.run_dir(run.project_id, run_id)
-    csv_path = rdir / "results.csv"
-    if not csv_path.exists():  # some ultralytics versions nest it one level down
-        found = sorted(rdir.glob("*/results.csv"))
-        csv_path = found[0] if found else csv_path
-    if not csv_path.exists():
+    csv_path = train_results.find(settings.run_dir(run.project_id, run_id), "results.csv")
+    if csv_path is None:
         raise HTTPException(404, "results.csv is not available for this run yet")
     filename = f"{_safe_part(run.name or run_id)}_results.csv"
     return FileResponse(csv_path, media_type="text/csv", filename=filename)
@@ -488,12 +352,8 @@ def download_args_yaml(run_id: str, session: Session = Depends(get_session)):
     run = session.get(TrainRun, run_id)
     if run is None:
         raise HTTPException(404, "Training run not found")
-    rdir = settings.run_dir(run.project_id, run_id)
-    path = rdir / "args.yaml"
-    if not path.exists():  # some ultralytics versions nest it one level down
-        found = sorted(rdir.glob("*/args.yaml"))
-        path = found[0] if found else path
-    if not path.exists():
+    path = train_results.find(settings.run_dir(run.project_id, run_id), "args.yaml")
+    if path is None:
         raise HTTPException(404, "args.yaml is not available for this run yet")
     filename = f"{_safe_part(run.name or run_id)}_args.yaml"
     return FileResponse(path, media_type="text/yaml", filename=filename)
