@@ -1,26 +1,23 @@
-"""Video tracking worker: run a model's object tracker (ByteTrack) over a video,
-draw per-object boxes with stable track IDs (and a short motion trail), and/or
-apply a moving vertical (9:16) crop window computed by the adaptive-crop pipeline,
-then write a browser-playable (H.264) mp4. Runs in a child process (torch/
-ultralytics + cv2). Progress → jobs_dir/{job_id}/progress.jsonl.
+"""영상 주석 워커 — 클립 하나를 받아 오버레이 영상이나 세로 크롭 클립을 만든다.
 
-Two independent overlays, each toggled by cfg:
-  - object_tracking: ByteTrack boxes + IDs + motion trails (per-frame model.track).
-  - crop_tracking:   the adaptive-crop pipeline (100ms predict pass, separate from
-                     ByteTrack by design) yields a target-center trajectory. Its
-                     crop X coordinates are always written to crop.json. What we do
-                     with that trajectory depends on cfg["crop_output"]:
-                       "label" — draw the 9:16 crop rectangle onto the full frame
-                                 (default; composes with object_tracking boxes).
-                       "video" — actually cut each frame down to the vertical 9:16
-                                 window and output that clean crop clip (no boxes,
-                                 no rectangle; object_tracking is ignored).
-    The cut/draw geometry lives in lib.crop.
+자식 프로세스에서 돈다(torch·ultralytics·cv2). 진행률은 `jobs_dir/{job_id}/progress.jsonl`.
 
-cv2.VideoWriter H.264 support is unreliable across OpenCV builds, so we always
-write an mp4v intermediate then transcode to H.264 with ffmpeg. ffmpeg is REQUIRED
-(shipped in the Docker image); if it's missing the job fails loudly rather than
-writing an unplayable mp4v file.
+설정 조합에 따라 만드는 것이 달라지지만 **골격은 하나다**:
+
+    궤적을 구한다  →  프레임 소스를 고른다  →  스테이지를 쌓는다  →  한 루프로 돌린다
+
+  궤적(crop.Trajectory)   검출 패스로 계산하거나(crop_tracking), 업로드된 crop.json 을
+                          따르거나(crop_source), 아예 없다(객체 추적만).
+  프레임 소스             영상을 그대로 읽거나, ByteTrack 을 돌려 검출과 함께 읽는다.
+  스테이지                프레임에 무엇을 그릴지 — 객체 박스 · 크롭 창 · HUD · 하이라이트.
+  출력 변환               원본 크기 그대로 두거나, 세로 창으로 잘라낸다.
+
+무엇을 켤지는 `_plan_render` 한 곳에서만 정한다. 새 오버레이를 붙이려면 스테이지를
+하나 만들어 거기에 한 줄 더하면 되고, 루프는 건드리지 않는다.
+
+cv2.VideoWriter 의 H.264 지원은 OpenCV 빌드마다 달라 믿을 수 없다. 그래서 항상 mp4v
+중간 파일을 쓰고 ffmpeg 로 다시 인코딩한다 — ffmpeg 는 필수이며, 없으면 재생 불가능한
+파일을 남기는 대신 잡을 실패시킨다.
 """
 
 from __future__ import annotations
@@ -45,6 +42,190 @@ def _color(key: int) -> tuple[int, int, int]:
     return _PALETTE[key % len(_PALETTE)]
 
 
+# ---------- 궤적: "이 시각에 어디를 잘라야 하나" ----------
+
+
+def _trajectory_from_json(path: str, frame_width: int, crop_w: int) -> crop.Trajectory:
+    """업로드된 crop.json 을 궤적으로 읽는다. 두 형식을 모두 받는다."""
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    keyframes = data.get("keyframes") or []
+    if keyframes and "videoOffsetMs" in keyframes[0]:
+        # 계약 스키마(camelCase): keyframes의 x는 크롭 왼쪽 X — 중심으로 변환.
+        # LINEAR 보간 계약은 center_at 의 선형 보간이 그대로 충족한다.
+        spec_src_w = float((data.get("source") or {}).get("width") or frame_width)
+        spec_crop_w = float((data.get("crop") or {}).get("width") or crop_w)
+        scale = frame_width / spec_src_w if spec_src_w else 1.0  # 해상도가 다르면 비례
+        return (
+            [int(k["videoOffsetMs"]) for k in keyframes],
+            [(float(k["x"]) + spec_crop_w / 2) * scale for k in keyframes],
+        )
+    # 레거시 형식: samples(target_center_x) 기반
+    samples = data.get("samples") or []
+    half = frame_width / 2
+    return (
+        [int(s["video_offset_ms"]) for s in samples],
+        [
+            half if s.get("target_type") == "center" else float(s["target_center_x"])
+            for s in samples
+        ],
+    )
+
+
+def _detect_trajectory(cfg, src: Path, meta, device: str, *, collect_debug: bool):
+    """검출 패스를 한 번 돌려 크롭 궤적을 계산하고 crop.json 을 쓴다.
+
+    ByteTrack(객체 추적)과는 **일부러 분리된 패스**다 — 공 재현율에 맞춘 설정(낮은
+    conf, 큰 imgsz)으로 따로 돌아야 크롭 좌표가 안정적이다.
+
+    돌려주는 것: (궤적, 타입 조회, 디버그 조회, 데드존 반폭, crop.json 문자열).
+    """
+    # adaptive_crop pulls in cv2/ultralytics — keep the imports lazy (worker only)
+    from adaptive_crop import VideoInfo, build_detector, detect_video, plan_from_detections
+
+    from lib.crop import plan as crop_adapter
+
+    conf_cfg = cfg.get("conf")
+    crop_conf = float(conf_cfg) if conf_cfg is not None else 0.10
+    entries = cfg.get("detectors") or [
+        {"pt": cfg["specs"][0][1], "mode": "full", "conf": conf_cfg,
+         "imgsz": int(cfg.get("imgsz", 1280))}
+    ]
+    detector = build_detector(crop_adapter.detector_entries(entries, crop_conf), device)
+    clip_cfg = crop_adapter.resolve_clip_config(cfg.get("overrides") or None)
+
+    detected = detect_video(
+        str(src), detector=detector, sampling_interval_ms=clip_cfg.sampling_interval_ms
+    )
+    # 컨테이너가 프레임 수를 안 들고 있으면(0) 샘플 격자의 끝을 길이로 본다.
+    duration_ms = meta.duration_ms
+    if duration_ms <= 0 and detected:
+        duration_ms = detected[-1][0]
+    vinfo = VideoInfo(
+        width=meta.width, height=meta.height, fps=meta.fps, duration_ms=duration_ms
+    )
+    result = plan_from_detections(
+        detected,
+        crop_adapter.crop_spec_for(meta.width, meta.height),
+        vinfo,
+        config=clip_cfg,
+        collect_debug=collect_debug,
+    )
+    return (
+        crop.geometry.build_trajectory(result.samples, meta.width),
+        crop.geometry.build_types(result.samples),
+        crop.geometry.build_debug_lookup(result.debug) if result.debug else None,
+        clip_cfg.dead_zone_half,
+        crop_adapter.crop_plan_json(result),
+    )
+
+
+# ---------- 프레임 소스: (idx, frame, ms, 검출) 을 낸다 ----------
+
+
+def _decoded_frames(src: Path, fps: float):
+    """영상을 순서대로 읽는다. 검출은 없다."""
+    import cv2
+
+    cap = cv2.VideoCapture(str(src))
+    try:
+        idx = 0
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                return
+            yield idx, frame, idx / fps * 1000.0, None
+            idx += 1
+    finally:
+        cap.release()
+
+
+def _tracked_frames(pt: str, src: Path, fps: float, *, conf, iou, imgsz, device):
+    """ByteTrack 을 돌려 프레임과 그 프레임의 검출을 함께 낸다."""
+    from ultralytics import YOLO
+
+    results = YOLO(pt).track(
+        source=str(src),
+        stream=True,
+        persist=True,
+        tracker="bytetrack.yaml",
+        conf=conf,
+        iou=iou,
+        imgsz=imgsz,
+        device=device,
+        verbose=False,
+    )
+    for idx, r in enumerate(results):
+        yield idx, r.orig_img, idx / fps * 1000.0, r
+
+
+# ---------- 스테이지: 프레임에 무엇을 그릴지 ----------
+
+
+def _box_stage():
+    """검출 박스 · 라벨 · 최근 이동 궤적. 트랙 id 별 궤적을 프레임 간에 기억한다."""
+    import cv2
+
+    trails: dict[int, deque] = defaultdict(lambda: deque(maxlen=_TRAIL_LEN))
+
+    def draw(frame, ms: float, detected) -> None:
+        boxes = getattr(detected, "boxes", None)
+        if boxes is None or boxes.xyxy is None:
+            return
+        xyxy = boxes.xyxy.cpu().numpy()
+        clss = boxes.cls.cpu().numpy().astype(int)
+        confs = boxes.conf.cpu().numpy()
+        ids = (
+            boxes.id.cpu().numpy().astype(int)
+            if boxes.id is not None
+            else [None] * len(xyxy)
+        )
+        names = detected.names
+        for k in range(len(xyxy)):
+            x1, y1, x2, y2 = (int(v) for v in xyxy[k])
+            tid = int(ids[k]) if ids[k] is not None else None
+            color = _color(tid if tid is not None else int(clss[k]))
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            cls_name = names.get(int(clss[k]), str(clss[k]))
+            label = (
+                f"#{tid} {cls_name} {confs[k] * 100:.0f}%"
+                if tid is not None
+                else f"{cls_name} {confs[k] * 100:.0f}%"
+            )
+            cv2.putText(
+                frame, label, (x1, max(12, y1 - 5)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA,
+            )
+            if tid is not None:
+                trails[tid].append(((x1 + x2) // 2, (y1 + y2) // 2))
+                pts = trails[tid]
+                for j in range(1, len(pts)):
+                    cv2.line(frame, pts[j - 1], pts[j], color, 2, cv2.LINE_AA)
+
+    return draw
+
+
+def _crop_overlay_stage(cfg, traj, types, debug, dead_zone_half, crop_w, w, h):
+    """크롭 창 사각형 · HUD(데드존·중심선·타입) · 선택 하이라이트."""
+    draw_crop_box = bool(cfg.get("draw_crop_box", True))
+    show_dead_zone = bool(cfg.get("show_dead_zone", True))
+    show_center_line = bool(cfg.get("show_center_line", True))
+
+    def draw(frame, ms: float, _detected) -> None:
+        cx = crop.geometry.center_at(ms, traj)  # 보간은 프레임당 한 번
+        if draw_crop_box and cx is not None:
+            crop.window.draw(frame, cx, crop_w, w, h)
+            crop.hud.draw(
+                frame, cx, w, h,
+                target_type=crop.geometry.type_at(ms, types) if types else None,
+                dead_zone_half=dead_zone_half,
+                show_dead_zone=show_dead_zone, show_center_line=show_center_line,
+            )
+        if debug is not None:  # 대상 하이라이트 (독립 토글)
+            crop.highlight.draw(frame, crop.geometry.debug_at(ms, debug), w, h)
+
+    return draw
+
+
 def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
     import cv2
 
@@ -58,235 +239,91 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_name("._raw.mp4")  # mp4v intermediate
 
-    device = resolve_device(cfg.get("device"))
-    # conf None → 파이프라인별 기본값 (object tracking 0.4 / crop 검출 0.10)
-    conf_cfg = cfg.get("conf")
-    conf_thr = float(conf_cfg) if conf_cfg is not None else 0.4
-    crop_conf = float(conf_cfg) if conf_cfg is not None else 0.10
-    iou_thr = float(cfg.get("iou", cfg.get("iou_wbf", 0.7)))
-    # 추론 입력 사이즈 — 보통 학습 사이즈에 맞춘다 (UI에서 선택)
-    imgsz = int(cfg.get("imgsz", 1280))
-    object_tracking = bool(cfg.get("object_tracking", True))
-    crop_tracking = bool(cfg.get("crop_tracking", True))
-    # crop output form: "none" = JSON만(영상 렌더 스킵), "label" = 9:16 사각형 오버레이,
-    # "video" = 프레임을 세로 창으로 잘라 깨끗한 클립 출력.
-    crop_output = cfg.get("crop_output", "label")
-    crop_cut = crop_tracking and crop_output == "video"
-    crop_json_only = crop_tracking and crop_output == "none"
-    # 그리기 도구 오버레이 개별 토글 (기본 True = 과거 동작 보존)
-    draw_crop_box = bool(cfg.get("draw_crop_box", True))
-    show_dead_zone = bool(cfg.get("show_dead_zone", True))
-    show_center_line = bool(cfg.get("show_center_line", True))
-    show_target_highlight = bool(cfg.get("show_target_highlight", False))
-    overrides = cfg.get("overrides") or None  # 크롭 튜닝 오버라이드 (dict)
-
-
     # crop_source: 추론 없이 컷만 하는 모드 ("json" = 업로드 좌표 따라, "center" = 중앙 고정)
     crop_source = cfg.get("crop_source")
+    crop_tracking = crop_source is None and bool(cfg.get("crop_tracking", True))
+    # crop_output: "none" = JSON만(영상 렌더 스킵) · "label" = 오버레이 · "video" = 세로 컷
+    crop_output = cfg.get("crop_output", "label")
+    json_only = crop_tracking and crop_output == "none"
+    # 컷 모드는 깨끗한 세로 클립만 낸다 — 오버레이도 객체 추적도 무시한다(설계).
+    cut_output = crop_source is not None or (crop_tracking and crop_output == "video")
+    object_tracking = (
+        crop_source is None and not cut_output and bool(cfg.get("object_tracking", True))
+    )
 
     try:
-        if crop_source in ("json", "center"):
-            return _run_crop_cut(cfg, src, out, tmp, job, crop_source)
+        if not json_only:
+            video.require_ffmpeg()  # 한 시간 렌더한 뒤 마지막에 실패하지 않도록 먼저
 
-        # tracking/crop are single-model by nature — use the first selected model
-        _, pt = cfg["specs"][0]
-
-        # fail early if we can't produce a browser-playable file (JSON-only needs no encode)
-        if not crop_json_only:
-            video.require_ffmpeg()
-
-        # probe geometry / length for the writer + progress total
         meta = video.probe(src)
         fps, total, w, h = meta.fps, meta.frame_count, meta.width, meta.height
-
-        # crop-cut output is narrower (the vertical 9:16 window); the overlay/box
-        # outputs keep the source size.
-        crop_w = crop.geometry.crop_width_for(h, w) if crop_tracking else 0
-        out_w, out_h = (crop_w, h) if crop_cut else (w, h)
-        writer = cv2.VideoWriter(str(tmp), cv2.VideoWriter_fourcc(*"mp4v"), fps, (out_w, out_h))
+        crop_w = crop.geometry.crop_width_for(h, w) if (crop_tracking or crop_source) else 0
 
         jobs.emit(progress, {"phase": "start", "total": total})
 
-        # ---- crop trajectory (separate predict pass) ----
-        crop_traj: crop.Trajectory | None = None
-        crop_types: tuple[list, list] | None = None  # 디버그 HUD 타입 라벨용
-        crop_debug: tuple[list, list] | None = None  # 대상 하이라이트 조회 lookup
-        dead_zone_half: float | None = None  # 데드존 밴드 반폭 (crop_tracking일 때만)
-        if crop_tracking:
+        # ---- 궤적 ----
+        traj = types = debug = dead_zone_half = None
+        if crop_source is not None:
+            # json → 업로드 좌표 / center → 빈 궤적(cut 이 중앙으로 폴백)
+            traj = (
+                _trajectory_from_json(cfg["crop_json_path"], w, crop_w)
+                if crop_source == "json"
+                else ([], [])
+            )
+        elif crop_tracking:
             jobs.emit(progress, {"phase": "crop_analyze", "total": total})
-            # adaptive_crop pulls in cv2/ultralytics — keep the imports lazy (worker only)
-            from adaptive_crop import (
-                VideoInfo,
-                build_detector,
-                detect_video,
-                plan_from_detections,
+            traj, types, debug, dead_zone_half, plan_json = _detect_trajectory(
+                cfg, src, meta, resolve_device(cfg.get("device")),
+                collect_debug=bool(cfg.get("show_target_highlight", False)) and not json_only,
             )
+            (out.parent / "crop.json").write_text(plan_json, encoding="utf-8")
 
-            from lib.crop import plan as crop_adapter
-
-            # 검출은 공 재현율에 맞춘 설정(낮은 conf, 큰 imgsz)으로 따로 한 패스 돈다.
-            # 영상 규격은 위에서 이미 읽었으므로 다시 열지 않고 그대로 넘긴다(출처 하나).
-            entries = cfg.get("detectors") or [
-                {"pt": pt, "mode": "full", "conf": conf_cfg, "imgsz": imgsz}
-            ]
-            crop_detector = build_detector(
-                crop_adapter.detector_entries(entries, crop_conf), device
-            )
-            crop_cfg = crop_adapter.resolve_clip_config(overrides)
-            detected = detect_video(
-                str(src),
-                detector=crop_detector,
-                sampling_interval_ms=crop_cfg.sampling_interval_ms,
-            )
-            # 컨테이너가 프레임 수를 안 들고 있으면(total=0) 샘플 격자의 끝을 길이로 본다.
-            duration_ms = int(total / fps * 1000) if total > 0 and fps else 0
-            if duration_ms <= 0 and detected:
-                duration_ms = detected[-1][0]
-            vinfo = VideoInfo(width=w, height=h, fps=fps, duration_ms=duration_ms)
-            cropres = plan_from_detections(
-                detected,
-                crop_adapter.crop_spec_for(w, h),
-                vinfo,
-                config=crop_cfg,
-                collect_debug=show_target_highlight and not crop_json_only,
-            )
-            crop_traj = crop.geometry.build_trajectory(cropres.samples, w)
-            crop_types = crop.geometry.build_types(cropres.samples)
-            if cropres.debug:
-                crop_debug = crop.geometry.build_debug_lookup(cropres.debug)
-            dead_zone_half = crop_cfg.dead_zone_half
-            (out.parent / "crop.json").write_text(
-                crop_adapter.crop_plan_json(cropres), encoding="utf-8"
-            )
-
-        # ---- JSON-only: crop.json은 위에서 썼다. 영상 렌더/인코딩 스킵 ----
-        if crop_json_only:
-            writer.release()
-            tmp.unlink(missing_ok=True)
+        # ---- JSON만: 좌표는 위에서 썼다. 렌더·인코딩은 건너뛴다 ----
+        if json_only:
             jobs.emit(progress, {"phase": "done", "done": 0, "total": total})
             return {"status": "done", "frames": 0, "json_only": True}
 
-        def _apply_crop_overlays(frame, ms: float) -> None:
-            """그리기 토글에 따라 크롭 박스(+데드존·센터선)·대상 하이라이트를 그린다."""
-            if crop_traj is None:
-                return
-            # 보간은 프레임당 한 번 — 그리기 함수는 좌표만 받는다
-            cx = crop.geometry.center_at(ms, crop_traj)
-            if draw_crop_box and cx is not None:
-                crop.window.draw(frame, cx, crop_w, w, h)
-                crop.hud.draw(
-                    frame, cx, w, h,
-                    target_type=crop.geometry.type_at(ms, crop_types) if crop_types else None,
-                    dead_zone_half=dead_zone_half,
-                    show_dead_zone=show_dead_zone, show_center_line=show_center_line,
-                )
-            if crop_debug is not None:  # 대상 하이라이트 (독립 토글)
-                crop.highlight.draw(frame, crop.geometry.debug_at(ms, crop_debug), w, h)
+        # ---- 무엇을 켤지 정하는 유일한 곳 ----
+        if object_tracking:
+            conf_cfg = cfg.get("conf")
+            source = _tracked_frames(
+                cfg["specs"][0][1], src, fps,
+                conf=float(conf_cfg) if conf_cfg is not None else 0.4,
+                iou=float(cfg.get("iou", cfg.get("iou_wbf", 0.7))),
+                imgsz=int(cfg.get("imgsz", 1280)),
+                device=resolve_device(cfg.get("device")),
+            )
+        else:
+            source = _decoded_frames(src, fps)
 
+        stages = []
+        if object_tracking:
+            stages.append(_box_stage())
+        if traj is not None and not cut_output:
+            stages.append(
+                _crop_overlay_stage(cfg, traj, types, debug, dead_zone_half, crop_w, w, h)
+            )
+
+        out_w, out_h = (crop_w, h) if cut_output else (w, h)
+        writer = cv2.VideoWriter(str(tmp), cv2.VideoWriter_fourcc(*"mp4v"), fps, (out_w, out_h))
+
+        # ---- 단일 렌더 루프 ----
         idx = 0
         cancelled = False
-
-        if crop_cut:
-            # crop-cut: output the clean vertical clip — cut each frame to the 9:16
-            # window (no boxes, no rectangle; object_tracking is ignored by design).
-            cap = cv2.VideoCapture(str(src))
-            try:
-                while True:
-                    if job.cancelled():
-                        cancelled = True
-                        break
-                    ok, frame = cap.read()
-                    if not ok:
-                        break
-                    ms = idx / fps * 1000.0
-                    writer.write(
-                        crop.cut.window(
-                            frame, crop.geometry.center_at(ms, crop_traj), crop_w, w
-                        )
-                    )
-                    idx += 1
-                    if idx % 5 == 0 or idx == total:
-                        jobs.emit(progress, {"phase": "annotate", "done": idx, "total": total})
-            finally:
-                cap.release()
-        elif object_tracking:
-            from ultralytics import YOLO
-
-            model = YOLO(pt)
-            trails: dict[int, deque] = defaultdict(lambda: deque(maxlen=_TRAIL_LEN))
-            results = model.track(
-                source=str(src),
-                stream=True,
-                persist=True,
-                tracker="bytetrack.yaml",
-                conf=conf_thr,
-                iou=iou_thr,
-                imgsz=imgsz,
-                device=device,
-                verbose=False,
-            )
-            for r in results:
-                if job.cancelled():
-                    cancelled = True
-                    break
-                frame = r.orig_img
-                boxes = getattr(r, "boxes", None)
-                if boxes is not None and boxes.xyxy is not None:
-                    xyxy = boxes.xyxy.cpu().numpy()
-                    clss = boxes.cls.cpu().numpy().astype(int)
-                    confs = boxes.conf.cpu().numpy()
-                    ids = (
-                        boxes.id.cpu().numpy().astype(int)
-                        if boxes.id is not None
-                        else [None] * len(xyxy)
-                    )
-                    names = r.names
-                    for k in range(len(xyxy)):
-                        x1, y1, x2, y2 = (int(v) for v in xyxy[k])
-                        tid = int(ids[k]) if ids[k] is not None else None
-                        color = _color(tid if tid is not None else int(clss[k]))
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                        cls_name = names.get(int(clss[k]), str(clss[k]))
-                        label = (
-                            f"#{tid} {cls_name} {confs[k] * 100:.0f}%"
-                            if tid is not None
-                            else f"{cls_name} {confs[k] * 100:.0f}%"
-                        )
-                        cv2.putText(
-                            frame, label, (x1, max(12, y1 - 5)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA,
-                        )
-                        if tid is not None:
-                            trails[tid].append(((x1 + x2) // 2, (y1 + y2) // 2))
-                            pts = trails[tid]
-                            for j in range(1, len(pts)):
-                                cv2.line(frame, pts[j - 1], pts[j], color, 2, cv2.LINE_AA)
-                if crop_traj is not None:
-                    _apply_crop_overlays(frame, idx / fps * 1000.0)
-                writer.write(frame)
-                idx += 1
-                if idx % 5 == 0 or idx == total:
-                    jobs.emit(progress, {"phase": "annotate", "done": idx, "total": total})
-        else:
-            # crop-only overlay: no ByteTrack pass — just read frames and draw the rectangle
-            cap = cv2.VideoCapture(str(src))
-            try:
-                while True:
-                    if job.cancelled():
-                        cancelled = True
-                        break
-                    ok, frame = cap.read()
-                    if not ok:
-                        break
-                    if crop_traj is not None:
-                        _apply_crop_overlays(frame, idx / fps * 1000.0)
-                    writer.write(frame)
-                    idx += 1
-                    if idx % 5 == 0 or idx == total:
-                        jobs.emit(progress, {"phase": "annotate", "done": idx, "total": total})
-            finally:
-                cap.release()
-
+        for i, frame, ms, detected in source:
+            if job.cancelled():
+                cancelled = True
+                break
+            for stage in stages:
+                stage(frame, ms, detected)
+            if cut_output:
+                frame = crop.cut.window(
+                    frame, crop.geometry.center_at(ms, traj), crop_w, w
+                )
+            writer.write(frame)
+            idx = i + 1
+            if idx % 5 == 0 or idx == total:
+                jobs.emit(progress, {"phase": "annotate", "done": idx, "total": total})
         writer.release()
 
         if cancelled:
@@ -307,80 +344,3 @@ def run_annotate(job_id: str, cfg: dict, jobs_dir: str) -> dict:
     finally:
         # source video is transient — never keep it around
         src.unlink(missing_ok=True)
-
-
-def _run_crop_cut(cfg, src, out, tmp, job, mode: str) -> dict:
-    """추론 없이 세로 9:16 크롭 클립만 만든다.
-
-    mode="json":   업로드된 crop.json의 samples 좌표를 따라 컷.
-    mode="center": crop.json 없이 화면 중앙에 고정해 컷.
-    모델을 로드하지 않으므로 빠르다.
-    """
-    import cv2
-
-    progress = job.progress_path
-
-    video.require_ffmpeg()
-
-    meta = video.probe(src)
-    fps, total, w, h = meta.fps, meta.frame_count, meta.width, meta.height
-
-    crop_w = crop.geometry.crop_width_for(h, w)
-    writer = cv2.VideoWriter(str(tmp), cv2.VideoWriter_fourcc(*"mp4v"), fps, (crop_w, h))
-    jobs.emit(progress, {"phase": "start", "total": total})
-
-    # 궤적: json → 좌표 따라 / center → 빈 궤적(cut_window이 중앙 fallback)
-    traj: crop.Trajectory = ([], [])
-    if mode == "json":
-        data = json.loads(Path(cfg["crop_json_path"]).read_text(encoding="utf-8"))
-        keyframes = data.get("keyframes") or []
-        if keyframes and "videoOffsetMs" in keyframes[0]:
-            # 계약 스키마(camelCase): keyframes의 x는 크롭 왼쪽 X — 중심으로 변환.
-            # LINEAR 보간 계약은 cut_window의 np.interp가 그대로 충족한다.
-            spec_src_w = float((data.get("source") or {}).get("width") or w)
-            spec_crop_w = float((data.get("crop") or {}).get("width") or crop_w)
-            scale = w / spec_src_w if spec_src_w else 1.0  # 실제 해상도가 다르면 비례
-            ms_list = [int(k["videoOffsetMs"]) for k in keyframes]
-            cx_list = [(float(k["x"]) + spec_crop_w / 2) * scale for k in keyframes]
-            traj = (ms_list, cx_list)
-        else:
-            # 레거시 형식: samples(target_center_x) 기반
-            samples = data.get("samples") or []
-            half = w / 2
-            ms_list = [int(s["video_offset_ms"]) for s in samples]
-            cx_list = [
-                half if s.get("target_type") == "center" else float(s["target_center_x"])
-                for s in samples
-            ]
-            traj = (ms_list, cx_list)
-
-    idx = 0
-    cancelled = False
-    cap = cv2.VideoCapture(str(src))
-    try:
-        while True:
-            if job.cancelled():
-                cancelled = True
-                break
-            ok, frame = cap.read()
-            if not ok:
-                break
-            ms = idx / fps * 1000.0
-            writer.write(crop.cut.window(frame, crop.geometry.center_at(ms, traj), crop_w, w))
-            idx += 1
-            if idx % 5 == 0 or idx == total:
-                jobs.emit(progress, {"phase": "annotate", "done": idx, "total": total})
-    finally:
-        cap.release()
-    writer.release()
-
-    if cancelled:
-        tmp.unlink(missing_ok=True)
-        jobs.emit(progress, {"phase": "cancelled", "done": idx, "total": total})
-        return {"status": "cancelled"}
-
-    jobs.emit(progress, {"phase": "encoding", "done": idx, "total": total})
-    video.to_h264(tmp, out)
-    tmp.unlink(missing_ok=True)
-    jobs.emit(progress, {"phase": "done", "done": idx, "total": total})
-    return {"status": "done", "frames": idx}

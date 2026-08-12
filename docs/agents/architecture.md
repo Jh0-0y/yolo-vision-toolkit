@@ -58,7 +58,11 @@ api/v1/endpoints  →  services  →  workers
 | `api/v1/endpoints/` | HTTP 경로. 입력 검증, `HTTPException`, DTO 변환 |
 | `api/v1/router.py` | **라우터 배선 단 한 곳.** 새 엔드포인트는 여기 두 목록에 등록해야 살아난다 |
 | `services/` | 잡 수명 관리(프로세스 풀 소유), DB 갱신, 싱글턴 매니저 |
-| `workers/` | 별도 프로세스에서 도는 엔트리 함수. 계산은 `lib/` 에서 가져다 조립만 한다 |
+| `workers/` | 별도 프로세스에서 도는 엔트리 함수. 계산은 `lib/` 에서 가져다 **조립만** 한다 |
+
+워커의 골격은 하나다 — **무엇을 켤지 정하는 곳을 한 군데로 모으고, 루프는 하나만 둔다.**
+`annotate_worker` 가 그 예다: 궤적을 구하고 → 프레임 소스를 고르고 → 스테이지를 쌓고 →
+한 루프로 돌린다. 새 오버레이는 스테이지 하나를 더하는 일이지 분기를 늘리는 일이 아니다.
 | `schemas/` | 요청·응답 DTO (pydantic `BaseModel`) |
 | `models/` | DB 테이블 (SQLModel `table=True`) — `__init__.py` 한 파일 |
 | `db/` | 엔진·세션·경량 마이그레이션 |
