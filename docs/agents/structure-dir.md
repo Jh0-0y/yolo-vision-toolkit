@@ -45,7 +45,11 @@ backend/
 frontend/src/
 ├── main.tsx                 QueryClient · MantineProvider · BrowserRouter
 ├── App.tsx                  라우트 정의
-├── api/client.ts            서버 통신 단일 진입 (경로 함수 + 응답 타입)
+├── api/                     서버 통신 — client.ts 는 재수출 배럴, 구현은 리소스별 파일
+│   ├── client.ts            화면은 이것만 import 한다
+│   ├── http.ts              fetch/XHR 을 아는 유일한 파일
+│   ├── <리소스>.ts           projects · labels · classes · jobs · exports · training …
+│   └── test/                predict · annotate · live · compare
 ├── pages/                   라우트 1개 = 파일 1개
 ├── layouts/                 프로젝트 셸
 ├── components/<영역>/       화면 전용 컴포넌트·훅 (dataset · editor · lab · test · upload)
@@ -88,8 +92,8 @@ data/                        런타임 데이터 (git 추적 안 함) → data-l
 **두 폴더 모두 비워져 사라졌다** — 순수 계산은 전부 `lib/` 의 주제 패키지에 있고, `app/` 에는
 HTTP·DB·프로세스 관리만 남았다.
 
-남은 것은 프론트다 — `api/client.ts`(약 980줄)가 리소스 전부를 한 파일에 들고 있고,
-`TrainRunDetailPage.tsx`(약 1000줄)에 서브 컴포넌트 다섯이 눌러앉아 있다.
+백엔드와 프론트 모두 한 차례 정리를 마쳤다. 다음에 손댈 곳은 그때 가장 큰 파일을 보고
+정한다 — 지금 기준으로는 `LabelEditorPage.tsx`(약 490줄)와 `stores/jobStore.ts`(약 400줄)다.
 
 무관한 변경에서 나머지를 함께 옮기지 않는다. 새 코드는 새 자리에 두고, 기존 코드는 그 기능을
 손볼 때 같이 옮긴다.

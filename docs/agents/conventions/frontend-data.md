@@ -63,3 +63,6 @@ export const cancelAutoLabel = (jobId: string) => api.post(`/jobs/${jobId}/cance
 - UI 는 Mantine 9 를 쓴다. 다른 UI 라이브러리를 새로 들이지 않는다.
 - 라우트 하나 = `pages/<이름>Page.tsx` 하나. `App.tsx` 에 라우트를 추가한다.
 - 특정 화면에서만 쓰는 컴포넌트·훅은 `components/<영역>/` 아래 둔다. 여러 화면이 쓰게 되면 `components/` 바로 아래로 올린다.
+- 페이지가 300줄을 넘고 안에 **서브 컴포넌트가 눌러앉아 있으면** `components/<영역>/` 으로 뺀다.
+  `pages/TrainRunDetailPage.tsx` + `components/train/` 이 그 예다. 순수 변환 함수는 `.ts` 로
+  따로 두면 컴포넌트 없이 읽을 수 있다.
