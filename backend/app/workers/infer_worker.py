@@ -87,7 +87,7 @@ def run_predict(specs: list[tuple[str, str]], image, cfg_dict: dict) -> dict:
     the requested device is loaded first (lazy warm). `image` is a path str.
     `cfg_dict` carries a resolved `device` plus conf/iou_wbf/imgsz.
     """
-    from app.ml.predict import PredictConfig, predict_image
+    from lib.detect.predict import PredictConfig, predict_image
 
     device = cfg_dict.get("device") or "cpu"
     models: list[tuple[str, object]] = []

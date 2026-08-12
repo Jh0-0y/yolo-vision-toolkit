@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from app.ml.labeling import LabelJobConfig, run_labeling
+from lib.detect.labeling import LabelJobConfig, run_labeling
 
 
 class _Arr:

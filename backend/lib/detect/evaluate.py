@@ -9,7 +9,7 @@ Reuses `ml.ensemble.iou`. Box coords are normalized xyxy in [0,1].
 
 from __future__ import annotations
 
-from app.ml.ensemble import iou
+from lib.detect.ensemble import iou
 
 
 def match_frame(gt: list[dict], pred: list[dict], iou_thr: float = 0.5) -> dict:

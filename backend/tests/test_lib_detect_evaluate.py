@@ -1,6 +1,6 @@
 """AP / mAP math in ml.evaluate — pure, no torch."""
 
-from app.ml.evaluate import (
+from lib.detect.evaluate import (
     IOU_THRESHOLDS,
     average_precision,
     map_from_accumulated,

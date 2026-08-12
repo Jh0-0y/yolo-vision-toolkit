@@ -53,7 +53,7 @@ job = jobs.at(Path(jobs_dir), job_id)      # 워커 (설정을 모르므로 루�
 
 ## 순수 계산 쪽
 
-`lib/` 과 `app/ml/` 의 계산 함수는 **파일도 잡도 모른다.** 콜백을 인자로 받는다.
+`lib/` 의 계산 함수는 **파일도 잡도 모른다.** 콜백을 인자로 받는다.
 
 ```python
 result = run_labeling(

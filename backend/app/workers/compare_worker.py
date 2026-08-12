@@ -76,7 +76,7 @@ def _gather_pairs(dataset_dir: Path, image_exts: set[str]) -> list[tuple[Path, P
 
 def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
     from app.core.config import resolve_device, settings
-    from app.ml.evaluate import (
+    from lib.detect.evaluate import (
         IOU_THRESHOLDS,
         accumulate,
         aggregate,
@@ -84,7 +84,7 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         match_for_ap,
         match_frame,
     )
-    from app.ml.predict import PredictConfig, predict_image
+    from lib.detect.predict import PredictConfig, predict_image
     from lib.formats import IMAGE_EXTS
     from lib.labels.io import read_label_file
     from lib.labels.registry import normalize

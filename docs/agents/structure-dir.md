@@ -19,9 +19,11 @@ backend/
 ├── scripts/                 일회성 마이그레이션 스크립트
 ├── lib/                     순수 기능 — app·infra 를 import 하지 않는다
 │   ├── formats.py           IMAGE_EXTS · VIDEO_EXTS — 어디서든 읽는 공용 어휘
+│   ├── device.py            "auto" -> 실제 장치 (설정은 모른다)
+│   ├── detect/              predict · labeling · ensemble · evaluate
 │   ├── video/               probe(규격 읽기) · to_h264 · require_ffmpeg
 │   ├── media/               extract(프레임 추출) · tiling · thumbnails
-│   ├── crop/                geometry(좌표 조회) · window · hud · highlight · cut
+│   ├── crop/                plan(어댑터) · geometry · window · hud · highlight · cut
 │   ├── labels/              io · store · classes · registry · export
 │   └── train/               uploads(업로드 데이터셋) · staging(SSD 복사)
 ├── infra/                   시스템 배관 — 기능이 아니다
@@ -38,7 +40,6 @@ backend/
     │   └── endpoints/       리소스별 HTTP 경로
     ├── services/            *_manager.py — 잡 수명·프로세스 풀·DB 갱신
     ├── workers/             *_worker.py · train_runner.py — 별도 프로세스 엔트리
-    ├── ml/                  모델을 쓰는 순수 계산 (앙상블·평가·추론·크롭 어댑터)
     └── tests/               test_*.py
 
 frontend/src/
@@ -82,10 +83,12 @@ data/                        런타임 데이터 (git 추적 안 함) → data-l
 
 ## 이행 중이다
 
-`lib/` 과 `infra/` 는 `app/domain/`·`app/ml/` 의 잡탕 상태를 걷어내려고 새로 만든 자리다.
-**`app/domain/` 은 비워져 사라졌다.** 그 안에 있던 것은 전부 `lib/` 의 주제 패키지로 갔다.
-`app/ml/` 은 아직 남아 있다 — 앙상블·평가·추론·크롭 어댑터 다섯 파일이고, `ml/labeling.py` 가
-`app.core.config` 에 묶여 있어 통째로는 못 옮긴다.
+`lib/` 과 `infra/` 는 `app/domain/`·`app/ml/` 의 잡탕 상태를 걷어내려고 만든 자리다.
+**두 폴더 모두 비워져 사라졌다** — 순수 계산은 전부 `lib/` 의 주제 패키지에 있고, `app/` 에는
+HTTP·DB·프로세스 관리만 남았다.
+
+다음 단계는 `app/` 안이다. `api/v1/endpoints/predict.py`(603줄)에 네 가지 잡 계열이 섞여 있고,
+워커가 아직 계산과 조립을 함께 들고 있다.
 
 무관한 변경에서 나머지를 함께 옮기지 않는다. 새 코드는 새 자리에 두고, 기존 코드는 그 기능을
 손볼 때 같이 옮긴다.

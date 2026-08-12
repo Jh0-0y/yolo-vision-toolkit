@@ -27,7 +27,7 @@ related:
 ## 백엔드 계층과 의존 방향
 
 ```
-api/v1/endpoints  →  services  →  workers  ──▶  ml
+api/v1/endpoints  →  services  →  workers
        │
        └──────────────→  schemas  ·  models
 
@@ -39,7 +39,7 @@ api/v1/endpoints  →  services  →  workers  ──▶  ml
 
 | 패키지 | 담는 것 | 금지 |
 |---|---|---|
-| `lib/` | 순수 기능 (영상 프로브·인코딩 등) | `app/`·`infra/` import. 잡·DB·HTTP 를 몰라야 한다 |
+| `lib/` | 순수 기능 (검출·크롭·라벨·영상·미디어·학습파일) | `app/`·`infra/` import. 잡·DB·HTTP 를 몰라야 한다 |
 | `infra/` | 잡 배관 (진행률·취소·잡 디렉터리) | `app/` import. `settings` 도 모르므로 경로를 인자로 받는다 |
 
 - `lib/` 가 진행률을 알려야 하면 **콜백으로 받는다** (`emit`·`on_progress`·`cancel_check`).
@@ -58,15 +58,14 @@ api/v1/endpoints  →  services  →  workers  ──▶  ml
 | `api/v1/endpoints/` | HTTP 경로. 입력 검증, `HTTPException`, DTO 변환 |
 | `api/v1/router.py` | **라우터 배선 단 한 곳.** 새 엔드포인트는 여기 두 목록에 등록해야 살아난다 |
 | `services/` | 잡 수명 관리(프로세스 풀 소유), DB 갱신, 싱글턴 매니저 |
-| `workers/` | 별도 프로세스에서 도는 엔트리 함수. `torch`·`ultralytics` 는 여기 함수 안에서만 |
-| `ml/` | 모델을 쓰는 순수 계산 (앙상블·평가·추론·크롭 어댑터) |
+| `workers/` | 별도 프로세스에서 도는 엔트리 함수. 계산은 `lib/` 에서 가져다 조립만 한다 |
 | `schemas/` | 요청·응답 DTO (pydantic `BaseModel`) |
 | `models/` | DB 테이블 (SQLModel `table=True`) — `__init__.py` 한 파일 |
 | `db/` | 엔진·세션·경량 마이그레이션 |
 | `core/` | 설정(`settings`)·디바이스 해석 |
 
-- `ml/` 은 **프로세스도 DB도 HTTP도 모른다.** 값을 받아 값을 돌려준다.
-- 모델을 쓰지 **않는** 순수 계산은 `app/` 이 아니라 `lib/` 에 둔다 — 옛 `app/domain/` 은 비워졌다.
+- **계산은 `app/` 에 두지 않는다.** 옛 `app/domain/`·`app/ml/` 은 둘 다 비워져 사라졌고,
+  순수 계산은 전부 `lib/` 의 주제 패키지에 있다. `app/` 에 남은 건 HTTP·DB·프로세스 관리뿐이다.
 - DB 접근은 `api/`·`services/` 에서만 한다.
 
 ## 아직 확정되지 않은 경계
@@ -74,9 +73,9 @@ api/v1/endpoints  →  services  →  workers  ──▶  ml
 - `services/` vs `workers/` — 새 장시간 잡의 기본 자리는 **정해져 있지 않다.**
   애매하면 추측하지 말고 사용자에게 묻는다.
 
-> `domain/` vs `ml/` 은 더 이상 문제가 아니다. `app/domain/` 을 없애고 그 내용을 `lib/` 의
-> 주제 패키지로 보내면서 경계 자체가 사라졌다. 남은 `app/ml/` 의 기준은 하나다 — **모델을 쓰면
-> `app/ml/`, 안 쓰면 `lib/`.**
+> `domain/` vs `ml/` 은 더 이상 문제가 아니다. 두 폴더를 없애고 내용을 `lib/` 의 주제 패키지로
+> 보내면서 경계 자체가 사라졌다. **모델을 쓰는지는 기준이 아니다** — `lib/detect/` 는 ultralytics 를
+> 쓴다. 기준은 하나다: **`app/`·`infra/` 를 import 하지 않으면 `lib/`.**
 
 ## 프론트
 

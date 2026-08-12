@@ -1,7 +1,7 @@
 ---
 title: adaptive-crop
 scope:
-  - backend/app/ml/crop.py
+  - backend/lib/crop/plan.py
   - backend/app/workers/*.py
   - backend/lib/crop/**
   - frontend/src/components/lab/**
@@ -30,7 +30,7 @@ related:
 
 **크롭 계산 로직을 이 저장소에 추가하지 않는다.** 알고리즘을 고쳐야 하면 adaptive-crop 에서 고치고 버전을 올린다 → [업그레이드](adaptive-crop-upgrade.md)
 
-## 어댑터 — `app/ml/crop.py`
+## 어댑터 — `lib/crop/plan.py`
 
 라이브러리가 받는 형태와 툴킷/UI 가 쓰는 형태가 달라서 **번역만 하는 얇은 층**을 둔다.
 

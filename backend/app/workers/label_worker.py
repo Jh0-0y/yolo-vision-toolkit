@@ -12,7 +12,7 @@ from infra import jobs
 
 def run_label_job(job_id: str, cfg_dict: dict, jobs_dir: str) -> dict:
     from app.core.config import resolve_device
-    from app.ml.labeling import JobCancelled, LabelJobConfig, run_labeling
+    from lib.detect.labeling import JobCancelled, LabelJobConfig, run_labeling
 
     job = jobs.at(Path(jobs_dir), job_id).ensure()
     progress_path = job.progress_path

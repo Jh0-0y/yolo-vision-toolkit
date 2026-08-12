@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 
 from app.core.config import resolve_device
-from app.ml.labeling import LabelJobConfig, run_labeling
+from lib.detect.labeling import LabelJobConfig, run_labeling
 
 
 def main() -> None:

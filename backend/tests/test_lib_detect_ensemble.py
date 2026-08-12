@@ -1,6 +1,6 @@
 import pytest
 
-from app.ml.ensemble import Detection, FusedBox, fuse_class, iou, merge_detections
+from lib.detect.ensemble import Detection, FusedBox, fuse_class, iou, merge_detections
 
 
 def det(cls=0, xyxy=(0.1, 0.1, 0.3, 0.3), score=0.9, model="a"):

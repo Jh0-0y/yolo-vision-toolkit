@@ -348,13 +348,13 @@ cd backend && uv run pytest
 
 **백엔드**: Python 3.12 · FastAPI · SQLModel(SQLite) · Ultralytics(YOLO) · PyTorch · SSE(진행 스트리밍) · uv(패키지) · [adaptive-crop](https://github.com/Jh0-0y/adaptive-crop)(세로 크롭 좌표 계산).
 
-**크롭 파이프라인은 외부 라이브러리다.** 공·선수를 추적해 세로 크롭 X 좌표를 내는 계산은 이 저장소에 없고 `adaptive-crop` 패키지가 한다 — 운영 CropWorker와 **같은 코드로 같은 좌표**를 내야 여기서 맞춘 튜닝을 믿을 수 있기 때문이다. 툴킷이 갖는 것은 그 좌표를 화면에 그리고(`lib/crop/`·`liveOverlay.ts`) 파일로 내보내는 부분, 그리고 둘을 잇는 얇은 어댑터(`ml/crop.py`)뿐이다.
+**크롭 파이프라인은 외부 라이브러리다.** 공·선수를 추적해 세로 크롭 X 좌표를 내는 계산은 이 저장소에 없고 `adaptive-crop` 패키지가 한다 — 운영 CropWorker와 **같은 코드로 같은 좌표**를 내야 여기서 맞춘 튜닝을 믿을 수 있기 때문이다. 툴킷이 갖는 것은 그 좌표를 화면에 그리고(`lib/crop/`·`liveOverlay.ts`) 파일로 내보내는 부분, 그리고 둘을 잇는 얇은 어댑터(`lib/crop/plan.py`)뿐이다.
 
 **계층 경계 (백엔드 대원칙)**:
 > **API·services = 비즈니스·상태·결정·DB / workers = 순수 계산(별도 프로세스, torch·CUDA는 여기서만) / ml·domain = 순수 함수(프로세스·DB 모름).**
 
 - `app/` 밖에 두 패키지가 더 있다: `lib/`(순수 기능 — 영상 프로브·인코딩 등, 잡·DB·HTTP를 모른다)와 `infra/`(잡 배관 — `progress.jsonl`·`CANCEL`). 둘 다 `app/`을 import하지 않아 웹 없이도 쓸 수 있다.
-- `torch`/`ultralytics`/CUDA는 `workers/`·`ml/`에서만, 그것도 함수 안 lazy import — API 프로세스가 CUDA를 로드하지 않도록.
+- `torch`/`ultralytics`/CUDA는 `workers/`·`lib/detect/`에서만, 그것도 함수 안 lazy import — API 프로세스가 CUDA를 로드하지 않도록.
 - DB(SQLite)는 API 프로세스에서만 접근. 워커는 값을 받아 계산하고 값을 돌려줄 뿐.
 - 장시간 작업은 **파일 기반 IPC**: 진행상황은 `progress.jsonl` tail을 SSE로 스트리밍, 취소는 `CANCEL` 센티넬 파일.
 - 모든 HTTP 경로는 `/api/v1/...` (인프라 프로브 `GET /api/health`만 예외).
