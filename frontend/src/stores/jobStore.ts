@@ -259,6 +259,14 @@ export const useJobStore = create<JobStore>((set, get) => {
   const addJob = (job: Job) =>
     set((s) => ({ jobs: { ...s.jobs, [job.id]: job }, order: [...s.order, job.id] }))
 
+  // 이미 이 서버 잡을 보고 있는 카드. `track*` 은 화면이 다시 마운트될 때마다
+  // 불릴 수 있으므로(탭 이동·StrictMode) 같은 잡을 두 번 등록하지 않는다.
+  const trackedByRef = (kind: JobKind, refId: string): string | undefined =>
+    get().order.find((i) => {
+      const j = get().jobs[i]
+      return j?.kind === kind && j.refId === refId
+    })
+
   // drive a single-phase server job from its SSE, with reconnect-failure handling
   const attachServerJob = <E>(
     id: string,
@@ -423,6 +431,8 @@ export const useJobStore = create<JobStore>((set, get) => {
     },
 
     trackCrop: (projectId, cropId, title) => {
+      const tracked = trackedByRef('crop', cropId)
+      if (tracked) return tracked
       const id = newId()
       addJob({
         id,
@@ -444,6 +454,8 @@ export const useJobStore = create<JobStore>((set, get) => {
     },
 
     trackLive: (projectId, jobId, title) => {
+      const tracked = trackedByRef('live', jobId)
+      if (tracked) return tracked
       const id = newId()
       addJob({
         id,
@@ -471,13 +483,9 @@ export const useJobStore = create<JobStore>((set, get) => {
       } catch {
         return // offline / project gone — the Crop Runs page reports it properly
       }
-      const { jobs, order, trackCrop } = get()
-      const tracked = new Set(
-        order.map((i) => jobs[i]).filter((j) => j?.kind === 'crop').map((j) => j.refId),
-      )
       for (const run of runs) {
-        if (run.status !== 'running' || tracked.has(run.id)) continue
-        trackCrop(projectId, run.id, run.name)
+        // trackCrop 이 이미 보고 있는 잡은 그대로 돌려준다
+        if (run.status === 'running') get().trackCrop(projectId, run.id, run.name)
       }
     },
 

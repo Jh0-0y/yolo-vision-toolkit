@@ -101,6 +101,8 @@ export default function CropDrawMode({ projectId, models }: Props) {
 
   useEffect(() => {
     if (renderJob.status === 'done') setRenderReady(true)
+    // 끝난 잡의 id 는 버린다 — 세션에 남겨 두면 다음에 들어올 때 이미 닫은 카드가 되살아난다
+    if (renderJob.status === 'done' || renderJob.status === 'error') setRenderJobId(null)
   }, [renderJob.status, renderJob.seq])
 
   // 검출이 끝나면 캐시를 받아 온다
