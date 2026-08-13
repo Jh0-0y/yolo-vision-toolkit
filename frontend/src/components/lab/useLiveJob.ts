@@ -1,79 +1,65 @@
-import { useEffect, useRef, useState } from 'react'
-import { startLive, subscribeLiveEvents, type LiveProgress } from '../../api/client'
-
-export const LIVE_PHASE_LABEL: Record<string, string> = {
-  start: 'Preparing…',
-  detect: 'Detecting objects…',
-  encoding: 'Encoding preview…',
-  done: 'Done',
-}
+import { useState } from 'react'
+import { startLive, startLiveRender, type TrackcropOverrides } from '../../api/client'
+import { useJobStore } from '../../stores/jobStore'
 
 type StartOpts = Parameters<typeof startLive>[0]
 
-/** Lifecycle hook for the live-preview detection pass (drop → detect → done).
- *  On success it calls `onDone(detectId)` so the caller can fetch the cached result. */
-export function useLiveJob(onDone: (detectId: string) => void) {
-  const [jobId, setJobId] = useState<string | null>(null)
-  const [progress, setProgress] = useState<LiveProgress | null>(null)
-  const [running, setRunning] = useState(false)
+/** Crop Draw 의 서버 잡을 **시작**하고 전역 잡 카드에 넘긴다.
+ *
+ * 검출 패스도 오버레이 렌더도 몇 분씩 걸리는 서버 잡이라, 다른 오래 걸리는 작업과
+ * 같은 자리(우상단 카드)에서 보여야 한다. 이 화면은 진행률을 그리지 않고 "끝났다"는
+ * 신호만 받아 결과를 가져온다.
+ *
+ * 카드가 `refId` 로 SSE 를 듣고 취소도 보내므로, 여기서는 잡 하나의 스토어 id 만
+ * 들고 있으면 된다. */
+export function useLiveJob(projectId: string) {
+  const trackLive = useJobStore((s) => s.trackLive)
+  const [jobKey, setJobKey] = useState<string | null>(null)
+  const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const unsub = useRef<(() => void) | null>(null)
-  const onDoneRef = useRef(onDone)
-  onDoneRef.current = onDone
+  const job = useJobStore((s) => (jobKey ? s.jobs[jobKey] : undefined))
 
-  useEffect(() => () => unsub.current?.(), [])
-
-  function listen(id: string) {
-    unsub.current?.()
+  async function launch(title: string, starter: () => Promise<{ job_id: string }>) {
     setError(null)
-    setJobId(id)
-    setProgress({ phase: 'start' })
-    setRunning(true)
-    unsub.current = subscribeLiveEvents(id, (ev) => {
-      setProgress(ev)
-      if (ev.phase === 'done') {
-        setRunning(false)
-        onDoneRef.current(id)
-      } else if (ev.phase === 'error') {
-        setError(ev.msg || 'Detection failed')
-        setRunning(false)
-      } else if (ev.phase === 'cancelled') {
-        setRunning(false)
-      }
-    })
-  }
-
-  async function run(opts: StartOpts) {
-    unsub.current?.()
-    setError(null)
-    setJobId(null)
-    setProgress({ phase: 'start' })
-    setRunning(true)
+    setStarting(true)
     try {
-      listen((await startLive(opts)).job_id)
+      const { job_id } = await starter()
+      setJobKey(trackLive(projectId, job_id, title))
+      return job_id
     } catch (e) {
       setError((e as Error).message)
-      setRunning(false)
+      return null
+    } finally {
+      setStarting(false)
     }
   }
 
-  /** 이미 돌고 있는 검출에 다시 붙는다 (탭 복귀·새로고침).
+  const run = (opts: StartOpts) => launch(opts.file.name, () => startLive(opts))
+
+  const render = (detectId: string, title: string, overrides: TrackcropOverrides, toggles: Record<string, boolean>) =>
+    launch(title, () => startLiveRender(detectId, overrides, toggles))
+
+  /** 이미 돌고 있는 잡을 카드에 올린다 (탭 복귀·새로고침).
    *  서버가 progress.jsonl 을 처음부터 재생하므로 늦게 붙어도 같은 그림이 나온다. */
-  const attach = (id: string) => listen(id)
+  const attach = (jobId: string, title: string) => setJobKey(trackLive(projectId, jobId, title))
 
   function reset() {
-    unsub.current?.()
-    unsub.current = null
-    setJobId(null)
-    setProgress(null)
-    setRunning(false)
+    setJobKey(null)
     setError(null)
   }
 
-  const pct =
-    progress?.total && progress.done != null
-      ? Math.round((progress.done / progress.total) * 100)
-      : 0
-
-  return { jobId, progress, running, error, pct, setError, run, attach, reset }
+  return {
+    starting,
+    error,
+    setError,
+    /** 마지막으로 시작·복구한 잡. 진행률 UI 는 전역 카드가 그린다 — 여기서는 상태만 본다. */
+    status: job?.status,
+    /** done 으로 넘어갈 때 한 번 올라간다 */
+    seq: job?.seq,
+    jobError: job?.error,
+    run,
+    render,
+    attach,
+    reset,
+  }
 }

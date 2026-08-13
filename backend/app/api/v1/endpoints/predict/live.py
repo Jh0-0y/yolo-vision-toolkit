@@ -102,7 +102,16 @@ def live_status(detect_id: str):
     status, msg = jobs.at(settings.jobs_dir, detect_id).status()
     if status == "done" and not (work / "detected.json").exists():
         return LiveStatus(status="expired")
-    return LiveStatus(status=status, msg=msg)
+    return LiveStatus(status=status, msg=msg, has_render=(work / "render.mp4").exists())
+
+
+@router.post("/live/{job_id}/cancel")
+def cancel_live(job_id: str):
+    """검출·렌더 잡 취소. 워커가 CANCEL 을 보고 스스로 멈춘다 — kill 하지 않는다."""
+    if not job_id.isalnum():  # uuid4().hex
+        raise HTTPException(422, "Invalid job id")
+    test_job_manager.cancel(job_id)
+    return {"cancelled": True}
 
 
 @router.get("/live/{job_id}/video")

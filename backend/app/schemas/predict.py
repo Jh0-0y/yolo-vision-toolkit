@@ -30,6 +30,7 @@ class LiveStatus(BaseModel):
 
     status: str  # running | done | error | cancelled | expired
     msg: str | None = None
+    has_render: bool = False  # 구워 둔 오버레이 영상이 아직 있나
 
 
 class ResidentModel(BaseModel):

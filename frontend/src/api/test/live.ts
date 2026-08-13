@@ -5,8 +5,9 @@ import { appendBall } from './annotate'
 import type { BallDetectorOpts, TestJobStart, TrackcropOverrides } from './annotate'
 
 
+// 검출 패스와 오버레이 렌더가 같은 스트림 형식을 쓴다 — 다른 것은 중간 phase 뿐이다.
 export interface LiveProgress {
-  phase: 'start' | 'detect' | 'encoding' | 'done' | 'error' | 'cancelled'
+  phase: 'start' | 'detect' | 'render' | 'encoding' | 'done' | 'error' | 'cancelled'
   done?: number
   total?: number
   msg?: string
@@ -95,15 +96,24 @@ export function startLive(opts: {
   return api.upload<TestJobStart>('/predict/live', form)
 }
 
-export function subscribeLiveEvents(jobId: string, onEvent: (ev: LiveProgress) => void): () => void {
+export function subscribeLiveEvents(
+  jobId: string,
+  onEvent: (ev: LiveProgress) => void,
+  onError?: () => void,
+): () => void {
   const source = new EventSource(`${BASE}/predict/live/${jobId}/events`)
   source.addEventListener('progress', (e) => {
     const ev = JSON.parse((e as MessageEvent).data) as LiveProgress
     onEvent(ev)
     if (ev.phase === 'done' || ev.phase === 'error' || ev.phase === 'cancelled') source.close()
   })
+  source.onerror = () => {
+    if (source.readyState === EventSource.CLOSED) onError?.()
+  }
   return () => source.close()
 }
+
+export const cancelLiveJob = (jobId: string) => api.post(`/predict/live/${jobId}/cancel`)
 
 export const liveVideoUrl = (detectId: string) => `${BASE}/predict/live/${detectId}/video`
 
@@ -112,6 +122,7 @@ export const liveVideoUrl = (detectId: string) => `${BASE}/predict/live/${detect
 export interface LiveSessionStatus {
   status: 'running' | 'done' | 'error' | 'cancelled' | 'expired'
   msg: string | null
+  has_render: boolean // 구워 둔 오버레이 영상이 아직 있나
 }
 
 export const getLiveStatus = (detectId: string) =>

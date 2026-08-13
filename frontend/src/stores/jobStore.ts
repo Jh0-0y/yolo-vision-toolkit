@@ -3,17 +3,20 @@ import {
   cancelAutoLabel,
   cancelCropRun,
   cancelExport,
+  cancelLiveJob,
   cancelVideo,
   listCropRuns,
   subscribeCropEvents,
   subscribeExportEvents,
   subscribeJobEvents,
+  subscribeLiveEvents,
   subscribeVideoEvents,
   uploadTrainDataset,
   uploadVideo,
   type CropProgressEvent,
   type ExportProgressEvent,
   type JobProgressEvent,
+  type LiveProgress,
   type VideoProgressEvent,
   type VideoUploadParams,
 } from '../api/client'
@@ -32,7 +35,10 @@ import {
 //    (GET /crops derives status from progress.jsonl), so nothing is persisted
 //    here — `syncCropRuns` asks the server instead. That survives a different
 //    browser, a different machine, and a cleared localStorage.
-export type JobKind = 'dataset' | 'video' | 'autolabel' | 'export' | 'crop'
+//  - live (Crop Draw detect / overlay render): the same SSE. Not persisted here
+//    either — the Draw tab remembers its session id and re-registers the job on
+//    mount if the server says it is still running.
+export type JobKind = 'dataset' | 'video' | 'autolabel' | 'export' | 'crop' | 'live'
 export type JobStatus = 'running' | 'done' | 'error'
 
 export interface JobPhase {
@@ -70,6 +76,7 @@ interface JobStore {
   trackAutoLabel: (projectId: string, jobId: string, title: string) => string
   trackExport: (projectId: string, exportId: string, title: string) => string
   trackCrop: (projectId: string, cropId: string, title: string) => string
+  trackLive: (projectId: string, jobId: string, title: string) => string
   cancel: (id: string) => void
   dismiss: (id: string) => void
   hydrate: () => void
@@ -210,6 +217,34 @@ function mapCrop(ev: CropProgressEvent): Mapped {
   if (ev.phase === 'done') return { phase, status: 'done' }
   if (ev.phase === 'error' || ev.phase === 'cancelled')
     return { phase, status: 'error', error: ev.msg || 'Crop job stopped' }
+  return { phase, status: 'running' }
+}
+
+const LIVE_PHASE_DETAIL: Record<string, string> = {
+  start: 'Preparing…',
+  detect: 'Detecting objects…',
+  render: 'Rendering overlay…',
+  encoding: 'Encoding video…',
+}
+
+function mapLive(ev: LiveProgress): Mapped {
+  const pct =
+    ev.total && ev.done != null
+      ? Math.min(100, Math.round((ev.done / ev.total) * 100))
+      : ev.phase === 'done'
+        ? 100
+        : 0
+  const phase: JobPhase = {
+    key: 'live',
+    label: 'Crop Draw',
+    // only the detect / render passes count frames; the rest have no measurable length
+    indeterminate: ev.phase !== 'detect' && ev.phase !== 'render' && ev.phase !== 'done',
+    value: pct,
+    detail: ev.phase === 'done' ? 'Ready' : (LIVE_PHASE_DETAIL[ev.phase] ?? 'Working…'),
+  }
+  if (ev.phase === 'done') return { phase, status: 'done' }
+  if (ev.phase === 'error' || ev.phase === 'cancelled')
+    return { phase, status: 'error', error: ev.msg || 'Crop Draw job stopped' }
   return { phase, status: 'running' }
 }
 
@@ -408,6 +443,27 @@ export const useJobStore = create<JobStore>((set, get) => {
       return id
     },
 
+    trackLive: (projectId, jobId, title) => {
+      const id = newId()
+      addJob({
+        id,
+        kind: 'live',
+        title,
+        projectId,
+        status: 'running',
+        phaseIndex: 0,
+        phases: [{ key: 'live', label: 'Crop Draw', indeterminate: true, value: 0, detail: 'Preparing…' }],
+        seq: 0,
+        refId: jobId,
+        // 결과를 볼 곳이 Draw 탭뿐이라 카드가 그 손잡이다
+        sticky: true,
+        resultHref: `/projects/${projectId}/lab/crop?tab=draw`,
+        resultLabel: 'Open Crop Draw',
+      })
+      attachServerJob(id, (onEv, onErr) => subscribeLiveEvents(jobId, onEv, onErr), mapLive)
+      return id
+    },
+
     syncCropRuns: async (projectId) => {
       let runs
       try {
@@ -434,6 +490,7 @@ export const useJobStore = create<JobStore>((set, get) => {
         else if (j.kind === 'autolabel') cancelAutoLabel(j.refId).catch(() => {})
         else if (j.kind === 'export') cancelExport(j.projectId, j.refId).catch(() => {})
         else if (j.kind === 'crop') cancelCropRun(j.projectId, j.refId).catch(() => {})
+        else if (j.kind === 'live') cancelLiveJob(j.refId).catch(() => {})
       }
       // reflect immediately; the SSE / upload rejection will also settle it
       patch(id, (jj) => ({ ...jj, status: 'error', error: 'Cancelled' }))

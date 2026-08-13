@@ -7,7 +7,6 @@ import {
   Card,
   Checkbox,
   Group,
-  Progress,
   Stack,
   Text,
   UnstyledButton,
@@ -20,8 +19,6 @@ import {
   livePlan,
   liveRenderVideoUrl,
   liveVideoUrl,
-  startLiveRender,
-  subscribeLiveEvents,
   type CropPlan,
   type DetectorPayload,
   type LiveResult,
@@ -31,7 +28,7 @@ import {
 import DetectionSettings, { type DetectorEntry } from './DetectionSettings'
 import TuningPanel from './TuningPanel'
 import { clearSession, loadSession, saveSession } from './cropDrawSession'
-import { LIVE_PHASE_LABEL, useLiveJob } from './useLiveJob'
+import { useLiveJob } from './useLiveJob'
 import { drawOverlay } from './liveOverlay'
 
 function entryPayload(entries: DetectorEntry[]): DetectorPayload[] {
@@ -81,6 +78,7 @@ export default function CropDrawMode({ projectId, models }: Props) {
   const [file, setFile] = useState<File | null>(null)
   const [fileName, setFileName] = useState<string | null>(saved.fileName)
   const [detectId, setDetectId] = useState<string | null>(saved.detectId)
+  const [renderJobId, setRenderJobId] = useState<string | null>(saved.renderJobId)
   const [restoring, setRestoring] = useState(saved.detectId != null)
   const [result, setResult] = useState<LiveResult | null>(null)
   const [plan, setPlan] = useState<CropPlan | null>(null)
@@ -89,15 +87,33 @@ export default function CropDrawMode({ projectId, models }: Props) {
   const [notice, setNotice] = useState<string | null>(null)
   const [videoFailed, setVideoFailed] = useState(false)
   const [analyzedKey, setAnalyzedKey] = useState<string | null>(saved.analyzedKey)
-  // 오버레이 렌더 잡 (추론 없음 — 캐시로 영상 굽기)
-  const [renderState, setRenderState] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
-  const [renderPct, setRenderPct] = useState(0)
-  const renderUnsub = useRef<(() => void) | null>(null)
+  // 두 서버 잡 모두 전역 잡 카드가 진행률을 보여준다 — 이 화면은 결과만 받는다.
+  const detectJob = useLiveJob(projectId) // 검출 패스 (모델·GPU)
+  const renderJob = useLiveJob(projectId) // 오버레이 렌더 (추론 없음 — 캐시로 영상 굽기)
+  const busy = detectJob.starting || detectJob.status === 'running'
+  // 카드는 사용자가 닫을 수 있다 — 끝났다는 사실은 여기 걸어 둔다
+  const [detectDone, setDetectDone] = useState(false)
+  const [renderReady, setRenderReady] = useState(false)
 
-  const job = useLiveJob((id) => {
-    setDetectId(id)
-    getLiveResult(id).then(setResult).catch((e) => setLoadError((e as Error).message))
-  })
+  useEffect(() => {
+    if (detectJob.status === 'done') setDetectDone(true)
+  }, [detectJob.status, detectJob.seq])
+
+  useEffect(() => {
+    if (renderJob.status === 'done') setRenderReady(true)
+  }, [renderJob.status, renderJob.seq])
+
+  // 검출이 끝나면 캐시를 받아 온다
+  useEffect(() => {
+    if (!detectDone || !detectId || result?.detect_id === detectId) return
+    let alive = true
+    getLiveResult(detectId)
+      .then((r) => alive && setResult(r))
+      .catch((e) => alive && setLoadError((e as Error).message))
+    return () => {
+      alive = false
+    }
+  }, [detectDone, detectId, result?.detect_id])
 
   useEffect(() => {
     if (models.length && !entries[0].modelId)
@@ -110,6 +126,7 @@ export default function CropDrawMode({ projectId, models }: Props) {
     saveSession({
       projectId,
       detectId,
+      renderJobId,
       fileName,
       analyzedKey,
       entries,
@@ -118,13 +135,14 @@ export default function CropDrawMode({ projectId, models }: Props) {
       toggles: { objInference, showTrails, drawCropBox, showDeadZone, showCenterLine, showHighlight },
     })
   }, [
-    projectId, detectId, fileName, analyzedKey, entries, sampling, overrides,
+    projectId, detectId, renderJobId, fileName, analyzedKey, entries, sampling, overrides,
     objInference, showTrails, drawCropBox, showDeadZone, showCenterLine, showHighlight,
   ])
 
   /** 프리뷰만 놓아준다 — 튜닝 노브는 남긴다. 어차피 다시 쓸 값이다. */
   function forgetPreview(why: string | null) {
     setDetectId(null)
+    setRenderJobId(null)
     setFileName(null)
     setAnalyzedKey(null)
     setResult(null)
@@ -138,13 +156,17 @@ export default function CropDrawMode({ projectId, models }: Props) {
     const id = saved.detectId
     let alive = true
     getLiveStatus(id)
-      .then(async ({ status, msg }) => {
+      .then(async ({ status, msg, has_render }) => {
         if (!alive) return
+        if (has_render) setRenderReady(true)
+        // 렌더 잡은 SSE 가 처음부터 재생되므로 상태를 따로 묻지 않고 카드에 올리면 된다
+        if (saved.renderJobId) renderJob.attach(saved.renderJobId, `Overlay — ${saved.fileName ?? 'video'}`)
         if (status === 'done') {
           const r = await getLiveResult(id)
           if (alive) setResult(r)
         } else if (status === 'running') {
-          job.attach(id) // 진행률은 처음부터 재생되므로 늦게 붙어도 같은 그림이다
+          // 도는 중이면 전역 카드에 올린다 — 진행률은 처음부터 재생된다
+          detectJob.attach(id, saved.fileName ?? 'Crop Draw')
         } else if (status === 'expired') {
           forgetPreview('The previous preview expired — its cache is cleared after an hour.')
         } else {
@@ -183,22 +205,31 @@ export default function CropDrawMode({ projectId, models }: Props) {
     setFile(f)
     setFileName(f.name)
     setAnalyzedKey(detectionKey)
-    await job.run({
-      file: f,
-      modelIds: [base.modelId],
-      projectId,
-      conf: base.conf === '' ? undefined : base.conf,
-      imgsz: base.imgsz,
-      device: null,
-      samplingIntervalMs: sampling === '' ? undefined : sampling,
-      detectors: entryPayload(entries),
-    })
+    setDetectDone(false)
+    setRenderReady(false)
+    setRenderJobId(null)
+    renderJob.reset()
+    // startLive 가 돌려주는 job_id 가 곧 detect_id 다 — 캐시도 이 이름으로 찾는다
+    setDetectId(
+      await detectJob.run({
+        file: f,
+        modelIds: [base.modelId],
+        projectId,
+        conf: base.conf === '' ? undefined : base.conf,
+        imgsz: base.imgsz,
+        device: null,
+        samplingIntervalMs: sampling === '' ? undefined : sampling,
+        detectors: entryPayload(entries),
+      }),
+    )
   }
 
   function reset() {
-    job.reset()
-    renderUnsub.current?.()
-    setRenderState('idle')
+    detectJob.reset()
+    renderJob.reset()
+    setDetectDone(false)
+    setRenderReady(false)
+    setRenderJobId(null)
     setFile(null)
     setFileName(null)
     setDetectId(null)
@@ -212,33 +243,20 @@ export default function CropDrawMode({ projectId, models }: Props) {
     clearSession()
   }
 
-  /** 오버레이 영상 렌더 시작 — 검출 캐시 + 현재 튜닝/토글로 서버가 굽는다. */
+  /** 오버레이 영상 렌더 시작 — 검출 캐시 + 현재 튜닝/토글로 서버가 굽는다.
+   *  진행률은 전역 잡 카드가 보여주므로 여기서는 시작만 한다. */
   async function renderVideo() {
     if (!result) return
-    renderUnsub.current?.()
-    setRenderState('running')
-    setRenderPct(0)
-    try {
-      const { job_id } = await startLiveRender(result.detect_id, overrides, {
+    setRenderJobId(
+      await renderJob.render(result.detect_id, `Overlay — ${fileName ?? 'video'}`, overrides, {
         obj_boxes: objInference,
         show_trails: showTrails,
         draw_crop_box: drawCropBox,
         show_dead_zone: showDeadZone,
         show_center_line: showCenterLine,
         show_highlight: showHighlight,
-      })
-      renderUnsub.current = subscribeLiveEvents(job_id, (ev) => {
-        if (ev.total && ev.done != null) setRenderPct(Math.round((ev.done / ev.total) * 100))
-        if (ev.phase === 'done') setRenderState('done')
-        else if (ev.phase === 'error') {
-          setLoadError(ev.msg || 'Render failed')
-          setRenderState('error')
-        } else if (ev.phase === 'cancelled') setRenderState('idle')
-      })
-    } catch (e) {
-      setLoadError((e as Error).message)
-      setRenderState('error')
-    }
+      }),
+    )
   }
 
   /** 현재 튜닝이 반영된 plan을 계약 스키마(camelCase) crop.json으로 저장한다.
@@ -379,7 +397,7 @@ export default function CropDrawMode({ projectId, models }: Props) {
     }
   }, [result])
 
-  const error = job.error || loadError
+  const error = detectJob.error || renderJob.error || loadError
 
   return (
     <Stack gap="md">
@@ -391,10 +409,10 @@ export default function CropDrawMode({ projectId, models }: Props) {
             onEntries={setEntries}
             sampling={sampling}
             onSampling={setSampling}
-            disabled={job.running}
+            disabled={busy}
           />
 
-          {detectionDirty && !job.running && (
+          {detectionDirty && !busy && (
             file ? (
               <Button
                 variant="light"
@@ -414,7 +432,7 @@ export default function CropDrawMode({ projectId, models }: Props) {
           <TuningPanel
             value={overrides}
             onChange={setOverrides}
-            disabled={job.running}
+            disabled={busy}
             exclude={['sampling_interval_ms']}
           />
 
@@ -479,7 +497,7 @@ export default function CropDrawMode({ projectId, models }: Props) {
       <Card withBorder radius="md" padding="md">
         <Stack gap="md">
           {error && (
-            <Alert color="red" icon={<IconAlertTriangle size={18} />} withCloseButton onClose={() => { job.setError(null); setLoadError(null) }}>
+            <Alert color="red" icon={<IconAlertTriangle size={18} />} withCloseButton onClose={() => { detectJob.setError(null); renderJob.setError(null); setLoadError(null) }}>
               {error}
             </Alert>
           )}
@@ -505,25 +523,21 @@ export default function CropDrawMode({ projectId, models }: Props) {
                 <Text size="sm" truncate="end" maw={360}>{fileName}</Text>
                 <Group gap="xs">
                   {planLoading && result && <Badge variant="light" color="blue">updating…</Badge>}
-                  <Button size="xs" variant="subtle" onClick={reset} disabled={job.running}>New video</Button>
+                  <Button size="xs" variant="subtle" onClick={reset} disabled={busy}>New video</Button>
                 </Group>
               </Group>
 
-              {restoring && !job.running && (
+              {restoring && !busy && (
                 <Text size="sm" c="dimmed">Restoring the previous preview…</Text>
               )}
 
-              {job.running && (
-                <Stack gap={4}>
-                  <Group justify="space-between">
-                    <Text size="sm">{LIVE_PHASE_LABEL[job.progress?.phase ?? 'start'] ?? 'Working…'}</Text>
-                    {job.progress?.phase === 'detect' && <Badge variant="light">{job.pct}%</Badge>}
-                  </Group>
-                  <Progress value={job.progress?.phase === 'encoding' ? 100 : job.pct} animated />
-                </Stack>
+              {busy && (
+                <Text size="sm" c="dimmed">
+                  Detecting in the background — progress is in the job card, top right.
+                </Text>
               )}
 
-              {result && !job.running && (
+              {result && !busy && (
                 videoFailed ? (
                   <Alert color="orange" icon={<IconAlertTriangle size={18} />}>
                     The preview couldn't play inline (unsupported codec in this browser).
@@ -549,19 +563,19 @@ export default function CropDrawMode({ projectId, models }: Props) {
                 )
               )}
 
-              {plan && result && !job.running && (
+              {plan && result && !busy && (
                 <Group gap="md">
                   <Anchor size="sm" onClick={() => downloadPlan()} style={{ cursor: 'pointer' }}>
                     Download crop.json — current tuning
                   </Anchor>
-                  {renderState === 'running' ? (
-                    <Text size="sm" c="dimmed">Rendering overlay video… {renderPct}%</Text>
+                  {renderJob.status === 'running' ? (
+                    <Text size="sm" c="dimmed">Rendering overlay video — see the job card</Text>
                   ) : (
-                    <Anchor size="sm" onClick={() => renderVideo()} style={{ cursor: 'pointer' }}>
-                      {renderState === 'done' ? 'Re-render overlay video' : 'Render overlay video'}
+                    <Anchor size="sm" onClick={() => void renderVideo()} style={{ cursor: 'pointer' }}>
+                      {renderReady ? 'Re-render overlay video' : 'Render overlay video'}
                     </Anchor>
                   )}
-                  {renderState === 'done' && (
+                  {renderReady && (
                     <Anchor size="sm" href={liveRenderVideoUrl(result.detect_id)} download="crop_overlay.mp4">
                       Download overlay video
                     </Anchor>

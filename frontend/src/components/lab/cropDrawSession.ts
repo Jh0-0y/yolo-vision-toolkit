@@ -21,6 +21,8 @@ export interface DrawToggles {
 export interface DrawSession {
   projectId: string
   detectId: string | null
+  /** 마지막 오버레이 렌더 잡. 카드에 다시 올리는 데만 쓴다 — 진행률은 서버가 재생한다 */
+  renderJobId: string | null
   fileName: string | null
   /** 이 검출을 돌릴 때의 detection 설정 지문 — 노브가 바뀌었는지 판단한다 */
   analyzedKey: string | null
@@ -45,6 +47,7 @@ export function emptySession(projectId: string): DrawSession {
   return {
     projectId,
     detectId: null,
+    renderJobId: null,
     fileName: null,
     analyzedKey: null,
     entries: [newEntry('full')],

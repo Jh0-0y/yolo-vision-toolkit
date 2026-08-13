@@ -1,4 +1,4 @@
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Alert, Badge, Group, Stack, Tabs, Text, Title } from '@mantine/core'
 import { IconAlertTriangle, IconBrush, IconFileCode, IconMovie } from '@tabler/icons-react'
@@ -7,8 +7,13 @@ import CropDrawMode from '../components/lab/CropDrawMode'
 import CropResultMode from '../components/lab/CropResultMode'
 import CropVideoMode from '../components/lab/CropVideoMode'
 
+const TABS = ['json', 'draw', 'video']
+
 export default function CropPage() {
   const { projectId = '' } = useParams()
+  // 탭을 URL 에 둔다 — 새로고침해도 보던 탭이고, 잡 카드가 결과 탭으로 링크할 수 있다
+  const [params, setParams] = useSearchParams()
+  const tab = TABS.includes(params.get('tab') ?? '') ? (params.get('tab') as string) : 'json'
 
   const modelsQuery = useQuery({
     queryKey: ['models', projectId],
@@ -45,7 +50,11 @@ export default function CropPage() {
         </Alert>
       )}
 
-      <Tabs defaultValue="json" keepMounted={false}>
+      <Tabs
+        value={tab}
+        onChange={(v) => setParams(v ? { tab: v } : {}, { replace: true })}
+        keepMounted={false}
+      >
         <Tabs.List>
           <Tabs.Tab value="json" leftSection={<IconFileCode size={16} />}>
             Crop JSON
