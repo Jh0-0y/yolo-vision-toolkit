@@ -96,3 +96,26 @@ def test_prepare_keeps_existing_progress_but_reset_empties_it(tmp_path):
 
     jobs.at(tmp_path, "j1").reset()
     assert job.progress_path.read_text() == ""
+
+
+def test_status_is_running_until_a_terminal_phase(tmp_path):
+    job = jobs.at(tmp_path, "j1").prepare()
+    assert job.status() == ("running", None)
+
+    job.emit({"phase": "detect", "done": 1, "total": 3})
+    assert job.status() == ("running", None)
+
+    job.emit({"phase": "done"})
+    assert job.status() == ("done", None)
+
+
+def test_status_carries_the_terminal_message(tmp_path):
+    job = jobs.at(tmp_path, "j1").prepare()
+    job.emit({"phase": "error", "msg": "boom"})
+
+    assert job.status() == ("error", "boom")
+
+
+def test_status_of_a_job_that_never_ran_is_running(tmp_path):
+    """진행률 파일이 아예 없어도 터지지 않는다 — 아직 아무것도 안 쓴 잡과 같다."""
+    assert jobs.at(tmp_path, "never").status() == ("running", None)

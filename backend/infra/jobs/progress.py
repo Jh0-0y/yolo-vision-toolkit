@@ -17,6 +17,9 @@ from pathlib import Path
 
 FILENAME = "progress.jsonl"
 
+# 잡이 끝났음을 뜻하는 phase. 이 셋 말고는 없다.
+TERMINAL_PHASES = frozenset({"done", "error", "cancelled"})
+
 
 def path_in(job_dir: Path) -> Path:
     return job_dir / FILENAME

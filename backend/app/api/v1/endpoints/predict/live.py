@@ -23,8 +23,9 @@ from app.api.v1.endpoints.predict.common import (
 )
 from app.core.config import settings
 from app.db import get_session
-from app.schemas.predict import TestJobStart
+from app.schemas.predict import LiveStatus, TestJobStart
 from app.services.test_jobs import sweep_old_live, test_job_manager
+from infra import jobs
 from lib.formats import VIDEO_EXTS
 
 router = APIRouter(prefix="/predict", tags=["predict"])
@@ -86,6 +87,22 @@ async def start_live(
 @router.get("/live/{job_id}/events")
 async def live_events(job_id: str):
     return await job_event_stream(job_id)
+
+
+@router.get("/live/{detect_id}/status", response_model=LiveStatus)
+def live_status(detect_id: str):
+    """세션이 아직 쓸 수 있는지. 화면이 기억한 detect_id 로 돌아왔을 때 먼저 묻는다.
+
+    진행률 파일은 캐시가 쓸려 나가도 남으므로, 캐시 디렉터리 존재를 먼저 본다 —
+    그러지 않으면 만료된 세션이 `done` 으로 보인다.
+    """
+    work = _live_dir(detect_id)
+    if not work.exists():
+        return LiveStatus(status="expired")
+    status, msg = jobs.at(settings.jobs_dir, detect_id).status()
+    if status == "done" and not (work / "detected.json").exists():
+        return LiveStatus(status="expired")
+    return LiveStatus(status=status, msg=msg)
 
 
 @router.get("/live/{job_id}/video")

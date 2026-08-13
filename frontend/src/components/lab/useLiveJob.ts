@@ -23,6 +23,26 @@ export function useLiveJob(onDone: (detectId: string) => void) {
 
   useEffect(() => () => unsub.current?.(), [])
 
+  function listen(id: string) {
+    unsub.current?.()
+    setError(null)
+    setJobId(id)
+    setProgress({ phase: 'start' })
+    setRunning(true)
+    unsub.current = subscribeLiveEvents(id, (ev) => {
+      setProgress(ev)
+      if (ev.phase === 'done') {
+        setRunning(false)
+        onDoneRef.current(id)
+      } else if (ev.phase === 'error') {
+        setError(ev.msg || 'Detection failed')
+        setRunning(false)
+      } else if (ev.phase === 'cancelled') {
+        setRunning(false)
+      }
+    })
+  }
+
   async function run(opts: StartOpts) {
     unsub.current?.()
     setError(null)
@@ -30,28 +50,20 @@ export function useLiveJob(onDone: (detectId: string) => void) {
     setProgress({ phase: 'start' })
     setRunning(true)
     try {
-      const { job_id } = await startLive(opts)
-      setJobId(job_id)
-      unsub.current = subscribeLiveEvents(job_id, (ev) => {
-        setProgress(ev)
-        if (ev.phase === 'done') {
-          setRunning(false)
-          onDoneRef.current(job_id)
-        } else if (ev.phase === 'error') {
-          setError(ev.msg || 'Detection failed')
-          setRunning(false)
-        } else if (ev.phase === 'cancelled') {
-          setRunning(false)
-        }
-      })
+      listen((await startLive(opts)).job_id)
     } catch (e) {
       setError((e as Error).message)
       setRunning(false)
     }
   }
 
+  /** 이미 돌고 있는 검출에 다시 붙는다 (탭 복귀·새로고침).
+   *  서버가 progress.jsonl 을 처음부터 재생하므로 늦게 붙어도 같은 그림이 나온다. */
+  const attach = (id: string) => listen(id)
+
   function reset() {
     unsub.current?.()
+    unsub.current = null
     setJobId(null)
     setProgress(null)
     setRunning(false)
@@ -63,5 +75,5 @@ export function useLiveJob(onDone: (detectId: string) => void) {
       ? Math.round((progress.done / progress.total) * 100)
       : 0
 
-  return { jobId, progress, running, error, pct, setError, run, reset }
+  return { jobId, progress, running, error, pct, setError, run, attach, reset }
 }

@@ -52,6 +52,19 @@ class JobDir:
     def read(self, offset: int = 0) -> tuple[list[dict], int]:
         return progress.read(self.progress_path, offset)
 
+    def status(self) -> tuple[str, str | None]:
+        """`(상태, 메시지)` — 마지막 종료 이벤트에서 뽑는다. 없으면 아직 도는 중이다.
+
+        상태를 따로 저장하지 않고 이걸 쓰는 기능이 여럿이라 여기 둔다. 종료 phase
+        셋(`done`·`error`·`cancelled`)은 이 배관이 정한 것이므로 해석도 여기 몫이다.
+        """
+        events, _ = self.read(0)
+        for event in reversed(events):
+            phase = event.get("phase")
+            if phase in progress.TERMINAL_PHASES:
+                return phase, event.get("msg")
+        return "running", None
+
     def request_cancel(self) -> None:
         cancel.request(self.cancel_path)
 

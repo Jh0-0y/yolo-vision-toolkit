@@ -107,6 +107,16 @@ export function subscribeLiveEvents(jobId: string, onEvent: (ev: LiveProgress) =
 
 export const liveVideoUrl = (detectId: string) => `${BASE}/predict/live/${detectId}/video`
 
+// 세션이 아직 살아 있는지 — 기억해 둔 detect_id 로 돌아왔을 때 먼저 묻는다.
+// 캐시는 TTL 로 사라지므로 서버만이 이걸 안다.
+export interface LiveSessionStatus {
+  status: 'running' | 'done' | 'error' | 'cancelled' | 'expired'
+  msg: string | null
+}
+
+export const getLiveStatus = (detectId: string) =>
+  api.get<LiveSessionStatus>(`/predict/live/${detectId}/status`)
+
 // 오버레이 렌더 — 캐시된 검출 + 현재 튜닝으로 그림 그려진 영상을 굽는다 (추론 없음)
 export const startLiveRender = (
   detectId: string,

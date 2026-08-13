@@ -26,8 +26,6 @@ from lib.labels.io import atomic_write_text
 # 은 만료 대상이 아니다 — 목록에는 "영상 만료" 로 남는다.
 VIDEO_TTL_SEC = 3600
 
-TERMINAL_PHASES = {"done", "error", "cancelled"}
-
 META_NAME = "run.json"
 CROP_NAME = "crop.json"
 VIDEO_NAME = "out.mp4"
@@ -93,15 +91,8 @@ def _read_json(path: Path) -> dict | None:
 
 
 def status_of(crop_id: str) -> tuple[str, str | None]:
-    """`(status, error)` — progress.jsonl 의 마지막 종료 이벤트에서 뽑는다.
-    종료 이벤트가 없으면 아직 도는 중이다."""
-    events, _ = jobs.at(settings.jobs_dir, crop_id).read(0)
-    for ev in reversed(events):
-        phase = ev.get("phase")
-        if phase in TERMINAL_PHASES:
-            status = "done" if phase == "done" else phase
-            return status, ev.get("msg")
-    return "running", None
+    """`(status, error)` — 진행률 파일이 유일한 근거다."""
+    return jobs.at(settings.jobs_dir, crop_id).status()
 
 
 def to_out(project_id: str, crop_id: str, meta: dict) -> dict:

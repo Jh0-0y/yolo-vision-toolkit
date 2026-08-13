@@ -24,6 +24,14 @@ class TestJobStart(BaseModel):
     job_id: str
 
 
+class LiveStatus(BaseModel):
+    """라이브 세션이 아직 살아 있는지. 클라이언트가 기억한 detect_id 가 여전히
+    쓸 수 있는지 판단하는 유일한 근거다 — 캐시는 TTL 로 쓸려 나간다."""
+
+    status: str  # running | done | error | cancelled | expired
+    msg: str | None = None
+
+
 class ResidentModel(BaseModel):
     model_id: str
     device: str | None = None
