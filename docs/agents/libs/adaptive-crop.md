@@ -24,7 +24,7 @@ related:
 | | adaptive-crop | 툴킷 |
 |---|---|---|
 | 공·선수 검출, 궤적 조립, 크롭 X 좌표 | ✅ | ❌ **사본을 두지 않는다** |
-| 크롭 창·데드존·박스 그리기, 세로 컷 | ❌ | ✅ `lib/crop/` · `liveOverlay.ts` |
+| 크롭 창·데드존·박스 그리기, 세로 컷 | ❌ | ✅ `lib/crop/` (색 정의는 `lib/crop/palette.py` 하나뿐) |
 | 잡 관리·진행률·취소·파일 저장 | ❌ | ✅ `workers/` · `services/` |
 | 잡 ID·게임 ID 같은 비즈니스 필드 | ❌ | ✅ `crop_plan_json` 이 얹는다 |
 
@@ -37,8 +37,8 @@ related:
 | 함수 | 하는 일 |
 |---|---|
 | `resolve_clip_config(overrides)` | UI 노브 dict → `ClipPlanConfig`. 모르는 키·`None` 은 버린다(라이브러리는 오타에 `TypeError`) |
-| `crop_spec_for(w, h)` | 실제 해상도 → `CropSpec`. 폭은 `lib.crop.geometry.crop_width_for` 와 **같은 규칙** |
-| `video_info_from_meta(meta)` | 라이브 세션 `meta.json` → `VideoInfo` |
+| `crop_spec_for(w, h, crop_w, crop_h)` | 요청 크기(px) → `CropSpec`. `lib.crop.geometry.crop_window_for` 와 **같은 규칙**(소스 밖으로 나가면 clamp, 짝수, 세로는 가운데) |
+| `video_info_from_meta(meta)` | dict → `VideoInfo`. **지금 부르는 곳이 없다** — 옛 라이브 세션의 잔재다 |
 | `detector_entries(entries, conf)` | `conf` 기본값 채우기, `merge_iou` → `tile_merge_iou`, **첫 full 엔트리만** `track_ids=True` |
 | `crop_plan_json(result)` | `CropResult` → crop.json 문자열 (계약용 플레이스홀더 id 를 얹는다) |
 

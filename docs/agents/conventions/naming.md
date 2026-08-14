@@ -35,7 +35,7 @@ DTO 역할 접미사는 이미 쓰이는 것을 따른다: `Create`(생성 요�
 | 페이지 | `<이름>Page.tsx` | `DatasetPage.tsx` |
 | 컴포넌트 | PascalCase `.tsx` | `BBoxCanvas.tsx` · `JobIndicator.tsx` |
 | 훅 | `use<이름>.ts` | `useLiveJob.ts` |
-| 순수 모듈 | camelCase `.ts` | `liveOverlay.ts` · `colors.ts` |
+| 순수 모듈 | camelCase `.ts` | `colors.ts` · `metrics.ts` |
 | 스토어 | `<도메인>Store.ts` + `use<도메인>Store` | `jobStore.ts` → `useJobStore` |
 
 ## 필드 이름은 백엔드 표기를 그대로 쓴다

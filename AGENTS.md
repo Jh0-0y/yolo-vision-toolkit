@@ -8,7 +8,7 @@
 
 ### 개요
 - [프로젝트 개요 & 스택](docs/agents/overview.md) — 무엇을 하는 앱인지 + 언어·라이브러리 버전; 처음 들어오거나 버전을 확인할 때
-- [아키텍처](docs/agents/architecture.md) — 프로세스 셋과 백엔드 계층, 의존 방향; 새 코드의 자리를 정할 때
+- [아키텍처](docs/agents/architecture.md) — 두 공간(연구실·학습실) · 프로세스 셋 · 백엔드 계층과 의존 방향; 새 코드의 자리를 정할 때
 - [디렉터리 구조](docs/agents/structure-dir.md) — 저장소 트리와 새 파일을 둘 자리; 파일을 만들거나 찾을 때
 
 ### 코드 컨벤션
@@ -20,7 +20,7 @@
 
 ### 라이브러리
 - [adaptive-crop](docs/agents/libs/adaptive-crop.md) — 크롭 좌표 계산의 경계와 어댑터 규칙, 좌표계; 크롭 코드를 만질 때
-- [크롭 계획 · 튜닝 · crop.json](docs/agents/libs/crop-plan.md) — 호출 경로별 검증 강도 · 튜닝 노브 · 산출 형태; 라이브 프리뷰나 산출물을 다룰 때
+- [크롭 계획 · 튜닝 · crop.json](docs/agents/libs/crop-plan.md) — 호출 흐름 · 크롭 크기(px) · 타깃 색 · 튜닝 노브 · 산출 형태; 크롭 런을 다룰 때
 - [adaptive-crop 설치 · 업그레이드](docs/agents/libs/adaptive-crop-upgrade.md) — 비공개 저장소 인증과 태그 올리는 절차; 설치가 막히거나 버전을 올릴 때
 
 ### 운영

@@ -14,24 +14,31 @@ related:
 
 ## 트리
 
+공간이 둘이다. **학습실**(`projects/`)은 데이터셋·라벨·학습을 갖고, **연구실**(`labs/`)은
+영상과 크롭 런만 갖는다. 둘은 **모델 풀만 공유**한다 — 영상은 각자 갖는다(학습용 장면
+샘플과 크롭할 경기는 실제로 다른 영상이다).
+
 ```
 DATA_DIR/                     # 기본 <repo>/data — git 이 추적하지 않는다
 ├── db.sqlite3                # 메타데이터 (WAL 모드)
 ├── models/{model_id}/        # 공유 모델 풀 — model.pt + meta.json
-├── projects/{project_id}/
+├── projects/{project_id}/    # 학습실
 │   ├── raw/                  # 원본 이미지
 │   ├── thumbs/               # 썸네일
 │   ├── videos/               # 업로드 영상
 │   ├── labels/               # 이미지별 YOLO 라벨 (.txt)
 │   ├── exports/              # 내보낸 데이터셋 zip
-│   ├── crops/{crop_id}/      # 크롭 랩 산출물 — run.json · crop.json · out.mp4(만료됨)
 │   ├── models/ · runs/       # 프로젝트 스코프 모델·학습 결과
 │   ├── classes.json          # 클래스 레지스트리
 │   ├── reviewed.json         # 검수 완료 플래그
 │   └── project.json
+├── labs/{lab_id}/            # 연구실
+│   ├── lab.json              # 사람이 읽는 표시(이름) — 진실은 DB 행이다
+│   ├── videos/{video_id}.mp4 # 원본 + {video_id}.json 사이드카 (프레임 추출 없음)
+│   └── crops/{crop_id}/      # 크롭 런 — run.json · crop.json · wide.mp4 · crop.mp4
 ├── jobs/{job_id}/            # progress.jsonl · CANCEL
 ├── datasets/                 # 업로드된 학습 데이터셋 전개
-└── test/                     # 라이브 프리뷰·모델비교 캐시 — 순수 임시물, 자동 정리된다
+└── test/                     # 모델비교 캐시 — 순수 임시물, 자동 정리된다
 ```
 
 ## 경로는 반드시 `settings` 에서 파생시킨다
@@ -43,7 +50,7 @@ pdir = settings.projects_dir / project_id        # ○
 pt = settings.model_dir(project_id, model_id) / "model.pt"   # ○
 ```
 
-- `settings.data_dir` · `models_dir` · `projects_dir` · `jobs_dir` · `runs_dir` · `datasets_dir` · `test_dir` 프로퍼티를 쓴다.
+- `settings.data_dir` · `models_dir` · `projects_dir` · `labs_dir` · `jobs_dir` · `runs_dir` · `datasets_dir` · `test_dir` 프로퍼티를 쓴다 (연구실 하나는 `settings.lab_dir(lab_id)`).
 - 문자열로 경로를 조립하거나 CWD 기준 상대경로를 쓰지 **않는다.** `data_dir` 기본값은 저장소 루트에 앵커돼 있고, 배포에서는 다른 볼륨을 가리킨다.
 - 모델·학습 결과는 **프로젝트 스코프와 공유 풀 두 자리**가 있다. 직접 조립하지 말고 `settings.model_dir(project_id, model_id)` · `settings.run_dir(...)` 를 쓴다 (`project_id=None` 이면 공유 풀).
 
@@ -51,7 +58,7 @@ pt = settings.model_dir(project_id, model_id) / "model.pt"   # ○
 
 | DB (SQLite) | 파일 |
 |---|---|
-| `Project` · `ModelEntry` · `Job` · `TrainRun` — 이 넷뿐 | 라벨 · 클래스 · 검수 플래그 · 내보내기 · 크롭 런 · 잡 진행상황 |
+| `Project` · `LabProject` · `ModelEntry` · `Job` · `TrainRun` — 이 다섯뿐 | 라벨 · 클래스 · 검수 플래그 · 내보내기 · 연구실 영상 · 크롭 런 · 잡 진행상황 |
 
 - 새 상태를 만들 때 **먼저 파일로 둘 수 있는지 본다.** 지금까지 DB는 "목록에 뜨고 상태가 바뀌는 것"만 담았다.
 - DB 접근은 **API 프로세스에서만** 한다. 워커는 값을 받아 값을 돌려준다 → [계층 경계](conventions/layer-boundaries.md)
@@ -62,17 +69,30 @@ pt = settings.model_dir(project_id, model_id) / "model.pt"   # ○
 - **`data/` 아래 실제 데이터를 검증용으로 지우거나 덮어쓰지 않는다.** git 이 추적하지 않아 되돌릴 수 없다.
 - 임시 산출물이 필요하면 `settings.test_dir` 아래에 만든다(자동 정리 대상).
 
+## 연구실 영상
+
+`labs/{lab_id}/videos/` 에 원본과 사이드카가 나란히 있다. **프레임 추출은 하지 않는다** — 학습
+재료가 아니라 크롭해서 내보낼 대상이다. 확장자는 사이드카(`{video_id}.json`)가 들고 있으므로
+**추측하지 않는다**(컨테이너가 여러 가지다).
+
 ## 크롭 런
 
-`projects/{project_id}/crops/{crop_id}/` 하나가 랩에서 돌린 크롭 잡 하나다. `crop_id` 는 **잡 id 로도 그대로** 쓰므로 진행률은 `jobs/{crop_id}/progress.jsonl` 에 있다.
+`labs/{lab_id}/crops/{crop_id}/` 하나가 크롭 런 하나다. `crop_id` 는 **잡 id 로도 그대로** 쓰므로
+진행률은 `jobs/{crop_id}/progress.jsonl` 에 있다.
 
-| 파일 | 수명 |
+| 파일 | 담는 것 |
 |---|---|
-| `run.json` | 영구. 잡을 **던지기 전에** 쓴다 — 실패한 시도도 목록에 남는다 |
-| `crop.json` | 영구. 커버리지 요약도 이 안에 있어 따로 저장하지 않는다 |
-| `out.mp4` | `VIDEO_TTL_SEC` 뒤 삭제. `run.json` 에 `video_expired` 만 남는다 |
-| `source.*` | 잡이 끝나면 삭제 |
+| `run.json` | 설정 스냅샷. 잡을 **던지기 전에** 쓴다 — 실패한 시도도 목록에 남는다 |
+| `crop.json` | 좌표. 커버리지 요약도 이 안에 있어 따로 저장하지 않는다 |
+| `wide.mp4` | 가로 영상 — 그리기 옵션이 있으면 오버레이 렌더본, 없으면 원본 하드링크 |
+| `crop.mp4` | 세로 크롭 영상. 오버레이를 굽지 않는다 — 산출물이지 관찰용이 아니다 |
+
+**셋은 전부 필수다.** 선택이 아니다. **TTL 은 없다** — 지우는 것은 사용자뿐이다.
+
+`wide.mp4` 는 원본과 완전히 분리된다. 그릴 것이 없을 때 통째로 복사하면 런마다 원본만 한 용량이
+들어서, **하드링크로 만들고 실패하면(다른 볼륨) 복사로 폴백**한다. 링크든 복사든 아카이브에서
+원본을 지워도 런은 온전하다.
 
 **상태는 저장하지 않는다.** `running` / `done` / `error` 는 `progress.jsonl` 의 마지막 이벤트에서 파생한다 → [잡과 진행률](conventions/jobs-and-progress.md)
 
-자리·정리·상태 파생은 전부 `services/crop_runs.py` 하나가 안다. 경로를 직접 조립하지 않는다.
+자리·상태 파생·하드링크는 전부 `services/lab_crop_runs.py` 하나가 안다. 경로를 직접 조립하지 않는다.
