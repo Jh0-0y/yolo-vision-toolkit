@@ -1,19 +1,17 @@
 """튜닝용 HUD — 크롭이 조준하는 중심선 · 데드존 밴드 · 타깃 타입 라벨.
 
-"왜 창이 저기로 갔나"를 눈으로 보려고 그린다. 산출물에는 필요 없고 Draw 탭에서만
-켠다. 중심 X 와 타입은 인자로 받는다 — 궤적을 모른다.
+"왜 창이 저기로 갔나"를 눈으로 보려고 그린다. 중심선은 **타깃 타입 색**으로 그리고
+신뢰도를 농도로 얹는다 — 색이 바뀌는 구간이 곧 공/선수 비중이 뒤집힌 구간이다.
+색은 `lib.crop.palette` 한 곳에서만 온다(프론트 캔버스와 같은 그림이어야 한다).
+
+중심 X · 타입 · 신뢰도는 인자로 받는다 — 궤적을 모른다.
 """
 
 from __future__ import annotations
 
-_TARGET_COLOR = (0, 165, 255)  # 주황 — 타깃 중심선
-_DEADZONE_COLOR = (200, 200, 200)  # 회색 — 데드존 경계
-_TYPE_COLORS = {
-    "ball": (60, 60, 255),  # 빨강
-    "ball_player": (60, 200, 60),  # 초록
-    "player_group": (255, 190, 60),  # 파랑
-    "center": (160, 160, 160),  # 회색
-}
+from lib.crop import palette
+
+_DEADZONE_COLOR = palette.hex_to_bgr(palette.DEAD_ZONE_COLOR)
 
 
 def draw(
@@ -23,6 +21,7 @@ def draw(
     frame_height: int,
     *,
     target_type: str | None = None,
+    confidence: float | None = None,
     dead_zone_half: float | None = None,
     show_dead_zone: bool = True,
     show_center_line: bool = True,
@@ -42,18 +41,20 @@ def draw(
     if not show_center_line:
         return
 
-    # 타깃 중심선 — 크롭이 조준하는 X
+    # 타깃 중심선 — 크롭이 조준하는 X. 색 = 타입, 농도 = 신뢰도.
+    color = palette.bgr_for(target_type)
+    alpha = palette.alpha_for(confidence)
+    faded = tuple(int(c * alpha) for c in color)
     x = int(round(cx))
     if 0 <= x < frame_width:
-        cv2.line(frame, (x, 0), (x, frame_height - 1), _TARGET_COLOR, 2, cv2.LINE_AA)
+        cv2.line(frame, (x, 0), (x, frame_height - 1), faded, 2, cv2.LINE_AA)
 
     # 타입 라벨 (좌하단 고정) — 가독성 위해 검은 외곽선 + 색 채움
     if target_type:
         text = f"TARGET: {target_type}"
+        if confidence is not None:
+            text += f" {confidence:.0%}"
         org = (10, frame_height - 16)
         font = cv2.FONT_HERSHEY_SIMPLEX
         cv2.putText(frame, text, org, font, 0.7, (0, 0, 0), 4, cv2.LINE_AA)
-        cv2.putText(
-            frame, text, org, font, 0.7,
-            _TYPE_COLORS.get(target_type, (220, 220, 220)), 2, cv2.LINE_AA,
-        )
+        cv2.putText(frame, text, org, font, 0.7, color, 2, cv2.LINE_AA)

@@ -17,6 +17,15 @@ async def device_info():
     return await run_in_threadpool(get_device_info)
 
 
+@router.get("/crop-palette")
+def crop_palette():
+    """타깃 타입의 색. 서버 렌더와 프론트 캔버스가 **같은 그림**을 그려야 하므로
+    정의는 `lib.crop.palette` 한 곳에만 두고 프론트는 여기서 받아 간다."""
+    from lib.crop import palette
+
+    return palette.as_dict()
+
+
 def _warning(info: dict) -> str | None:
     """Human-facing memory/contention warning for running inference now."""
     accel = info.get("accelerator")
