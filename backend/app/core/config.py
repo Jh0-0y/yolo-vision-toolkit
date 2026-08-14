@@ -50,6 +50,15 @@ class Settings(BaseSettings):
         return self.data_dir / "datasets"
 
     @property
+    def labs_dir(self) -> Path:
+        """연구실(Lab) 공간. 학습실 프로젝트와 나란한 최상위 자리다 —
+        연구실은 라벨도 클래스도 쓰지 않아 프로젝트에 속하지 않는다."""
+        return self.data_dir / "labs"
+
+    def lab_dir(self, lab_id: str) -> Path:
+        return self.labs_dir / lab_id
+
+    @property
     def test_dir(self) -> Path:
         """Scratch space for the Test playground (uploads, video frames).
         Nothing here is committed to the DB — it's transient."""
@@ -77,6 +86,7 @@ class Settings(BaseSettings):
             self.jobs_dir,
             self.runs_dir,
             self.datasets_dir,
+            self.labs_dir,
             self.test_dir,
         ):
             d.mkdir(parents=True, exist_ok=True)

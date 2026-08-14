@@ -27,6 +27,7 @@ def _add_missing_columns() -> None:
     additions = {
         "model_entry": [("project_id", "VARCHAR")],
         "train_run": [("project_id", "VARCHAR")],
+        "lab_project": [("preset_json", "VARCHAR")],
     }
     engine = get_engine()
     with engine.begin() as conn:
@@ -34,6 +35,8 @@ def _add_missing_columns() -> None:
             existing = {
                 row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")
             }
+            if not existing:
+                continue  # table not created yet — create_all will include the column
             for name, coltype in cols:
                 if name not in existing:
                     conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {coltype}")

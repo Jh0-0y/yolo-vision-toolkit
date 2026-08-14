@@ -1,15 +1,13 @@
-"""Test-playground long jobs: video annotation and dataset analysis.
+"""긴 잡 — 연구실 크롭 런과 모델 채점.
 
-These are long GPU jobs (whole-video encoding, full labeled-set inference) that
-do NOT fit the warm inference worker — `infer_manager`'s 180s idle reaper would
-kill a multi-minute job mid-run. So this manager owns its OWN
-`ProcessPoolExecutor(max_workers=1)` with no reaper and no DB bookkeeping
-(Test is a playground). Progress is streamed via `jobs_dir/{job_id}/progress.jsonl`
-(reuses `read_progress` + the existing SSE endpoints pattern).
+둘 다 오래 도는 GPU 잡(영상 전체 인코딩, 라벨셋 전체 추론)이라 상주 추론 워커에
+맞지 않는다 — `infer_manager` 의 180초 유휴 수거기가 몇 분짜리 잡을 도중에 죽인다.
+그래서 이 매니저가 **자기 `ProcessPoolExecutor(max_workers=1)`** 를 소유한다(수거기
+없음, DB 기록 없음). 진행률은 `jobs_dir/{job_id}/progress.jsonl` 로 흐른다.
 
-annotate 잡의 **산출물**은 여기가 아니라 프로젝트 아래 크롭 런 디렉터리에 남는다
-— 자리와 정리는 `services/crop_runs.py` 를 본다. 여기 sweep 은 compare·live 처럼
-`test_dir` 에만 남는 순수 임시물용이다.
+크롭 런의 **산출물**은 여기가 아니라 연구실 아래 런 디렉터리에 남는다 — 자리와
+수명은 `services/lab_crop_runs.py` 를 본다(TTL 없음, 지우는 것은 사용자뿐).
+여기 sweep 은 compare 처럼 `test_dir` 에만 남는 순수 임시물용이다.
 """
 
 from __future__ import annotations
@@ -47,13 +45,8 @@ def sweep_old_compare() -> None:
     _sweep_dir(settings.test_dir / "compare", ANNOTATE_TTL_SEC)
 
 
-def sweep_old_live() -> None:
-    """Delete live-preview cache dirs (detections + preview.mp4) older than the TTL."""
-    _sweep_dir(settings.test_dir / "live", ANNOTATE_TTL_SEC)
-
-
 class TestJobManager:
-    """Owns two single-worker pools so a long video-tracking job and a
+    """Owns two single-worker pools so a long video job and a
     model-comparison/analysis job don't block each other (they used to share one
     worker). Each pool is spawn-based, has no idle reaper, and does no DB work."""
 
@@ -80,12 +73,14 @@ class TestJobManager:
     def _prepare(self, job_id: str):
         return jobs.at(settings.jobs_dir, job_id).prepare()
 
-    def submit_annotate(self, job_id: str, cfg: dict) -> None:
-        from app.workers import annotate_worker
+    def submit_lab_crop(self, job_id: str, cfg: dict) -> None:
+        """연구실 크롭 런 — 검출 + 렌더가 한 잡 안에 있다. 무거운 GPU 잡이
+        모델 채점과 부딪히지 않도록 전용 "video" 풀을 쓴다."""
+        from app.workers import lab_crop_worker
 
         self._prepare(job_id)
         future = self._get_executor("video").submit(
-            annotate_worker.run_annotate, job_id, cfg, str(settings.jobs_dir)
+            lab_crop_worker.run_lab_crop, job_id, cfg, str(settings.jobs_dir)
         )
         self._futures[job_id] = future
 
@@ -95,27 +90,6 @@ class TestJobManager:
         self._prepare(job_id)
         future = self._get_executor("eval").submit(
             compare_worker.run_compare, job_id, cfg, str(settings.jobs_dir)
-        )
-        self._futures[job_id] = future
-
-    def submit_live(self, job_id: str, cfg: dict) -> None:
-        """Live-preview detection pass — shares the single "video" worker with
-        annotate so a heavy GPU detection and a heavy render never run at once."""
-        from app.workers import live_worker
-
-        self._prepare(job_id)
-        future = self._get_executor("video").submit(
-            live_worker.run_live, job_id, cfg, str(settings.jobs_dir)
-        )
-        self._futures[job_id] = future
-
-    def submit_live_render(self, job_id: str, cfg: dict) -> None:
-        """라이브 세션 캐시로 오버레이 영상 렌더 — 추론 없음(cv2/ffmpeg만)."""
-        from app.workers import live_worker
-
-        self._prepare(job_id)
-        future = self._get_executor("video").submit(
-            live_worker.run_live_render, job_id, cfg, str(settings.jobs_dir)
         )
         self._futures[job_id] = future
 

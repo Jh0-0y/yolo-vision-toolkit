@@ -47,6 +47,21 @@ class Project(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_now)
 
 
+class LabProject(SQLModel, table=True):
+    """연구실 하나. 학습실 `Project` 와 나란한 최상위 단위다 — 종목·연구 주제마다
+    하나씩 둔다(`basketball-adaptive-crop`). 라벨·클래스·데이터셋을 갖지 않고
+    영상과 크롭 런만 갖는다. 모델은 공용 풀에서 고른다."""
+
+    __tablename__ = "lab_project"
+
+    id: str = Field(default_factory=lambda: _uid("lab"), primary_key=True)
+    name: str
+    # 새 런이 출발할 기본값 — 크롭 노브 · 크롭 비율 · 기본 검출 모델.
+    # 종목마다 다르기 때문에 연구실이 갖는다.
+    preset_json: str = "{}"
+    created_at: datetime = Field(default_factory=_now)
+
+
 class Job(SQLModel, table=True):
     __tablename__ = "job"
 
