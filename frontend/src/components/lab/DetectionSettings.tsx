@@ -1,7 +1,9 @@
 import { ActionIcon, Button, Card, Group, NumberInput, SegmentedControl, Select, Stack, Text } from '@mantine/core'
 import { IconPlus, IconX } from '@tabler/icons-react'
 import type { ModelOut } from '../../api/client'
-import { IMGSZ_OPTIONS } from './useAnnotateJob'
+
+/** Full scan 의 추론 해상도 후보. 크게 잡을수록 작은 공이 살고 느려진다. */
+export const IMGSZ_OPTIONS = ['640', '960', '1280', '1600', '1920']
 
 /** 검출기 엔트리 — 모두 대등하다. 역할(추적/공)은 백엔드가 모드에서 자동 유도:
  *  첫 번째 Full scan 엔트리가 ByteTrack 추적, 나머지는 공 검출에 기여. */
@@ -147,7 +149,6 @@ export default function DetectionSettings({
                 <Group grow align="flex-start">
                   <NumberInput
                     label="Stride (px)"
-                    description={`Overlap = ${overlap}px${overlap <= 0 ? ' — needs overlap!' : ''}`}
                     value={entry.stride}
                     onChange={(v) => patch(entry.key, { stride: Number(v) || 480 })}
                     min={32}

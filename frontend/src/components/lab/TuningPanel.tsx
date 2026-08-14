@@ -10,7 +10,7 @@ import {
   UnstyledButton,
 } from '@mantine/core'
 import { IconChevronRight } from '@tabler/icons-react'
-import type { TrackcropOverrides } from '../../api/client'
+import type { TrackcropOverrides } from '../../api/labCrops'
 
 type NumberKnobKey = Exclude<keyof TrackcropOverrides, 'use_carrier'>
 

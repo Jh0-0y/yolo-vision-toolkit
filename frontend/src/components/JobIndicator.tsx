@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { Anchor, CloseButton, Group, Paper, Progress, Text } from '@mantine/core'
-import { IconBrush, IconCrop, IconFileExport, IconFileZip, IconMovie, IconWand } from '@tabler/icons-react'
+import { IconFileExport, IconFileZip, IconMovie, IconWand } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
@@ -43,11 +43,6 @@ export default function JobIndicator() {
           queryClient.invalidateQueries({ queryKey: ['images', j.projectId] })
           queryClient.invalidateQueries({ queryKey: ['stats', j.projectId] })
           notifications.show({ message: `Auto-labeling done: ${j.title}`, color: 'green' })
-        } else if (j.kind === 'crop') {
-          queryClient.invalidateQueries({ queryKey: ['crop-runs', j.projectId] })
-          notifications.show({ message: `Crop done: ${j.title} — saved to Crop Runs`, color: 'green' })
-        } else if (j.kind === 'live') {
-          notifications.show({ message: `Crop Draw ready: ${j.title}`, color: 'green' })
         } else {
           // export: finished export now appears in the list; download on the Exports page
           queryClient.invalidateQueries({ queryKey: ['exports', j.projectId] })
@@ -138,10 +133,6 @@ function JobCard({
             <IconWand size={16} stroke={1.5} />
           ) : job.kind === 'export' ? (
             <IconFileExport size={16} stroke={1.5} />
-          ) : job.kind === 'crop' ? (
-            <IconCrop size={16} stroke={1.5} />
-          ) : job.kind === 'live' ? (
-            <IconBrush size={16} stroke={1.5} />
           ) : (
             <IconFileZip size={16} stroke={1.5} />
           )}

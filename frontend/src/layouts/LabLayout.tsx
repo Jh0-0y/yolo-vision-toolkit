@@ -1,3 +1,5 @@
+// 연구실의 껍데기. `ProjectLayout` 과 같은 AppShell 이지만 네비가 다르다 —
+// 연구실은 라벨·클래스·학습을 갖지 않고 영상과 크롭만 갖는다.
 import {
   AppShell,
   Badge,
@@ -10,51 +12,22 @@ import {
   Tooltip,
   UnstyledButton,
 } from '@mantine/core'
-import {
-  IconBox,
-  IconFolder,
-  IconHistory,
-  IconLibraryPhoto,
-  IconPackageExport,
-  IconPlayerPlay,
-  IconTag,
-  IconTool,
-  IconUpload,
-} from '@tabler/icons-react'
+import { IconCrop, IconFlask, IconListDetails, IconTool } from '@tabler/icons-react'
 import { useQuery } from '@tanstack/react-query'
-import { Link, Outlet, useLocation, useParams } from 'react-router-dom'
-import { api, type DeviceInfo, type Health, type ProjectOut } from '../api/client'
+import { Link, Outlet, useLocation } from 'react-router-dom'
+import { api, getLab, type DeviceInfo, type Health } from '../api/client'
 
-const NAV_SECTIONS = [
-  {
-    label: 'Data',
-    items: [
-      { to: 'upload', label: 'Upload Data', icon: IconUpload },
-      { to: 'dataset', label: 'Dataset', icon: IconLibraryPhoto },
-      { to: 'classes', label: 'Classes', icon: IconTag },
-      { to: 'exports', label: 'Exports', icon: IconPackageExport },
-    ],
-  },
-  {
-    label: 'Model',
-    items: [
-      { to: 'train', label: 'Train', icon: IconPlayerPlay },
-      { to: 'history', label: 'Training History', icon: IconHistory },
-      { to: 'models', label: 'Models', icon: IconBox },
-    ],
-  },
+// 영상은 따로 탭을 두지 않는다 — 크롭 화면에서 고르는 자리가 곧 관리하는 자리다.
+// 설정 탭도 두지 않는다 — 다음 런은 마지막 런을 이어받으므로 따로 저장할 기준값이 없다.
+const NAV_ITEMS = [
+  { to: 'crop', label: 'Crop', icon: IconCrop },
+  { to: 'crops', label: 'Crop Runs', icon: IconListDetails },
 ]
 
-export default function ProjectLayout() {
-  const { projectId } = useParams()
+export default function LabLayout() {
   const location = useLocation()
-  const project = useQuery({
-    queryKey: ['project', projectId],
-    queryFn: async () => {
-      const projects = await api.get<ProjectOut[]>('/projects')
-      return projects.find((p) => p.id === projectId) ?? null
-    },
-  })
+
+  const lab = useQuery({ queryKey: ['lab'], queryFn: getLab })
   const health = useQuery({
     queryKey: ['health'],
     queryFn: () => api.get<Health>('/health'),
@@ -72,7 +45,7 @@ export default function ProjectLayout() {
       ? `${((dev.vram_used_mb ?? 0) / 1024).toFixed(1)} / ${(dev.vram_total_mb / 1024).toFixed(1)} GB`
       : null
 
-  const base = `/projects/${projectId}`
+  const base = '/lab'
 
   return (
     <AppShell navbar={{ width: 240, breakpoint: 'sm' }} padding="md">
@@ -92,27 +65,25 @@ export default function ProjectLayout() {
         </AppShell.Section>
 
         <AppShell.Section grow>
-          {NAV_SECTIONS.map((section) => (
-            <Stack key={section.label} gap={2} mb="md">
-              <Text size="xs" fw={700} c="dimmed" tt="uppercase" px="sm" mb={2}>
-                {section.label}
-              </Text>
-              {section.items.map((item) => {
-                const to = `${base}/${item.to}`
-                return (
-                  <NavLink
-                    key={item.to}
-                    component={Link}
-                    to={to}
-                    label={item.label}
-                    leftSection={<item.icon size={18} stroke={1.6} />}
-                    active={location.pathname === to || location.pathname.startsWith(`${to}/`)}
-                    style={{ borderRadius: 6 }}
-                  />
-                )
-              })}
-            </Stack>
-          ))}
+          {/* 연구실은 그룹이 하나뿐이라 소제목을 달지 않는다 — 학습실은 Data·Model
+              둘로 나뉘어 소제목이 구분에 쓰이지만, 여기서는 제목만 남는다 */}
+          <Stack gap={2} mb="md">
+            {NAV_ITEMS.map((item) => {
+              const to = `${base}/${item.to}`
+              return (
+                <NavLink
+                  key={item.to}
+                  component={Link}
+                  to={to}
+                  label={item.label}
+                  leftSection={<item.icon size={18} stroke={1.6} />}
+                  // `crop` 이 `crops` 의 접두사라 경로 경계까지 봐야 한다
+                  active={location.pathname === to || location.pathname.startsWith(`${to}/`)}
+                  style={{ borderRadius: 6 }}
+                />
+              )
+            })}
+          </Stack>
         </AppShell.Section>
 
         <AppShell.Section>
@@ -156,8 +127,8 @@ export default function ProjectLayout() {
         <Group justify="center" align="flex-start">
           <div style={{ width: '100%', maxWidth: 1200 }}>
             <Group gap="xs" pt="md" pb="xl">
-              <IconFolder size={22} stroke={1.6} />
-              <Title order={3}>{project.data?.name ?? ' '}</Title>
+              <IconFlask size={22} stroke={1.6} />
+              <Title order={3}>{lab.data?.name ?? ' '}</Title>
             </Group>
             <Outlet />
           </div>
