@@ -7,7 +7,7 @@
 import pytest
 from adaptive_crop import ClipPlanConfig
 
-from lib.crop.geometry import crop_width_for
+from lib.crop.geometry import crop_window_for
 from lib.crop.plan import (
     crop_spec_for,
     detector_entries,
@@ -48,13 +48,32 @@ def test_no_overrides_is_library_default():
 def test_crop_spec_matches_the_renderer(source_w, source_h):
     """좌표를 내는 쪽과 화면에 그리는 쪽의 창 폭은 같아야 한다."""
     spec = crop_spec_for(source_w, source_h)
-    assert spec.width == crop_width_for(source_h, source_w)
-    assert spec.height == source_h
+    assert (spec.width, spec.height, spec.y) == crop_window_for(source_w, source_h)
     spec.resolve(source_w, source_h)  # 소스 밖으로 나가지 않는다
 
 
 def test_crop_spec_1080p_is_the_608_window():
-    assert crop_spec_for(1920, 1080).width == 608
+    """기본 px 는 1080p 소스에서 옛 9:16 과 같은 창이다 — 세로는 전체 높이."""
+    spec = crop_spec_for(1920, 1080)
+    assert (spec.width, spec.height, spec.y) == (608, 1080, 0)
+
+
+def test_crop_spec_takes_absolute_pixels():
+    """비율이 아니다 — 준 값이 곧 창 크기다."""
+    assert crop_spec_for(1920, 1080, 1080, 1080).width == 1080  # 정사각
+    assert crop_spec_for(3840, 2160, 608, 1080).width == 608  # 4K 라고 커지지 않는다
+
+
+def test_crop_spec_clamps_to_a_smaller_source():
+    """소스보다 큰 창은 만들 수 없다 — 들어가는 만큼 잘라 낸다."""
+    spec = crop_spec_for(500, 400, 608, 1080)
+    assert (spec.width, spec.height, spec.y) == (500, 400, 0)
+
+
+def test_a_shorter_window_is_centred_vertically():
+    """세로를 낮게 잡으면 위아래가 실제로 잘린다 — 가운데를 남긴다."""
+    spec = crop_spec_for(1920, 1080, 608, 720)
+    assert (spec.height, spec.y) == (720, 180)
 
 
 # ---------------------------------------------------------------------------

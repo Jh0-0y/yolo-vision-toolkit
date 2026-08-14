@@ -17,17 +17,37 @@ import bisect
 Trajectory = tuple[list[int], list[float]]
 
 
-def crop_width_for(height: int, frame_width: int) -> int:
-    """프레임에 맞는 짝수 9:16 크롭 폭 (예: 1080 -> 608).
+# 크롭 창 기본 크기(px) — 1080p 소스의 9:16 과 같은 값. 연구실 프리셋이 런마다 바꾼다.
+DEFAULT_CROP_W = 608
+DEFAULT_CROP_H = 1080
 
-    libx264/yuv420p 가 짝수 해상도를 요구하므로 결과는 항상 짝수다. 원본보다 넓게
-    잡지 않는다 — 이미 세로인 클립은 거의 잘리지 않는다.
+
+def _even(v: int, limit: int) -> int:
+    """소스 안에 들어가는 짝수 — libx264/yuv420p 가 짝수 해상도를 요구한다."""
+    v = min(max(2, int(v)), limit)
+    if v % 2:
+        v -= 1  # limit 를 넘지 않도록 내림
+    return max(2, v)
+
+
+def crop_window_for(
+    source_width: int,
+    source_height: int,
+    crop_w: int = DEFAULT_CROP_W,
+    crop_h: int = DEFAULT_CROP_H,
+) -> tuple[int, int, int]:
+    """요청한 크롭 창(px)을 소스 안에 맞춘 `(width, height, y)`.
+
+    **크기는 비율이 아니라 절대 px 다.** 소스가 더 작으면 소스 크기로 clamp 한다 —
+    잘라낼 것이 없는 창을 만드느니 들어가는 만큼 잘라 내는 편이 낫다.
+
+    `y` 는 세로 가운데다. 높이가 소스보다 낮을 때만 의미가 있고(그때 위아래가
+    실제로 잘린다), 같으면 0 이라 지금까지와 똑같이 가로만 잘린다.
     """
-    w = max(2, round(height * 9 / 16))
-    w = min(w, frame_width)
-    if w % 2:
-        w -= 1  # frame_width 를 넘지 않도록 내림
-    return max(2, w)
+    w = _even(crop_w or DEFAULT_CROP_W, source_width)
+    h = _even(crop_h or DEFAULT_CROP_H, source_height)
+    y = max(0, (source_height - h) // 2)
+    return w, h, y
 
 
 def build_trajectory(samples: list, frame_width: int) -> Trajectory:
@@ -80,6 +100,29 @@ def type_at(ms: float, types: tuple[list[int], list[str]]) -> str | None:
         return None
     i = bisect.bisect_right(ms_list, ms) - 1
     return type_list[max(0, i)]
+
+
+def build_targets(samples: list) -> tuple[list[int], list[tuple[str, float]]]:
+    """crop 샘플 -> (ms 목록, (target_type, confidence) 목록) — 계단 조회용.
+
+    HUD 가 색(타입)과 농도(신뢰도)를 함께 쓰므로 둘을 한 번에 조회한다 —
+    프레임마다 두 번 bisect 하지 않게.
+    """
+    return (
+        [s.video_offset_ms for s in samples],
+        [(s.target_type, float(s.confidence)) for s in samples],
+    )
+
+
+def target_at(
+    ms: float, targets: tuple[list[int], list[tuple[str, float]]]
+) -> tuple[str, float] | None:
+    """시각 `ms` 의 (target_type, confidence) (계단 — 직전 샘플 값)."""
+    ms_list, entries = targets
+    if not ms_list:
+        return None
+    i = bisect.bisect_right(ms_list, ms) - 1
+    return entries[max(0, i)]
 
 
 def build_debug_lookup(debug: list) -> tuple[list[int], list[dict]]:

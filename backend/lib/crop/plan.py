@@ -19,7 +19,7 @@ from dataclasses import fields
 
 from adaptive_crop import ClipPlanConfig, CropSpec, VideoInfo
 
-from lib.crop.geometry import crop_width_for
+from lib.crop.geometry import DEFAULT_CROP_H, DEFAULT_CROP_W, crop_window_for
 
 # 공 검출 기본 임계값 — 낮게 잡고 트랙 단계에서 거른다 (라이브러리는 기본값을 두지 않는다).
 DEFAULT_CROP_CONF = 0.10
@@ -50,13 +50,20 @@ def resolve_clip_config(overrides: dict | None) -> ClipPlanConfig:
     return ClipPlanConfig(**clean)
 
 
-def crop_spec_for(source_width: int, source_height: int) -> CropSpec:
-    """소스 해상도에 맞는 세로 9:16 크롭 창 규격.
+def crop_spec_for(
+    source_width: int,
+    source_height: int,
+    crop_w: int = DEFAULT_CROP_W,
+    crop_h: int = DEFAULT_CROP_H,
+) -> CropSpec:
+    """요청한 크롭 창(px)을 소스에 맞춘 규격.
 
-    폭은 `lib.crop.geometry.crop_width_for`와 같은 값이다 — 좌표(라이브러리)와 렌더링
-    (cv2)이 같은 창을 가리키게 하려면 규칙이 하나여야 한다.
+    크기는 `lib.crop.geometry.crop_window_for`와 같은 값이다 — 좌표(라이브러리)와
+    렌더링(cv2)이 같은 창을 가리키게 하려면 규칙이 하나여야 한다. **크기를 바꾸는
+    쪽은 반드시 양쪽에 같은 값을 넘겨야 한다.**
     """
-    return CropSpec(crop_width_for(source_height, source_width), source_height)
+    w, h, y = crop_window_for(source_width, source_height, crop_w, crop_h)
+    return CropSpec(w, h, y)
 
 
 def video_info_from_meta(meta: dict) -> VideoInfo:

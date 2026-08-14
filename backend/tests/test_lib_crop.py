@@ -21,6 +21,7 @@ class _Sample:
     video_offset_ms: int
     target_center_x: float
     target_type: str
+    confidence: float = 1.0
 
 
 def _blank():
@@ -30,12 +31,29 @@ def _blank():
 # ---------- geometry ----------
 
 
-def test_crop_width_is_even_and_clamped():
-    assert geometry.crop_width_for(1080, 1920) == 608  # round(607.5) -> 608, 짝수
-    # 프레임보다 넓지 않고, 짝수를 유지하려 내림한다
-    assert geometry.crop_width_for(1080, 500) == 500
-    assert geometry.crop_width_for(1080, 501) == 500
-    assert geometry.crop_width_for(1080, 1920) % 2 == 0
+def test_crop_window_takes_absolute_pixels():
+    """비율이 아니라 px 다 — 준 값이 곧 창 크기이고 소스가 커도 따라 커지지 않는다."""
+    assert geometry.crop_window_for(1920, 1080) == (608, 1080, 0)  # 기본값
+    assert geometry.crop_window_for(1920, 1080, 1080, 1080) == (1080, 1080, 0)
+    assert geometry.crop_window_for(3840, 2160, 608, 1080) == (608, 1080, 540)
+
+
+def test_crop_window_is_even_and_clamped_to_the_source():
+    """libx264/yuv420p 가 짝수 해상도를 요구하고, 소스 밖으로는 나갈 수 없다."""
+    assert geometry.crop_window_for(500, 1080, 608, 1080)[0] == 500  # 폭 clamp
+    assert geometry.crop_window_for(1920, 400, 608, 1080)[1] == 400  # 높이 clamp
+    w, h, _ = geometry.crop_window_for(1920, 1080, 501, 401)
+    assert (w % 2, h % 2) == (0, 0) and (w, h) == (500, 400)
+
+
+def test_a_shorter_window_is_centred_vertically():
+    """세로를 낮게 잡으면 위아래가 실제로 잘린다 — 가운데를 남긴다."""
+    assert geometry.crop_window_for(1920, 1080, 608, 720) == (608, 720, 180)
+
+
+def test_a_nonsense_size_falls_back_to_the_default():
+    """0 이 오면 잘라낼 것이 없어진다 — 기본값으로 되돌린다."""
+    assert geometry.crop_window_for(1920, 1080, 0, 0) == (608, 1080, 0)
 
 
 def test_center_at_interpolates_and_remaps_center_fallback():
@@ -77,6 +95,20 @@ def test_build_types_and_type_at_step_lookup():
     assert geometry.type_at(0, ([], [])) is None
 
 
+def test_build_targets_carries_type_and_confidence_together():
+    """HUD 는 색(타입)과 농도(신뢰도)를 함께 쓴다 — 프레임마다 두 번 뒤지지 않게."""
+    samples = [
+        _Sample(0, 100.0, "ball", 0.9),
+        _Sample(100, 200.0, "player_group", 0.4),
+    ]
+    targets = geometry.build_targets(samples)
+
+    assert targets == ([0, 100], [("ball", 0.9), ("player_group", 0.4)])
+    assert geometry.target_at(50, targets) == ("ball", 0.9)  # 계단 — 직전 값 유지
+    assert geometry.target_at(9999, targets) == ("player_group", 0.4)
+    assert geometry.target_at(0, ([], [])) is None
+
+
 def test_debug_lookup_is_a_step_lookup():
     debug = [
         {"video_offset_ms": 0, "ball_bbox": [900, 480, 20, 20]},
@@ -94,13 +126,28 @@ def test_debug_lookup_is_a_step_lookup():
 
 
 def test_cut_returns_contiguous_slice_of_crop_width():
-    crop_w = geometry.crop_width_for(1080, 1920)  # 608
+    crop_w, _, _ = geometry.crop_window_for(1920, 1080)  # 608
     traj = geometry.build_trajectory([_Sample(0, 960.0, "ball")], 1920)
 
     out = cut.window(_blank(), geometry.center_at(0, traj), crop_w, 1920)
 
     assert out.shape == (1080, crop_w, 3)
     assert out.flags["C_CONTIGUOUS"]
+
+
+def test_cut_also_crops_vertically_when_the_window_is_shorter():
+    """세로를 낮게 잡으면 위아래도 실제로 잘린다 — px 로 정하는 것의 의미다."""
+    crop_w, crop_h, crop_y = geometry.crop_window_for(1920, 1080, 608, 720)
+
+    out = cut.window(_blank(), 960.0, crop_w, 1920, crop_h, crop_y)
+
+    assert out.shape == (720, 608, 3)
+    assert out.flags["C_CONTIGUOUS"]
+
+
+def test_cut_keeps_the_full_height_when_no_height_is_given():
+    """높이를 안 주면 지금까지처럼 가로만 자른다 — 기존 호출부가 그대로 돈다."""
+    assert cut.window(_blank(), 960.0, 608, 1920).shape == (1080, 608, 3)
 
 
 def test_cut_clamps_at_edges():
