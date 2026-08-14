@@ -14,7 +14,7 @@ from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.db import get_session
-from app.models import ModelEntry, iso_utc
+from app.models import ModelEntry, Project, iso_utc
 from app.schemas.model import ModelOut, ModelPatch, OfficialRequest
 
 router = APIRouter(prefix="/models", tags=["models"])
@@ -25,7 +25,7 @@ OFFICIAL_SIZES = ["n", "s", "m", "l", "x"]
 DEFAULT_OFFICIAL = "yolo26n"
 
 
-def _to_out(entry: ModelEntry) -> ModelOut:
+def _to_out(entry: ModelEntry, project_name: str | None = None) -> ModelOut:
     meta_path = settings.model_dir(entry.project_id, entry.id) / "meta.json"
     source = "upload"
     if meta_path.exists():
@@ -37,7 +37,22 @@ def _to_out(entry: ModelEntry) -> ModelOut:
         task=entry.task,
         created_at=iso_utc(entry.created_at),
         source=source,
+        project_id=entry.project_id,
+        project_name=project_name,
     )
+
+
+def _project_names(session: Session) -> dict[str, str]:
+    """모델의 출처를 이름으로 보여주기 위한 id→이름 표. 프로젝트 수는 적어서
+    한 번에 읽는 편이 모델마다 조회하는 것보다 싸다."""
+    return {p.id: p.name for p in session.exec(select(Project)).all()}
+
+
+def _project_name(session: Session, project_id: str | None) -> str | None:
+    if not project_id:
+        return None
+    project = session.get(Project, project_id)
+    return project.name if project else None
 
 
 def _load_names(pt_path) -> tuple[dict[int, str], str]:
@@ -72,6 +87,11 @@ def _register(
 
 @router.get("", response_model=list[ModelOut])
 def list_models(project_id: str | None = None, session: Session = Depends(get_session)):
+    """`project_id` 를 주면 그 프로젝트 + 공유 풀, 주지 않으면 **전부**.
+
+    전부를 고르는 쪽은 연구실이다 — 프로젝트에 속하지 않으므로 어느 프로젝트에서
+    나온 모델이든 쓸 수 있어야 한다. 응답의 `project_name` 으로 출처를 묶는다.
+    """
     stmt = select(ModelEntry)
     if project_id is not None:
         # this project's models plus legacy/shared (project_id NULL)
@@ -79,7 +99,8 @@ def list_models(project_id: str | None = None, session: Session = Depends(get_se
             or_(ModelEntry.project_id == project_id, ModelEntry.project_id.is_(None))
         )
     entries = session.exec(stmt.order_by(ModelEntry.created_at.desc())).all()
-    return [_to_out(e) for e in entries]
+    names = _project_names(session)
+    return [_to_out(e, names.get(e.project_id or "")) for e in entries]
 
 
 @router.get("/official")
@@ -114,7 +135,7 @@ async def download_official(req: OfficialRequest, session: Session = Depends(get
         raise HTTPException(502, f"Download failed: {e}")
 
     entry = _register(session, req.name, downloaded, source="official", project_id=req.project_id)
-    return _to_out(entry)
+    return _to_out(entry, _project_name(session, entry.project_id))
 
 
 @router.post("", response_model=ModelOut, status_code=201)
@@ -133,7 +154,7 @@ async def upload_model(
     entry = _register(
         session, file.filename.removesuffix(".pt"), tmp, source="upload", project_id=project_id
     )
-    return _to_out(entry)
+    return _to_out(entry, _project_name(session, entry.project_id))
 
 
 @router.get("/{model_id}", response_model=ModelOut)
@@ -141,7 +162,7 @@ def get_model(model_id: str, session: Session = Depends(get_session)):
     entry = session.get(ModelEntry, model_id)
     if entry is None:
         raise HTTPException(404, "Model not found")
-    return _to_out(entry)
+    return _to_out(entry, _project_name(session, entry.project_id))
 
 
 @router.get("/{model_id}/download")
@@ -185,7 +206,7 @@ def rename_model(model_id: str, req: ModelPatch, session: Session = Depends(get_
             meta = {}
         meta["name"] = name
         meta_path.write_text(json.dumps(meta, ensure_ascii=False))
-    return _to_out(entry)
+    return _to_out(entry, _project_name(session, entry.project_id))
 
 
 @router.delete("/{model_id}", status_code=204)
