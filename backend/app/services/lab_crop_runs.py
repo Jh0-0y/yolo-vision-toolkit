@@ -34,6 +34,7 @@ from app.core.config import settings
 from app.services import lab_store
 from infra import jobs
 from lib.crop.geometry import DEFAULT_CROP_H, DEFAULT_CROP_W
+from lib.fsutil import link_or_copy as _link_or_copy
 from lib.labels.io import atomic_write_text
 
 META_NAME = "run.json"
@@ -122,21 +123,8 @@ def _read_json(path: Path) -> dict | None:
 # ---------- 원본 사본 ----------
 
 
-def link_or_copy(src: Path, dst: Path) -> str:
-    """원본을 런 안으로 들인다. 하드링크가 되면 링크, 안 되면 복사.
-
-    돌려주는 값은 실제로 한 일(`"link"` · `"copy"`)이다 — 런 메타에 남겨 두면
-    나중에 용량을 설명할 수 있다. 링크든 복사든 **원본을 지워도 런은 온전하다.**
-    """
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    dst.unlink(missing_ok=True)
-    try:
-        os.link(src, dst)
-        return "link"
-    except OSError:
-        # 다른 볼륨이거나 파일시스템이 하드링크를 안 받는다 — 용량을 쓰더라도 복사한다
-        shutil.copy2(src, dst)
-        return "copy"
+# 원본을 런 안으로 들이는 방법 — 데이터셋 내보내기와 같은 문제라 `lib` 에 있다.
+link_or_copy = _link_or_copy
 
 
 # ---------- 상태 ----------
