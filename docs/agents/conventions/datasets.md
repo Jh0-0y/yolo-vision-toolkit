@@ -1,0 +1,70 @@
+---
+title: 데이터셋 규약
+scope: backend/app/services/datasets.py, backend/app/api/v1/endpoints/dataset*.py, backend/lib/labels/**, frontend/src/api/datasets.ts, frontend/src/components/dataset/**
+applies_to: 학습실의 이미지·라벨·검수·분할·내보내기·학습 입력을 다룰 때
+related:
+  - ../architecture.md
+  - ../data-layout.md
+  - ./jobs-and-progress.md
+  - ./backend-api-route.md
+---
+
+# 데이터셋 규약
+
+> 데이터셋 하나가 자기 것을 전부 갖고, 수치는 저장하지 않는다. 학습실 코드를 만질 때 읽는다.
+
+## 하나가 전부 갖는다
+
+`projects/{pid}/datasets/{did}/` 아래에 이미지·라벨·클래스·검수·분할이 **모두** 있다
+(자리는 [데이터 배치](../data-layout.md)). **데이터셋끼리는 아무것도 공유하지 않는다** —
+같은 영상을 두 데이터셋에 쓰려면 두 번 추출하고, 삭제는 디렉터리 통째로다.
+
+클래스도 데이터셋 것이다. 같은 이미지를 다른 데이터셋에 넣었더라도 거기서 보는 목록은
+그쪽 `classes.json` 이다.
+
+## 수치는 파생한다 — 저장하지 않는다
+
+`services/datasets.py` 의 `counts()` 가 파일을 세어 그 자리에서 만든다. 저장하면 실제와
+어긋나는 순간이 오고, 그 어긋남은 조용하다. **디렉터리가 곧 목록이다** — 데이터셋에 DB 행이
+없다(`services/lab_crop_runs.py` 와 같은 규약).
+
+## 흐름은 한 방향이다
+
+```
+가져오기 ─→ 미검수 ─(검수)→ 검수완료·미할당 ─(비율 split)→ train / val / test
+```
+
+- 가져온 것은 **전부 미검수**로 들어온다. 라벨이 있어도 그렇다.
+- **검수완료가 아닌 것은 절대 나가지 않는다** — 학습에도 내보내기에도.
+- 영상은 프레임을 얻는 수단일 뿐이라 추출이 끝나면 서버가 지운다.
+
+## 분할은 기존 배정을 건드리지 않는다
+
+`lib/labels/split.py:assign` 의 기본은 **미할당만** 배정한다. 이미 train/val/test 에 들어간
+것을 다시 섞으면 test 가 학습에 새어 들어가 이전 평가와 비교가 안 된다.
+
+전부 다시 섞는 것은 `reassign_all=True` 로 **명시할 때만** 하고, 화면은 그때 경고한다.
+
+## 내보내기와 학습은 같은 함수를 쓴다
+
+`lib/labels/dataset_export.py` 하나가 낸다. 담을 split 만 다르다.
+
+| 종류 | 담는 것 |
+|---|---|
+| `train` | train + val — 학습에 바로 쓸 것 |
+| `test` | test — 평가용 |
+| `all` | 검수완료 전부, 분할 무관 |
+
+- 이미지는 **하드링크**로 펼친다(`lib/fsutil.py:link_or_copy`). 몇 번을 내보내도 디스크는
+  한 벌이고, 실제 바이트가 드는 것은 zip 을 만들 때뿐이다.
+- 라벨은 링크하지 않고 **다시 쓴다** — 클래스를 걸러 id 를 0..n-1 로 다시 매기기 때문이다.
+  박스가 안 남아도 빈 파일을 쓴다: 빈 라벨은 "안 그렸다"가 아니라 **"여기엔 없다"는 학습 신호**다.
+- `materialize()` 는 트리까지, `build()` 는 이어서 zip 까지. **학습은 `materialize()` 를 쓴다** —
+  내보내기를 먼저 할 필요가 없다.
+- 내보내기는 **이력을 남기지 않는다.** 만들어서 받으면 끝이고, 목록이 필요하면 데이터셋이 목록이다.
+
+## 학습 입력은 토큰 하나다
+
+`dataset:{project_id}:{dataset_id}`. 다른 형태는 없다 — 옛 `export:` · `upload:` 는 사라졌다.
+학습을 시작하면 그 데이터셋의 train/val 을 `runs/{run_id}/dataset/` 에 펼치고, 하드링크라
+런을 지울 때 함께 사라진다.

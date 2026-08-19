@@ -24,8 +24,9 @@ backend/
 │   ├── video/               probe(규격 읽기) · to_h264 · require_ffmpeg
 │   ├── media/               extract(프레임 추출) · tiling · thumbnails
 │   ├── crop/                plan(어댑터) · geometry · window · hud · highlight · cut · palette
-│   ├── labels/              io · store · classes · registry · export
-│   └── train/               dataset(zip 임포트) · results(산출물 읽기) · uploads · staging
+│   ├── labels/              io · store · classes · split · import_yolo · dataset_export · registry
+│   ├── fsutil.py            link_or_copy — 하드링크, 안 되면 복사
+│   └── train/               dataset(data.yaml 찾기) · results(산출물 읽기) · staging
 ├── infra/                   시스템 배관 — 기능이 아니다
 │   └── jobs/                progress.jsonl · CANCEL · JobDir
 ├── tests/                   lib·infra 테스트 (app 테스트는 app/tests/)
@@ -38,6 +39,8 @@ backend/
     ├── api/v1/
     │   ├── router.py        라우터 배선 단 한 곳
     │   └── endpoints/       리소스별 HTTP 경로 (predict/ 는 계열별 패키지)
+    │                        데이터셋은 넷으로 나뉜다 — datasets(자리) · dataset_import
+    │                        · dataset_images · dataset_export
     ├── services/            *_manager.py — 잡 수명·프로세스 풀·DB 갱신
     ├── workers/             *_worker.py · train_runner.py — 별도 프로세스 엔트리
     └── tests/               test_*.py
@@ -48,7 +51,7 @@ frontend/src/
 ├── api/                     서버 통신 — client.ts 는 재수출 배럴, 구현은 리소스별 파일
 │   ├── client.ts            화면은 이것만 import 한다
 │   ├── http.ts              fetch/XHR 을 아는 유일한 파일
-│   ├── <리소스>.ts           projects · labs · labCrops · labels · classes · jobs · exports …
+│   ├── <리소스>.ts           datasets · projects · labs · labCrops · labels · classes · training …
 │   └── test/                predict · compare
 ├── pages/                   라우트 1개 = 파일 1개 (Lab* 은 연구실, 나머지는 학습실)
 ├── layouts/                 공간별 셸 — ProjectLayout(학습실) · LabLayout(연구실)
@@ -94,7 +97,7 @@ data/                        런타임 데이터 (git 추적 안 함) → data-l
 HTTP·DB·프로세스 관리만 남았다.
 
 백엔드와 프론트 모두 한 차례 정리를 마쳤다. 다음에 손댈 곳은 그때 가장 큰 파일을 보고
-정한다 — 지금 기준으로는 `LabelEditorPage.tsx`(약 490줄)와 `TrainRunDetailPage.tsx`(약 590줄)다.
+정한다 — 지금 기준으로는 `TrainRunDetailPage.tsx`(약 600줄)와 `LabelEditorPage.tsx`(약 490줄)다.
 
 무관한 변경에서 나머지를 함께 옮기지 않는다. 새 코드는 새 자리에 두고, 기존 코드는 그 기능을
 손볼 때 같이 옮긴다.

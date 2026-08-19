@@ -20,7 +20,7 @@ related:
 
 ```
 api/http.ts        BASE · ApiError · api 래퍼 · xhrUpload   (fetch/XHR 을 아는 유일한 파일)
-api/<리소스>.ts     projects · labels · classes · jobs · exports · training · videos · models
+api/<리소스>.ts     datasets · projects · labels · classes · jobs · training · labs · labCrops · models
 api/test/          predict · annotate · live · compare      (백엔드 endpoints/predict 와 같은 갈래)
 api/client.ts      전부 재수출하는 배럴
 ```

@@ -15,6 +15,7 @@
 - [계층 경계](docs/agents/conventions/layer-boundaries.md) — torch lazy import · DB는 API 프로세스만 · 워커 picklable; **백엔드 코드를 만질 때마다**
 - [명명 규칙](docs/agents/conventions/naming.md) — 파일·클래스·DTO·훅 이름과 주석 언어; 이름을 지을 때
 - [백엔드 API 라우트](docs/agents/conventions/backend-api-route.md) — router.py 등록 · 프리픽스 · 오류 코드; 엔드포인트를 추가할 때
+- [데이터셋 규약](docs/agents/conventions/datasets.md) — 데이터셋이 전부 갖는다 · 수치 파생 · 분할 안정성 · 내보내기 3종 · 학습 토큰; 학습실 코드를 만질 때
 - [잡과 진행률](docs/agents/conventions/jobs-and-progress.md) — progress.jsonl · CANCEL · SSE; 오래 걸리는 작업을 만들 때
 - [프론트 데이터 접근](docs/agents/conventions/frontend-data.md) — client.ts 단일 진입 · Query/스토어 경계; 서버 데이터를 다룰 때
 
@@ -39,6 +40,7 @@
 - **오래 걸리는 작업 추가** → [잡과 진행률](docs/agents/conventions/jobs-and-progress.md) → [계층 경계](docs/agents/conventions/layer-boundaries.md) → [데이터 배치](docs/agents/data-layout.md)
 - **화면 추가·수정** → [프론트 데이터 접근](docs/agents/conventions/frontend-data.md) → [명명 규칙](docs/agents/conventions/naming.md) → [테스트 · 검증](docs/agents/testing.md)
 - **크롭 관련 수정** → [adaptive-crop](docs/agents/libs/adaptive-crop.md) → [크롭 계획 · 튜닝 · crop.json](docs/agents/libs/crop-plan.md) → [adaptive-crop 설치 · 업그레이드](docs/agents/libs/adaptive-crop-upgrade.md)
+- **데이터셋·검수·분할·내보내기·학습 수정** → [데이터셋 규약](docs/agents/conventions/datasets.md) → [데이터 배치](docs/agents/data-layout.md) → [잡과 진행률](docs/agents/conventions/jobs-and-progress.md)
 - **작업 시작 · 마무리** → [브랜치](docs/agents/workflow/branching.md) → [테스트 · 검증](docs/agents/testing.md) → [커밋 메시지](docs/agents/workflow/commit-messages.md) → [PR](docs/agents/workflow/pr.md)
 
 ## 규칙 적용 원칙

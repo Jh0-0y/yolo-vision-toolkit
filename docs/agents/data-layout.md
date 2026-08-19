@@ -6,6 +6,7 @@ related:
   - ./architecture.md
   - ./structure-dir.md
   - ./conventions/jobs-and-progress.md
+  - ./conventions/datasets.md
 ---
 
 # 데이터 배치
@@ -22,24 +23,27 @@ related:
 DATA_DIR/                     # 기본 <repo>/data — git 이 추적하지 않는다
 ├── db.sqlite3                # 메타데이터 (WAL 모드)
 ├── models/{model_id}/        # 공유 모델 풀 — model.pt + meta.json
-├── projects/{project_id}/    # 학습실
-│   ├── raw/                  # 원본 이미지
-│   ├── thumbs/               # 썸네일
-│   ├── videos/               # 업로드 영상
-│   ├── labels/               # 이미지별 YOLO 라벨 (.txt)
-│   ├── exports/              # 내보낸 데이터셋 zip
+├── projects/{project_id}/    # 학습실 — 프로젝트는 껍데기다
+│   ├── project.json
 │   ├── models/ · runs/       # 프로젝트 스코프 모델·학습 결과
-│   ├── classes.json          # 클래스 레지스트리
-│   ├── reviewed.json         # 검수 완료 플래그
-│   └── project.json
+│   └── datasets/{dataset_id}/    # 데이터셋 하나가 자기 것을 전부 갖는다
+│       ├── dataset.json      # 이름 · 생성일
+│       ├── raw/              # 이미지
+│       ├── thumbs/           # 썸네일 — 요청할 때 만든다
+│       ├── labels/{stem}.txt # YOLO 라벨 (+ {stem}.meta.json — 박스별 score·status)
+│       ├── classes.json      # **이 데이터셋만의** 클래스
+│       ├── reviewed.json     # {stem: true}
+│       └── splits.json       # {stem: "train"|"val"|"test"}
 ├── labs/{lab_id}/            # 연구실
 │   ├── lab.json              # 사람이 읽는 표시(이름) — 진실은 DB 행이다
 │   ├── videos/{video_id}.mp4 # 원본 + {video_id}.json 사이드카 (프레임 추출 없음)
 │   └── crops/{crop_id}/      # 크롭 런 — run.json · crop.json · wide.mp4 · crop.mp4
 ├── jobs/{job_id}/            # progress.jsonl · CANCEL
-├── datasets/                 # 업로드된 학습 데이터셋 전개
 └── test/                     # 모델비교 캐시 — 순수 임시물, 자동 정리된다
 ```
+
+**데이터셋끼리는 아무것도 공유하지 않는다.** 같은 영상을 두 데이터셋에 쓰려면 두 번
+추출한다. 그래서 삭제도 통째로고, 한쪽을 고쳐도 다른 쪽이 흔들리지 않는다.
 
 ## 경로는 반드시 `settings` 에서 파생시킨다
 
