@@ -5,7 +5,6 @@ import {
   Collapse,
   Group,
   Modal,
-  MultiSelect,
   NumberInput,
   Stack,
   Text,
@@ -14,6 +13,7 @@ import { IconAlertTriangle, IconSettings } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { api, getResources, type JobOut, type ModelOut } from '../../api/client'
+import DetectorList, { newEntry, type DetectorEntry } from '../detect/DetectorList'
 import { useJobStore } from '../../stores/jobStore'
 
 interface Props {
@@ -34,10 +34,10 @@ export default function AutoLabelModal({
   names,
 }: Props) {
   const startAutoLabel = useJobStore((s) => s.trackAutoLabel)
-  const [modelIds, setModelIds] = useState<string[]>([])
+  // 엔트리마다 모델과 **추론 방식**을 따로 갖는다 — 선수는 풀 프레임, 공은 타일 식으로.
+  const [entries, setEntries] = useState<DetectorEntry[]>(() => [newEntry('full')])
   const [conf, setConf] = useState<number | string>(0.4)
   const [iouWbf, setIouWbf] = useState<number | string>(0.55)
-  const [imgsz, setImgsz] = useState<number | string>(640)
   const [maxBoxes, setMaxBoxes] = useState<Record<string, number>>({})
   const [advanced, setAdvanced] = useState(false)
 
@@ -57,7 +57,7 @@ export default function AutoLabelModal({
 
   // Union of class names across the selected models (classes merge by name).
   const classNames = useMemo(() => {
-    const selected = new Set(modelIds)
+    const selected = new Set(entries.map((e) => e.modelId).filter(Boolean) as string[])
     const names = new Set<string>()
     for (const m of models.data ?? []) {
       if (selected.has(m.id)) {
@@ -65,7 +65,7 @@ export default function AutoLabelModal({
       }
     }
     return [...names].sort((a, b) => a.localeCompare(b))
-  }, [models.data, modelIds])
+  }, [models.data, entries])
 
   const DEFAULT_MAX = 300
 
@@ -73,10 +73,19 @@ export default function AutoLabelModal({
     mutationFn: () =>
       api.post<JobOut>(`/projects/${projectId}/jobs`, {
         dataset_id: datasetId,
-        model_ids: modelIds,
+        detectors: entries
+          .filter((e) => e.modelId)
+          .map((e) => ({
+            model_id: e.modelId,
+            mode: e.mode,
+            imgsz: e.imgsz,
+            tile_size: e.tileSize,
+            stride: e.stride,
+            merge_iou: e.mergeIou,
+            border_margin_px: e.borderMargin ?? 4,
+          })),
         conf: Number(conf),
         iou_wbf: Number(iouWbf),
-        imgsz: Number(imgsz),
         names,
         // only send classes the user capped below the default
         max_boxes_per_class: Object.fromEntries(
@@ -118,17 +127,14 @@ export default function AutoLabelModal({
           Target: {names.length} selected images.
         </Text>
 
-        <MultiSelect
-          label="Models (1–N, classes are unioned by name)"
-          data={
-            models.data?.map((m) => ({
-              value: m.id,
-              label: `${m.name} (${Object.keys(m.classes).length} classes)`,
-            })) ?? []
-          }
-          value={modelIds}
-          onChange={setModelIds}
+        <DetectorList
+          models={models.data ?? []}
+          entries={entries}
+          onEntries={setEntries}
           disabled={running}
+          showConf={false}
+          showBorderMargin
+          defaultMode="full"
         />
         <NumberInput
           label="Confidence threshold (conf)"
@@ -165,15 +171,6 @@ export default function AutoLabelModal({
                 decimalScale={2}
                 disabled={running}
               />
-              <NumberInput
-                label="Image size (imgsz)"
-                value={imgsz}
-                onChange={setImgsz}
-                min={320}
-                max={1920}
-                step={32}
-                disabled={running}
-              />
             </Group>
 
             {classNames.length > 0 && (
@@ -206,7 +203,7 @@ export default function AutoLabelModal({
         <Group justify="flex-end">
           <Button
             onClick={() => launch.mutate()}
-            disabled={modelIds.length === 0}
+            disabled={!entries.some((e) => e.modelId)}
             loading={launch.isPending}
           >
             Run
