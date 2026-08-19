@@ -26,6 +26,7 @@ from pathlib import Path
 import yaml
 
 from lib.formats import IMAGE_EXTS
+from lib.fsutil import safe_stem
 from lib.labels.io import atomic_write_text
 from lib.labels.registry import ClassRegistry
 
@@ -138,14 +139,17 @@ def import_zip(tmp_zip: Path, dest: Path) -> dict:
             if img.suffix.lower() not in IMAGE_EXTS or img.name.startswith("."):
                 continue
             lbl = label_files.get(img.stem)
-            shutil.copyfile(img, raw_dir / img.name)
+            # 저쪽 이름을 그대로 믿지 않는다 — 앞에 점이 있으면 목록에서 사라지고,
+            # `#?%` 가 있으면 이미지 URL 이 깨진다. 영상 프레임과 **같은 규칙**을 쓴다.
+            stem = safe_stem(img.name, fallback="image")
+            shutil.copyfile(img, raw_dir / f"{stem}{img.suffix.lower()}")
             added_images += 1
-            stems.append(img.stem)
+            stems.append(stem)
             split = split_of(img.relative_to(extract))
             if split is not None:
-                splits[img.stem] = split
+                splits[stem] = split
             if lbl is not None:
-                atomic_write_text(labels_dir / f"{img.stem}.txt", remap_label_text(lbl, mapping))
+                atomic_write_text(labels_dir / f"{stem}.txt", remap_label_text(lbl, mapping))
                 added_labels += 1
 
         atomic_write_text(classes_path, json.dumps(registry.to_dict(), indent=2))

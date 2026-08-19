@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import uuid
 from pathlib import Path
 
@@ -26,6 +25,7 @@ from app.services import datasets
 from app.services.video_manager import video_manager
 from infra import jobs
 from lib.formats import VIDEO_EXTS
+from lib.fsutil import safe_stem
 from lib.labels.import_yolo import YoloImportError, import_zip
 from lib.media.extract import ExtractParams
 from lib.media.tiling import TilingParams
@@ -55,8 +55,8 @@ def _staging_dir(dataset: Path) -> Path:
 
 
 def _sanitize_stem(name: str) -> str:
-    stem = re.sub(r"[^0-9A-Za-z_-]+", "_", Path(name).stem).strip("_")
-    return stem or "video"
+    """프레임 이름 앞부분 — 규칙은 `lib.fsutil.safe_stem` 한 곳에 있다."""
+    return safe_stem(name, fallback="video")
 
 
 def _extract_params(
