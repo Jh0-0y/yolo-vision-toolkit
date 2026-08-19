@@ -94,6 +94,43 @@ def split_of(rel: Path) -> str | None:
     return None
 
 
+def zip_entry_name(info: zipfile.ZipInfo) -> str:
+    """zip 항목의 **진짜** 파일명.
+
+    zip 규격은 파일명을 CP437 로 쓰되, UTF-8 이면 플래그(0x800)를 세우라고 한다.
+    그런데 macOS 가 만드는 zip 은 UTF-8 바이트를 넣고도 **플래그를 세우지 않는다.**
+    그러면 `zipfile` 이 규격대로 CP437 로 해독해서 한글이 라틴 문자로 뒤집힌다 —
+    `스크린샷 2026-04-16.png` 이 `ßäëßà│ßäÅßà│…` 로 들어온다.
+
+    플래그가 없을 때만 되감아 UTF-8 로 다시 읽는다. 진짜 CP437 로 쓰인 옛 zip 은
+    UTF-8 해독이 실패하므로, 그때는 원래 이름을 그대로 둔다.
+    """
+    if info.flag_bits & 0x800:
+        return info.filename
+    try:
+        return info.filename.encode("cp437").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return info.filename
+
+
+def _extract_all(zf: zipfile.ZipFile, dest: Path) -> None:
+    """`extractall` 대신 한 항목씩 푼다 — 이름을 고쳐서 넣어야 하기 때문이다.
+
+    직접 푸는 만큼 **경로 탈출(zip slip)도 직접 막는다**: `../../etc/passwd` 같은
+    이름이 `dest` 밖을 가리키면 건너뛴다. `extractall` 은 이걸 대신 해 줬었다.
+    """
+    root = dest.resolve()
+    for info in zf.infolist():
+        if info.is_dir():
+            continue
+        target = (dest / zip_entry_name(info)).resolve()
+        if not target.is_relative_to(root):
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with zf.open(info) as src, open(target, "wb") as out:
+            shutil.copyfileobj(src, out)
+
+
 def import_zip(tmp_zip: Path, dest: Path) -> dict:
     """zip 을 `dest/{raw,labels}` 로 들여오고 클래스를 `dest/classes.json` 에 병합한다.
 
@@ -109,7 +146,7 @@ def import_zip(tmp_zip: Path, dest: Path) -> dict:
         extract = Path(td)
         try:
             with zipfile.ZipFile(tmp_zip) as zf:
-                zf.extractall(extract)
+                _extract_all(zf, extract)
         except zipfile.BadZipFile as e:
             raise YoloImportError("Corrupted zip file") from e
 

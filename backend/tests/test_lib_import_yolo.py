@@ -13,10 +13,12 @@ import pytest
 
 from lib.labels.import_yolo import (
     YoloImportError,
+    _extract_all,
     import_zip,
     read_yaml_names,
     remap_label_text,
     split_of,
+    zip_entry_name,
 )
 
 
@@ -201,3 +203,50 @@ def test_read_yaml_names_finds_a_nested_yaml(tmp_path):
     (nested / "data.yaml").write_text(json.dumps({"names": ["a", "b"]}))
 
     assert read_yaml_names(tmp_path) == {0: "a", 1: "b"}
+
+
+# ---------- macOS zip 의 파일명 ----------
+#
+# zip 규격은 파일명을 CP437 로 쓰되 UTF-8 이면 플래그를 세우라고 한다. macOS 는
+# UTF-8 바이트를 넣고도 플래그를 안 세워서, 규격대로 읽으면 한글이 뒤집힌다.
+# 실제로 `스크린샷 …png` 이 `ßäëßà│…` 로 들어와 데이터셋에 쌓인 적이 있다.
+
+
+def _info(filename: str, *, utf8_flag: bool) -> zipfile.ZipInfo:
+    info = zipfile.ZipInfo(filename="x")
+    info.filename = filename  # 생성자를 우회해 플래그를 우리가 정한다
+    info.flag_bits = 0x800 if utf8_flag else 0
+    return info
+
+
+def test_unflagged_utf8_name_is_recovered():
+    """macOS zip — 플래그가 없어 CP437 로 뒤집힌 이름을 되돌린다."""
+    mojibake = "스크린샷 2026-04-16.png".encode().decode("cp437")
+
+    assert zip_entry_name(_info(mojibake, utf8_flag=False)) == "스크린샷 2026-04-16.png"
+
+
+def test_flagged_name_is_left_alone():
+    """플래그가 있으면 `zipfile` 이 이미 UTF-8 로 읽었다 — 건드리면 오히려 깨진다."""
+    assert zip_entry_name(_info("스크린샷.png", utf8_flag=True)) == "스크린샷.png"
+
+
+def test_a_real_cp437_name_survives():
+    """옛날 zip 이 진짜 CP437 로 쓴 이름은 UTF-8 해독이 실패한다 — 그대로 둔다."""
+    assert zip_entry_name(_info("café.png", utf8_flag=False)) == "café.png"
+
+
+def test_zip_slip_is_blocked(tmp_path):
+    """직접 푸는 만큼 경로 탈출도 직접 막는다 — `extractall` 이 해 주던 일이다."""
+    zip_path = tmp_path / "evil.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("../escaped.txt", "nope")
+        zf.writestr("ok.txt", "yes")
+
+    dest = tmp_path / "out"
+    dest.mkdir()
+    with zipfile.ZipFile(zip_path) as zf:
+        _extract_all(zf, dest)
+
+    assert (dest / "ok.txt").exists()
+    assert not (tmp_path / "escaped.txt").exists()
