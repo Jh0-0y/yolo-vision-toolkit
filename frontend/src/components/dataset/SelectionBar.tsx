@@ -15,7 +15,7 @@ import {
 } from '@tabler/icons-react'
 
 interface Props {
-  /** 이 패널이 보여주는 쪽 — 검수 버튼의 방향이 갈린다 */
+  /** 이 패널이 보여주는 쪽 — 있는 버튼이 갈린다 */
   reviewed: boolean
   selectedCount: number
   total: number
@@ -25,7 +25,7 @@ interface Props {
   onSelectAll: () => void
   onClear: () => void
   onAutoLabel: () => void
-  onReview: () => void
+  onSendBack: () => void
   onDelete: () => void
 }
 
@@ -39,7 +39,7 @@ export default function SelectionBar({
   onSelectAll,
   onClear,
   onAutoLabel,
-  onReview,
+  onSendBack,
   onDelete,
 }: Props) {
   const none = selectedCount === 0
@@ -82,21 +82,30 @@ export default function SelectionBar({
         </Group>
 
         <Group gap="xs">
-          {/* 오토라벨링은 미검수 탭의 일이다. 선택이 없으면 **전체**가 대상이라
-              비활성화하지 않는다 — 문구로 대상을 밝힌다. */}
+          {/* **고른 것에만** 돈다. "전부"가 되면 검수 끝난 라벨까지 모델 출력으로
+              덮어쓰게 되어, 사람이 승인한 적 없는 라벨이 검수완료로 남는다. */}
           {!reviewed && (
-            <Button variant="light" leftSection={<IconWand size={16} />} onClick={onAutoLabel}>
-              {none ? 'Auto-label all' : `Auto-label (${selectedCount})`}
+            <Button
+              variant="light"
+              leftSection={<IconWand size={16} />}
+              onClick={onAutoLabel}
+              disabled={none}
+            >
+              Auto-labeling{none ? '' : ` (${selectedCount})`}
             </Button>
           )}
-          <Button
-            leftSection={reviewed ? <IconArrowBackUp size={16} /> : <IconChecks size={16} />}
-            onClick={onReview}
-            loading={reviewPending}
-            disabled={none}
-          >
-            {reviewed ? 'Send back' : 'Mark reviewed'}
-          </Button>
+          {/* 검수 **완료**는 여기 없다 — 한 장씩 봐야 의미가 있어 에디터에서만 한다.
+              되돌리는 쪽만 일괄로 둔다. */}
+          {reviewed && (
+            <Button
+              leftSection={<IconArrowBackUp size={16} />}
+              onClick={onSendBack}
+              loading={reviewPending}
+              disabled={none}
+            >
+              Send back
+            </Button>
+          )}
           <Button
             variant="light"
             color="red"
