@@ -4,8 +4,9 @@
 `labels/` 아래 어디쯤 있고, 클래스 id 는 그쪽 번호다. 여기서 하는 일은 셋이다.
 
     클래스 이름을 레지스트리에 병합 → local id → 우리 id 매핑
-    이미지를 raw/ 로 복사 (또는 타일로 쪼개서)
+    이미지를 raw/ 로 복사
     라벨을 그 매핑으로 다시 써서 labels/ 로
+    폴더 구조(train/val/test)에서 split 을 읽어 함께 돌려주기
 
 **HTTP 를 모른다.** 형식이 틀리면 `YoloImportError` 를 던지고, 그것을 몇 번 응답으로
 옮길지는 호출자가 정한다.
@@ -25,9 +26,8 @@ from pathlib import Path
 import yaml
 
 from lib.formats import IMAGE_EXTS
-from lib.labels.io import atomic_write_text, read_label_file, write_label_file
+from lib.labels.io import atomic_write_text
 from lib.labels.registry import ClassRegistry
-from lib.media.tiling import TilingParams, clip_boxes_to_tile, tile_grid, tile_stem
 
 
 class YoloImportError(Exception):
@@ -71,51 +71,37 @@ def remap_label_text(path: Path, mapping: dict[int, int]) -> str:
     return "\n".join(lines) + ("\n" if lines else "")
 
 
-def _import_tiled(
-    img: Path,
-    lbl: Path | None,
-    mapping: dict[int, int],
-    raw_dir: Path,
-    labels_dir: Path,
-    tiling: TilingParams,
-) -> tuple[int, int]:
-    """이미지 한 장을 타일로 쪼개 저장한다. `(저장한 타일 수, 라벨 쓴 타일 수)`.
+# zip 안에서 split 을 나타내는 폴더 이름. `valid` 는 Roboflow 가 쓰는 이름이다.
+_SPLIT_DIRS = {
+    "train": "train",
+    "val": "val",
+    "valid": "val",
+    "test": "test",
+}
 
-    라벨은 자동 변환한다 — 타일에 들어온 박스의 가시 비율이 min_visibility 이상이면
-    타일 경계로 클립해 유지하고, 미만이면 버린다. drop_empty 면 (라벨 있는 원본에서)
-    박스가 하나도 안 남은 타일은 저장하지 않는다.
+
+def split_of(rel: Path) -> str | None:
+    """이미지의 zip 내 상대경로에서 split 을 읽는다. 못 읽으면 None.
+
+    배치가 출처마다 다르다 — `images/train/x.jpg` 도 있고 `train/images/x.jpg` 도
+    있다. 그래서 자리를 못 박지 않고 **경로 어딘가에 있는 split 이름**을 찾는다.
     """
-    import cv2
-
-    frame = cv2.imread(str(img))
-    if frame is None:
-        return 0, 0
-    img_h, img_w = frame.shape[:2]
-
-    boxes: list[tuple[int, tuple[float, float, float, float]]] = []
-    if lbl is not None:
-        boxes = [(mapping.get(c, c), xyxy) for c, xyxy in read_label_file(lbl)]
-
-    saved = labeled = 0
-    for col, row, tx, ty in tile_grid(img_w, img_h, tiling):
-        tile_boxes = clip_boxes_to_tile(boxes, img_w, img_h, tx, ty, tiling)
-        if lbl is not None and tiling.drop_empty and not tile_boxes:
-            continue
-        stem = tile_stem(img.stem, col, row)
-        crop = frame[ty : ty + tiling.tile_size, tx : tx + tiling.tile_size]
-        cv2.imwrite(str(raw_dir / f"{stem}.jpg"), crop)
-        saved += 1
-        if lbl is not None:
-            write_label_file(labels_dir / f"{stem}.txt", tile_boxes)
-            labeled += 1
-    return saved, labeled
+    for part in rel.parts[:-1]:
+        name = _SPLIT_DIRS.get(part.lower())
+        if name is not None:
+            return name
+    return None
 
 
-def import_zip(tmp_zip: Path, dest: Path, tiling: TilingParams | None = None) -> dict:
+def import_zip(tmp_zip: Path, dest: Path) -> dict:
     """zip 을 `dest/{raw,labels}` 로 들여오고 클래스를 `dest/classes.json` 에 병합한다.
 
     이미 있는 이름의 이미지는 **덮어쓴다** — 같은 zip 을 두 번 넣으면 두 벌이 아니라
     한 벌이다.
+
+    `splits` 에 zip 의 폴더 구조에서 읽은 `{stem: split}` 을 함께 돌려준다. 여기서는
+    **읽기만 한다** — 그것을 실제 배정으로 쓸지는 호출자가 정한다(사용자가 "이미 검증된
+    데이터"라고 했을 때만 쓴다).
     """
     with tempfile.TemporaryDirectory() as td:
         extract = Path(td)
@@ -146,17 +132,18 @@ def import_zip(tmp_zip: Path, dest: Path, tiling: TilingParams | None = None) ->
         labels_dir.mkdir(parents=True, exist_ok=True)
 
         added_images = added_labels = 0
+        splits: dict[str, str] = {}
+        stems: list[str] = []
         for img in sorted(extract.rglob("*")):
             if img.suffix.lower() not in IMAGE_EXTS or img.name.startswith("."):
                 continue
             lbl = label_files.get(img.stem)
-            if tiling is not None:
-                saved, labeled = _import_tiled(img, lbl, mapping, raw_dir, labels_dir, tiling)
-                added_images += saved
-                added_labels += labeled
-                continue
             shutil.copyfile(img, raw_dir / img.name)
             added_images += 1
+            stems.append(img.stem)
+            split = split_of(img.relative_to(extract))
+            if split is not None:
+                splits[img.stem] = split
             if lbl is not None:
                 atomic_write_text(labels_dir / f"{img.stem}.txt", remap_label_text(lbl, mapping))
                 added_labels += 1
@@ -166,4 +153,6 @@ def import_zip(tmp_zip: Path, dest: Path, tiling: TilingParams | None = None) ->
             "images": added_images,
             "labeled": added_labels,
             "classes": len(registry.classes),
+            "stems": stems,
+            "splits": splits,
         }

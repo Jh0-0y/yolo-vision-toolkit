@@ -56,7 +56,10 @@ export interface DatasetImageQuery {
   reviewed?: boolean
   split?: 'train' | 'val' | 'test' | 'none'
   labeled?: boolean
+  /** 클래스 id, 또는 **-1 = 클래스 없음**(라벨은 있는데 박스가 없는 네거티브) */
   cls?: number
+  sort?: 'created' | 'name'
+  order?: 'asc' | 'desc'
   q?: string
   page?: number
   size?: number
@@ -197,6 +200,7 @@ export const deleteDatasetClass = (projectId: string, datasetId: string, classId
 // 두 방식 모두 결과는 **미검수**로 들어온다. 동영상은 프레임을 얻는 수단일 뿐이라
 // 추출이 끝나면 서버가 지운다.
 
+/** 타일링을 켜면 데이터셋에 들어가는 이미지가 **프레임이 아니라 타일**이 된다. */
 export interface VideoImportParams {
   target_fps: number
   max_frames: number
@@ -248,24 +252,31 @@ export function importVideo(
   )
 }
 
-/** YOLO zip 가져오기. 잡이 아니라 그 자리에서 끝나고 결과를 돌려준다. */
+export interface ZipImportResult {
+  images: number
+  labeled: number
+  classes: number
+  reviewed: boolean
+  /** 폴더 구조에서 train/val/test 로 배정된 수 (검증됨으로 가져왔을 때만) */
+  assigned: number
+}
+
+/** YOLO zip 가져오기. 잡이 아니라 그 자리에서 끝나고 결과를 돌려준다.
+ *
+ *  `reviewed` 는 "이미 사람이 검증한 데이터"라는 뜻이다. 참이면 검수완료로 들어오고
+ *  zip 의 train/val/test 폴더가 그대로 분할이 된다.
+ */
 export function importYoloZip(
   projectId: string,
   datasetId: string,
   file: File,
-  tiling?: { tile_size: number; stride: number; min_visibility: number; drop_empty: boolean },
+  reviewed: boolean,
   handlers: UploadHandlers = {},
 ) {
   const form = new FormData()
   form.append('file', file)
-  if (tiling) {
-    form.append('tile', 'true')
-    form.append('tile_size', String(tiling.tile_size))
-    form.append('stride', String(tiling.stride))
-    form.append('min_visibility', String(tiling.min_visibility))
-    form.append('drop_empty', String(tiling.drop_empty))
-  }
-  return xhrUpload<{ images: number; labeled: number; classes: number }>(
+  form.append('reviewed', String(reviewed))
+  return xhrUpload<ZipImportResult>(
     `${importBase(projectId, datasetId)}/dataset`,
     form,
     handlers,

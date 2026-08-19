@@ -7,22 +7,34 @@
 
 import json
 import zipfile
+from pathlib import Path
 
 import pytest
 
-from lib.labels.import_yolo import YoloImportError, import_zip, read_yaml_names, remap_label_text
+from lib.labels.import_yolo import (
+    YoloImportError,
+    import_zip,
+    read_yaml_names,
+    remap_label_text,
+    split_of,
+)
 
 
-def _make_zip(tmp_path, names, images, *, names_as_list=True, labels=None):
-    """이미지 `images`(stem 목록)와 data.yaml 을 담은 zip 을 만든다."""
+def _make_zip(tmp_path, names, images, *, names_as_list=True, labels=None, split="train"):
+    """이미지 `images`(stem 목록)와 data.yaml 을 담은 zip 을 만든다.
+
+    `split=None` 이면 폴더를 나누지 않은 평탄한 zip 을 만든다.
+    """
     src = tmp_path / "src"
-    (src / "images" / "train").mkdir(parents=True)
-    (src / "labels" / "train").mkdir(parents=True)
+    img_dir = (src / "images" / split) if split else (src / "images")
+    lbl_dir = (src / "labels" / split) if split else (src / "labels")
+    img_dir.mkdir(parents=True)
+    lbl_dir.mkdir(parents=True)
     for stem in images:
-        (src / "images" / "train" / f"{stem}.jpg").write_bytes(b"\xff\xd8\xff")
+        (img_dir / f"{stem}.jpg").write_bytes(b"\xff\xd8\xff")
         text = (labels or {}).get(stem)
         if text is not None:
-            (src / "labels" / "train" / f"{stem}.txt").write_text(text)
+            (lbl_dir / f"{stem}.txt").write_text(text)
     spec = names if names_as_list else {i: n for i, n in enumerate(names)}
     (src / "data.yaml").write_text(json.dumps({"train": "images/train", "names": spec}))
 
@@ -42,7 +54,10 @@ def test_imports_images_and_labels(tmp_path):
 
     result = import_zip(zip_path, dest)
 
-    assert result == {"images": 2, "labeled": 1, "classes": 1}
+    assert result["images"] == 2
+    assert result["labeled"] == 1
+    assert result["classes"] == 1
+    assert sorted(result["stems"]) == ["a", "b"]
     assert (dest / "raw" / "a.jpg").exists()
     assert (dest / "labels" / "a.txt").exists()
     assert not (dest / "labels" / "b.txt").exists()  # 라벨 없는 이미지는 라벨도 없다
@@ -126,6 +141,47 @@ def test_remap_drops_malformed_lines(tmp_path):
     path.write_text("0 0.1 0.1 0.1 0.1\ngarbage\n2 0.2\nx 0.1 0.1 0.1 0.1\n")
 
     assert remap_label_text(path, {0: 5}) == "5 0.1 0.1 0.1 0.1\n"
+
+
+# ---------- 폴더에서 읽는 분할 ----------
+#
+# zip 의 train/val/test 는 **읽기만** 한다. 실제 배정으로 쓸지는 호출자가 정한다
+# (사용자가 "이미 검증된 데이터"라고 했을 때만).
+
+
+@pytest.mark.parametrize(
+    "rel, expected",
+    [
+        ("images/train/a.jpg", "train"),
+        ("images/val/a.jpg", "val"),
+        ("images/valid/a.jpg", "val"),  # Roboflow 는 valid 를 쓴다
+        ("images/test/a.jpg", "test"),
+        ("train/images/a.jpg", "train"),  # 반대 배치도 있다
+        ("a.jpg", None),
+        ("images/a.jpg", None),
+    ],
+)
+def test_split_is_read_from_any_folder_level(rel, expected):
+    assert split_of(Path(rel)) == expected
+
+
+def test_import_reports_the_split_each_image_came_from(tmp_path):
+    dest = tmp_path / "ds"
+    for split in ("train", "val", "test"):
+        zip_path = _make_zip(tmp_path / split, ["ball"], [f"{split}_a"], split=split)
+        import_zip(zip_path, dest)
+
+    result = import_zip(_make_zip(tmp_path / "again", ["ball"], ["extra"], split="val"), dest)
+    assert result["splits"] == {"extra": "val"}
+
+
+def test_a_flat_zip_reports_no_splits(tmp_path):
+    zip_path = _make_zip(tmp_path, ["ball"], ["a", "b"], split=None)
+
+    result = import_zip(zip_path, tmp_path / "ds")
+
+    assert result["splits"] == {}
+    assert sorted(result["stems"]) == ["a", "b"]
 
 
 def test_read_yaml_names_finds_a_nested_yaml(tmp_path):

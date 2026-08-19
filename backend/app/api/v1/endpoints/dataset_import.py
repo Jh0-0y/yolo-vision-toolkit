@@ -102,12 +102,16 @@ async def import_video(
     end_sec: float | None = Form(None),
     dedup: bool = Form(True),
     dedup_threshold: float = Form(0.92),
-    tile: bool = Form(False),  # 프레임을 학습용 타일로 쪼개 저장
+    tile: bool = Form(False),  # 뽑은 프레임을 타일로 쪼개 저장
     tile_size: int = Form(640),
     stride: int = Form(480),  # 겹침 = tile_size - stride
     session: Session = Depends(get_session),
 ):
-    """영상을 올려 프레임을 이 데이터셋으로 뽑는다. **영상은 끝나면 지운다.**"""
+    """영상을 올려 프레임을 이 데이터셋으로 뽑는다. **영상은 끝나면 지운다.**
+
+    `tile` 이면 프레임을 그대로 두지 않고 타일로 쪼개 저장한다 — 데이터셋에 들어가는
+    이미지가 곧 타일이다.
+    """
     dataset = _require_dataset(session, project_id, dataset_id)
     params = _extract_params(
         target_fps, max_frames, start_sec, end_sec, dedup, dedup_threshold,
@@ -148,30 +152,20 @@ async def import_yolo_dataset(
     project_id: str,
     dataset_id: str,
     file: UploadFile,
-    tile: bool = Form(False),
-    tile_size: int = Form(640),
-    stride: int = Form(480),
-    min_visibility: float = Form(0.3),
-    drop_empty: bool = Form(True),
+    # 이미 사람이 검증한 데이터인가. 참이면 **검수완료로 들어오고**, zip 의
+    # train/val/test 폴더가 그대로 분할 배정이 된다.
+    reviewed: bool = Form(True),
     session: Session = Depends(get_session),
 ):
     """YOLO zip(이미지+labels+data.yaml)을 이 데이터셋으로 들여온다.
 
     클래스는 이 데이터셋의 `classes.json` 에 병합되고 라벨의 클래스 id 는 그에 맞춰
     다시 매겨진다 — 데이터셋마다 클래스가 다르므로 저쪽 번호를 그대로 쓸 수 없다.
+
+    `reviewed=False` 면 폴더 구조를 **읽지 않는다** — 검증되지 않은 데이터의 분할을
+    믿고 쓸 이유가 없어서, 전부 미검수·미할당으로 들어온다.
     """
     dataset = _require_dataset(session, project_id, dataset_id)
-    tiling = None
-    if tile:
-        tiling = TilingParams(
-            tile_size=tile_size,
-            stride=stride,
-            min_visibility=min_visibility,
-            drop_empty=drop_empty,
-        )
-        errors = tiling.validate()
-        if errors:
-            raise HTTPException(422, f"Invalid tiling params: {errors}")
 
     staging = _staging_dir(dataset)
     tmp = staging / f"upload_{uuid.uuid4().hex[:8]}.zip"
@@ -179,12 +173,28 @@ async def import_yolo_dataset(
         with open(tmp, "wb") as f:
             while chunk := await file.read(1 << 20):
                 f.write(chunk)
-        result = await run_in_threadpool(import_zip, tmp, dataset, tiling)
+        result = await run_in_threadpool(import_zip, tmp, dataset)
     except YoloImportError as e:
         raise HTTPException(422, str(e)) from None
     finally:
         tmp.unlink(missing_ok=True)
-    return result
+
+    # stem 목록은 응답에 싣지 않는다 — 수천 개가 될 수 있고 화면이 쓰지 않는다
+    imported_splits: dict[str, str] = result.pop("splits", {})
+    fresh = set(result.pop("stems", []))
+
+    assigned = 0
+    if reviewed and fresh:
+        # **방금 들어온 것만** 올린다. 이미 있던 미검수 이미지는 건드리지 않는다.
+        datasets.write_reviewed(
+            project_id, dataset_id, datasets.read_reviewed(project_id, dataset_id) | fresh
+        )
+        if imported_splits:
+            splits = datasets.read_splits(project_id, dataset_id)
+            splits.update(imported_splits)
+            datasets.write_splits(project_id, dataset_id, splits)
+            assigned = len(imported_splits)
+    return {**result, "reviewed": reviewed, "assigned": assigned}
 
 
 @router.post("/{job_id}/cancel")
