@@ -11,7 +11,7 @@ import { Button, Card, Group, Loader, Pagination, SegmentedControl, Stack, Text 
 import { notifications } from '@mantine/notifications'
 import { IconArrowsSplit, IconPackageExport, IconPlus } from '@tabler/icons-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   deleteDatasetImages,
   listDatasetClasses,
@@ -23,7 +23,15 @@ import {
 import { useJobStore } from '../../stores/jobStore'
 import AutoLabelModal from './AutoLabelModal'
 import ExportModal from './ExportModal'
-import GridFilters, { DEFAULT_FILTERS, type GridFilterState } from './GridFilters'
+import GridFilters, { type GridFilterState } from './GridFilters'
+import {
+  editorSearch,
+  readFilters,
+  readPage,
+  readSplit,
+  toImageQuery,
+  writeGridParams,
+} from './gridParams'
 import ImageGrid from './ImageGrid'
 import ImportModal from './ImportModal'
 import SelectionBar from './SelectionBar'
@@ -50,24 +58,23 @@ interface Props {
 export default function ImagePanel({ projectId, datasetId, reviewed, dataset }: Props) {
   const qc = useQueryClient()
   const navigate = useNavigate()
-  const [page, setPage] = useState(1)
-  const [filters, setFilters] = useState<GridFilterState>(DEFAULT_FILTERS)
-  const [split, setSplit] = useState('all')
+  // 필터·정렬·페이지는 **URL 에** 산다. 그래야 라벨 에디터가 같은 목록을 보고
+  // (`3 / 128` 과 이전·다음이 좁혀 놓은 것을 따른다), 새로고침·뒤로가기도 견딘다.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const filters = readFilters(searchParams)
+  const split = readSplit(searchParams)
+  const page = readPage(searchParams)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [autoLabelOpen, setAutoLabelOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [splitOpen, setSplitOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
 
+  // 에디터도 **같은 조건**으로 목록을 받는다 — 조건이 어긋나면 순서와 총 수가 달라진다
   const query: DatasetImageQuery = {
-    reviewed,
+    ...toImageQuery(filters, reviewed, split),
     page,
     size: PAGE_SIZE,
-    sort: filters.sort,
-    order: filters.order,
-    ...(filters.q ? { q: filters.q } : {}),
-    ...(filters.cls !== null ? { cls: filters.cls } : {}),
-    ...(reviewed && split !== 'all' ? { split: split as DatasetImageQuery['split'] } : {}),
   }
 
   const images = useQuery({
@@ -99,10 +106,18 @@ export default function ImagePanel({ projectId, datasetId, reviewed, dataset }: 
   }, [autoLabelDone])
 
   // 필터가 바뀌면 첫 페이지로. 안 그러면 3페이지짜리 결과의 7페이지를 보게 된다.
+  // `replace` 인 이유는 검색어 한 글자마다 히스토리가 쌓이면 뒤로가기가 망가지기 때문이다.
   const applyFilters = (next: GridFilterState) => {
-    setFilters(next)
-    setPage(1)
+    setSearchParams(writeGridParams(searchParams, { filters: next, page: 1 }), {
+      replace: true,
+    })
   }
+
+  const applySplit = (next: string) =>
+    setSearchParams(writeGridParams(searchParams, { split: next, page: 1 }), { replace: true })
+
+  const applyPage = (next: number) =>
+    setSearchParams(writeGridParams(searchParams, { page: next }), { replace: true })
 
   // 필터에 걸린 **전부**를 고른다 — 보이는 페이지가 아니다. 서버가 이름만 돌려주는
   // `names_only` 를 쓰므로 수천 장이어도 썸네일을 끌어오지 않는다.
@@ -182,10 +197,7 @@ export default function ImagePanel({ projectId, datasetId, reviewed, dataset }: 
       {reviewed && (
         <SegmentedControl
           value={split}
-          onChange={(v) => {
-            setSplit(v)
-            setPage(1)
-          }}
+          onChange={applySplit}
           data={SPLIT_FILTERS}
           size="xs"
           style={{ alignSelf: 'flex-start' }}
@@ -210,13 +222,19 @@ export default function ImagePanel({ projectId, datasetId, reviewed, dataset }: 
             items={items}
             selected={selected}
             onSelectedChange={setSelected}
+            // 지금 보고 있는 목록을 그대로 들고 넘어간다 — 에디터의 위치와
+            // 이전·다음이 좁혀 놓은 것을 따라야 한다
             onOpen={(item) =>
-              navigate(`/projects/${projectId}/datasets/${datasetId}/label/${item.stem}`)
+              navigate(
+                `/projects/${projectId}/datasets/${datasetId}/label/${encodeURIComponent(
+                  item.stem,
+                )}?${editorSearch(filters, reviewed, split)}`,
+              )
             }
           />
           {pages > 1 && (
             <Group justify="center">
-              <Pagination value={page} onChange={setPage} total={pages} />
+              <Pagination value={page} onChange={applyPage} total={pages} />
             </Group>
           )}
           <SelectionBar
