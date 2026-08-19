@@ -11,6 +11,7 @@ cls · q · sort)는 그 안에서 좁히는 데 쓴다.
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
@@ -126,8 +127,11 @@ def list_dataset_images(
         {
             "name": p.name,
             "stem": p.stem,
-            "thumb": f"{base}/thumbs/{p.name}",
-            "url": f"{base}/raw/{p.name}",
+            # 이름을 **인코딩해서** 넣는다. 안 하면 `#` 은 프래그먼트로 잘리고
+            # `?` 는 쿼리로 새어 404 가 난다 — 우리가 만든 이름이 아닐 수도 있으므로
+            # (zip 으로 들어온 것) 여기서 막는다.
+            "thumb": f"{base}/thumbs/{quote(p.name)}",
+            "url": f"{base}/raw/{quote(p.name)}",
             "labeled": p.stem in labeled_stems,
             "reviewed": p.stem in reviewed_stems,
             "split": splits.get(p.stem) if p.stem in reviewed_stems else None,
