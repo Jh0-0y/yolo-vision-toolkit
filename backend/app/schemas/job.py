@@ -4,6 +4,8 @@ from pydantic import BaseModel
 
 
 class JobCreate(BaseModel):
+    # 오토라벨링의 대상 — 이미지도 라벨도 클래스도 이 데이터셋 안에 있다
+    dataset_id: str
     model_ids: list[str]
     conf: float = 0.4
     iou_wbf: float = 0.55

@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.db import get_session, session_scope
 from app.models import Job, ModelEntry, Project, iso_utc
 from app.schemas.job import JobCreate, JobOut
+from app.services import datasets
 from app.services.label_manager import job_manager
 from infra import jobs
 
@@ -58,12 +59,20 @@ def create_job(project_id: str, req: JobCreate, session: Session = Depends(get_s
         name = entry.name if entry.name not in model_names else f"{entry.name}#{mid[-4:]}"
         model_names.append(name)
 
-    pdir = settings.projects_dir / project_id
+    # 오토라벨링의 대상은 **데이터셋**이다 — 이미지도 라벨도 클래스도 그 안에 있다.
+    if not req.dataset_id:
+        raise HTTPException(422, "dataset_id is required")
+    if not datasets.valid_id(req.dataset_id):
+        raise HTTPException(422, "Invalid dataset id")
+    if datasets.read_meta(project_id, req.dataset_id) is None:
+        raise HTTPException(404, "Dataset not found")
+    ddir = datasets.dataset_dir(project_id, req.dataset_id)
+
     cfg = {
         "model_paths": model_paths,
         "model_names": model_names,
-        "images_dir": str(pdir / "raw"),
-        "out_dir": str(pdir),
+        "images_dir": str(ddir / "raw"),
+        "out_dir": str(ddir),
         "conf": req.conf,
         "iou_wbf": req.iou_wbf,
         "imgsz": req.imgsz,

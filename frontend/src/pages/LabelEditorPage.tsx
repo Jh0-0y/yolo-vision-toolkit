@@ -28,13 +28,13 @@ import { notifications } from '@mantine/notifications'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
-  addClass,
-  deleteImages,
-  getLabels,
-  listImageNames,
-  putLabels,
-  putReviewed,
-  type ImageQuery,
+  addDatasetClass,
+  deleteDatasetImages,
+  getDatasetLabels,
+  listDatasetImages,
+  putDatasetLabels,
+  setImageReviewed,
+  type DatasetImageQuery,
 } from '../api/client'
 import BBoxCanvas from '../components/editor/BBoxCanvas'
 import { classColor, useEditorStore, type EditorTool } from '../stores/editorStore'
@@ -46,7 +46,7 @@ function triToBool(v: string | null): boolean | undefined {
 }
 
 export default function LabelEditorPage() {
-  const { projectId = '', stem = '' } = useParams()
+  const { projectId = '', datasetId = '', stem = '' } = useParams()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
@@ -60,20 +60,19 @@ export default function LabelEditorPage() {
   const [newClassName, setNewClassName] = useState('')
 
   // the filtered/sorted name list this editor navigates within (frozen per filter set)
-  const filterQuery: ImageQuery = useMemo(
+  const filterQuery: DatasetImageQuery = useMemo(
     () => ({
       labeled: triToBool(searchParams.get('labeled') as TriFilter),
       reviewed: triToBool(searchParams.get('reviewed') as TriFilter),
       cls: searchParams.get('cls') != null ? Number(searchParams.get('cls')) : undefined,
-      sort: (searchParams.get('sort') as 'created' | 'name') || 'created',
-      order: (searchParams.get('order') as 'asc' | 'desc') || 'desc',
       q: searchParams.get('q') || undefined,
+      names_only: true,
     }),
     [searchParams],
   )
   const names = useQuery({
-    queryKey: ['image-names', projectId, filterQuery],
-    queryFn: () => listImageNames(projectId, filterQuery),
+    queryKey: ['image-names', projectId, datasetId, filterQuery],
+    queryFn: () => listDatasetImages(projectId, datasetId, filterQuery),
     staleTime: 5 * 60_000,
   })
 
@@ -86,8 +85,8 @@ export default function LabelEditorPage() {
       : null
 
   const detail = useQuery({
-    queryKey: ['labels', projectId, stem],
-    queryFn: () => getLabels(projectId, stem),
+    queryKey: ['labels', projectId, datasetId, stem],
+    queryFn: () => getDatasetLabels(projectId, datasetId, stem),
   })
 
   // load boxes into the shared editor store when the image arrives
@@ -125,12 +124,12 @@ export default function LabelEditorPage() {
   const saveNow = useCallback(async () => {
     const s = useEditorStore.getState()
     if (!s.dirty) return
-    await putLabels(projectId, stem, s.boxes as never)
+    await putDatasetLabels(projectId, datasetId, stem, s.boxes as never)
     s.markSaved()
     queryClient.invalidateQueries({ queryKey: ['images', projectId] })
     queryClient.invalidateQueries({ queryKey: ['stats', projectId] })
-    queryClient.invalidateQueries({ queryKey: ['labels', projectId, stem] })
-  }, [projectId, stem, queryClient])
+    queryClient.invalidateQueries({ queryKey: ['labels', projectId, datasetId, stem] })
+  }, [projectId, datasetId, stem, queryClient])
 
   // 2s debounce autosave while editing
   useEffect(() => {
@@ -146,33 +145,35 @@ export default function LabelEditorPage() {
       if (!targetStem) return
       saveNow().catch((e) => notifications.show({ message: String(e), color: 'red' }))
       navigate(
-        `/projects/${projectId}/dataset/label/${encodeURIComponent(targetStem)}?${searchParams.toString()}`,
+        `/projects/${projectId}/datasets/${datasetId}/label/${encodeURIComponent(targetStem)}?${searchParams.toString()}`,
         { replace: true },
       )
     },
-    [navigate, projectId, searchParams, saveNow],
+    [navigate, projectId, datasetId, searchParams, saveNow],
   )
 
   const backToDataset = () => {
     saveNow().catch((e) => notifications.show({ message: String(e), color: 'red' }))
-    navigate(`/projects/${projectId}/dataset?${searchParams.toString()}`)
+    navigate(`/projects/${projectId}/datasets/${datasetId}`)
   }
 
   const toggleReviewed = useMutation({
     mutationFn: async (flag: boolean) => {
       await saveNow()
-      return putReviewed(projectId, stem, flag)
+      return setImageReviewed(projectId, datasetId, stem, flag)
     },
     onSuccess: (res) => {
+      // 검수를 켜면 이 이미지는 검수완료 탭으로 넘어간다 — 수치도 함께 다시 읽는다
       setReviewed(res.reviewed)
-      queryClient.invalidateQueries({ queryKey: ['images', projectId] })
-      queryClient.invalidateQueries({ queryKey: ['stats', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['dataset-images', projectId, datasetId] })
+      queryClient.invalidateQueries({ queryKey: ['dataset', projectId, datasetId] })
+      queryClient.invalidateQueries({ queryKey: ['datasets', projectId] })
     },
     onError: (e) => notifications.show({ message: String(e), color: 'red' }),
   })
 
   const removeImage = useMutation({
-    mutationFn: () => deleteImages(projectId, [detail.data?.name ?? '']),
+    mutationFn: () => deleteDatasetImages(projectId, datasetId, [detail.data?.name ?? '']),
     onSuccess: () => {
       // the deleted stem's autosave must not recreate its label file
       useEditorStore.getState().markSaved()
@@ -180,12 +181,12 @@ export default function LabelEditorPage() {
       queryClient.invalidateQueries({ queryKey: ['images', projectId] })
       queryClient.invalidateQueries({ queryKey: ['image-names', projectId] })
       queryClient.invalidateQueries({ queryKey: ['stats', projectId] })
-      queryClient.removeQueries({ queryKey: ['labels', projectId, stem] })
+      queryClient.removeQueries({ queryKey: ['labels', projectId, datasetId, stem] })
       // jump to a neighbour to keep the flow going, else back to the gallery
       const target = nextStem ?? prevStem
       navigate(
         target
-          ? `/projects/${projectId}/dataset/label/${encodeURIComponent(target)}?${searchParams.toString()}`
+          ? `/projects/${projectId}/datasets/${datasetId}/label/${encodeURIComponent(target)}?${searchParams.toString()}`
           : `/projects/${projectId}/dataset?${searchParams.toString()}`,
         { replace: true },
       )
@@ -194,11 +195,11 @@ export default function LabelEditorPage() {
   })
 
   const createClass = useMutation({
-    mutationFn: (name: string) => addClass(projectId, name),
+    mutationFn: (name: string) => addDatasetClass(projectId, datasetId, name),
     onSuccess: (cls) => {
       notifications.show({ message: `Class added: ${cls.name}`, color: 'green' })
       // refresh the label detail (its classes) and the active class becomes the new one
-      queryClient.invalidateQueries({ queryKey: ['labels', projectId, stem] })
+      queryClient.invalidateQueries({ queryKey: ['labels', projectId, datasetId, stem] })
       queryClient.invalidateQueries({ queryKey: ['stats', projectId] })
       const s = useEditorStore.getState()
       if (s.selectedId) s.updateBox(s.selectedId, { cls: cls.id })

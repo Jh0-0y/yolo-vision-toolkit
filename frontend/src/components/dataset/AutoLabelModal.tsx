@@ -18,13 +18,21 @@ import { useJobStore } from '../../stores/jobStore'
 
 interface Props {
   projectId: string
+  /** 라벨이 들어갈 데이터셋 — 이미지도 클래스도 그 안에 있다 */
+  datasetId: string
   opened: boolean
   onClose: () => void
-  /** target file names; null = every image in the project */
+  /** 대상 파일 이름들. null 이면 이 데이터셋의 모든 이미지 */
   names: string[] | null
 }
 
-export default function AutoLabelModal({ projectId, opened, onClose, names }: Props) {
+export default function AutoLabelModal({
+  projectId,
+  datasetId,
+  opened,
+  onClose,
+  names,
+}: Props) {
   const startAutoLabel = useJobStore((s) => s.trackAutoLabel)
   const [modelIds, setModelIds] = useState<string[]>([])
   const [conf, setConf] = useState<number | string>(0.4)
@@ -64,6 +72,7 @@ export default function AutoLabelModal({ projectId, opened, onClose, names }: Pr
   const launch = useMutation({
     mutationFn: () =>
       api.post<JobOut>(`/projects/${projectId}/jobs`, {
+        dataset_id: datasetId,
         model_ids: modelIds,
         conf: Number(conf),
         iou_wbf: Number(iouWbf),
@@ -79,6 +88,7 @@ export default function AutoLabelModal({ projectId, opened, onClose, names }: Pr
       // modal, navigating away, and a full reload (SSE reconnect).
       startAutoLabel(
         projectId,
+        datasetId,
         job.id,
         names ? `Auto-label · ${names.length} imgs` : 'Auto-label · all',
       )
