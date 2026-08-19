@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import unicodedata
+from collections.abc import Callable
 from pathlib import Path
 
 # 파일명에서 **반드시** 걷어내야 하는 것들. 한글·공백·괄호는 건드리지 않는다 —
@@ -49,6 +50,28 @@ def safe_stem(name: str, fallback: str = "file") -> str:
     while len(stem.encode()) > _MAX_STEM_BYTES:
         stem = stem[:-1]
     return stem or fallback
+
+
+def unique_stem(stem: str, taken: Callable[[str], bool], *, limit: int = 9999) -> str:
+    """이미 쓰이고 있으면 ` (2)` · ` (3)` … 을 붙여 **비어 있는** stem 을 돌려준다.
+
+    덮어쓰지 않는 이유는 하나다 — 이름이 같아도 **다른 데이터일 수 있다.** 덮어쓰면
+    그 판단을 기계가 조용히 내려 버리고, 사라진 쪽은 되돌릴 수 없다. `(2)` 로 남겨
+    두면 사람이 보고 정한다.
+
+    같은 것을 두 번 넣었을 때도 두 벌이 된다는 뜻이다 — 그건 목록에서 보이므로
+    (이름으로 `(2)` 를 검색해 지운다) 조용한 손실보다 낫다고 본다.
+
+    `taken` 은 "이 stem 이 이미 쓰였나"를 답한다. 무엇을 보고 판단할지는 부르는
+    쪽이 안다 — 이미지는 파일 하나, 영상 프레임은 그 추출의 첫 장이다.
+    """
+    if not taken(stem):
+        return stem
+    for n in range(2, limit + 1):
+        candidate = f"{stem} ({n})"
+        if not taken(candidate):
+            return candidate
+    raise RuntimeError(f"Cannot find a free name for {stem!r} after {limit} tries")
 
 
 def link_or_copy(src: Path, dst: Path) -> str:

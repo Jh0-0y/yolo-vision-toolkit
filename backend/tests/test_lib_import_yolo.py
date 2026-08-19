@@ -125,15 +125,25 @@ def test_a_corrupted_zip_is_rejected(tmp_path):
         import_zip(bad, tmp_path / "ds")
 
 
-def test_importing_twice_does_not_duplicate(tmp_path):
-    """같은 zip 을 두 번 넣으면 두 벌이 아니라 한 벌이다."""
-    zip_path = _make_zip(tmp_path, ["ball"], ["a", "b"])
+def test_importing_twice_keeps_both_as_numbered_copies(tmp_path):
+    """이름이 같아도 **덮어쓰지 않는다.**
+
+    같은 이름이 다른 데이터일 수 있어서, 지울지는 사람이 보고 정한다. 실수로 같은
+    zip 을 두 번 넣으면 두 벌이 되지만 `(2)` 로 보이므로 찾아서 지울 수 있다 —
+    조용히 사라지는 것보다 낫다.
+    """
+    zip_path = _make_zip(tmp_path, ["ball"], ["a", "b"], labels={"a": "0 0.5 0.5 0.1 0.1\n"})
     dest = tmp_path / "ds"
 
     import_zip(zip_path, dest)
-    import_zip(zip_path, dest)
+    result = import_zip(zip_path, dest)
 
-    assert len(list((dest / "raw").iterdir())) == 2
+    assert {p.name for p in (dest / "raw").iterdir()} == {
+        "a.jpg", "b.jpg", "a (2).jpg", "b (2).jpg",
+    }
+    # 두 번째 것도 자기 라벨을 갖는다 — 첫 번째 라벨을 가리키지 않는다
+    assert (dest / "labels" / "a (2).txt").exists()
+    assert sorted(result["stems"]) == ["a (2)", "b (2)"]
 
 
 def test_remap_drops_malformed_lines(tmp_path):

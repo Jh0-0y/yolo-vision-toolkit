@@ -26,7 +26,7 @@ from pathlib import Path
 import yaml
 
 from lib.formats import IMAGE_EXTS
-from lib.fsutil import safe_stem
+from lib.fsutil import safe_stem, unique_stem
 from lib.labels.io import atomic_write_text
 from lib.labels.registry import ClassRegistry
 
@@ -97,8 +97,9 @@ def split_of(rel: Path) -> str | None:
 def import_zip(tmp_zip: Path, dest: Path) -> dict:
     """zip 을 `dest/{raw,labels}` 로 들여오고 클래스를 `dest/classes.json` 에 병합한다.
 
-    이미 있는 이름의 이미지는 **덮어쓴다** — 같은 zip 을 두 번 넣으면 두 벌이 아니라
-    한 벌이다.
+    이미 있는 이름의 이미지는 **덮어쓰지 않고 `(2)` 로 넣는다.** 이름이 같아도 다른
+    데이터일 수 있어서, 무엇을 남길지는 사람이 보고 정한다. 그래서 같은 zip 을 두 번
+    넣으면 두 벌이 된다 — 이름으로 `(2)` 를 검색해 지우면 된다.
 
     `splits` 에 zip 의 폴더 구조에서 읽은 `{stem: split}` 을 함께 돌려준다. 여기서는
     **읽기만 한다** — 그것을 실제 배정으로 쓸지는 호출자가 정한다(사용자가 "이미 검증된
@@ -141,8 +142,14 @@ def import_zip(tmp_zip: Path, dest: Path) -> dict:
             lbl = label_files.get(img.stem)
             # 저쪽 이름을 그대로 믿지 않는다 — 앞에 점이 있으면 목록에서 사라지고,
             # `#?%` 가 있으면 이미지 URL 이 깨진다. 영상 프레임과 **같은 규칙**을 쓴다.
-            stem = safe_stem(img.name, fallback="image")
-            shutil.copyfile(img, raw_dir / f"{stem}{img.suffix.lower()}")
+            ext = img.suffix.lower()
+            # 같은 이름이 이미 있으면 덮어쓰지 않고 `(2)` 로 넣는다 — 이름만 같고
+            # 내용은 다른 것일 수 있어서, 지울지는 사람이 보고 정한다.
+            stem = unique_stem(
+                safe_stem(img.name, fallback="image"),
+                lambda s: (raw_dir / f"{s}{ext}").exists(),
+            )
+            shutil.copyfile(img, raw_dir / f"{stem}{ext}")
             added_images += 1
             stems.append(stem)
             split = split_of(img.relative_to(extract))

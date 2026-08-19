@@ -9,7 +9,7 @@ import unicodedata
 
 import pytest
 
-from lib.fsutil import safe_stem
+from lib.fsutil import safe_stem, unique_stem
 
 
 # ---------- 살려야 하는 것 ----------
@@ -87,3 +87,28 @@ def test_caps_the_length_in_bytes():
     stem = safe_stem("가" * 200 + ".mp4")
     assert len(stem.encode()) <= 150
     assert stem  # 통째로 날아가지는 않는다
+
+
+# ---------- 이름이 겹칠 때 ----------
+#
+# 덮어쓰지 않는다. 이름이 같아도 다른 데이터일 수 있고, 덮어쓰면 사라진 쪽을
+# 되돌릴 수 없다. `(2)` 로 남겨 두면 사람이 보고 정한다.
+
+
+def test_free_stem_is_returned_as_is():
+    assert unique_stem("경기 영상", lambda s: False) == "경기 영상"
+
+
+def test_taken_stem_gets_a_number():
+    taken = {"경기 영상"}
+    assert unique_stem("경기 영상", lambda s: s in taken) == "경기 영상 (2)"
+
+
+def test_numbers_keep_climbing():
+    taken = {"a", "a (2)", "a (3)"}
+    assert unique_stem("a", lambda s: s in taken) == "a (4)"
+
+
+def test_gives_up_loudly_rather_than_looping_forever():
+    with pytest.raises(RuntimeError, match="free name"):
+        unique_stem("a", lambda s: True, limit=3)
