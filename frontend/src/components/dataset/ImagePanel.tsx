@@ -1,33 +1,33 @@
 // 데이터셋 안의 이미지 그리드 — 미검수 탭과 검수완료 탭이 같은 컴포넌트를 쓴다.
 //
 // 다른 것은 셋뿐이다.
-//   미검수   오토라벨링 버튼이 있고, 고른 것을 "검수 완료"로 보낼 수 있다
-//   검수완료 split 하위 필터가 있고, 검수를 되돌릴 수 있다
+//   미검수   가져오기 · 오토라벨링이 있다
+//   검수완료 split 하위 필터와 나누기 · 내보내기가 있고, 검수를 되돌릴 수 있다
+//
+// **일괄 "검수 완료"는 없다.** 검수는 한 장씩 봐야 의미가 있어서, 검수완료로 보내는
+// 것은 라벨 에디터에서만 한다. 되돌리는 쪽은 일괄로 둔다 — 안전한 방향이다.
 import { useEffect, useState } from 'react'
-import {
-  Badge,
-  Card,
-  Group,
-  Loader,
-  Pagination,
-  SegmentedControl,
-  Stack,
-  Text,
-  TextInput,
-} from '@mantine/core'
+import { Button, Card, Group, Loader, Pagination, SegmentedControl, Stack, Text } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
+import { IconArrowsSplit, IconPackageExport, IconPlus } from '@tabler/icons-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
   deleteDatasetImages,
+  listDatasetClasses,
   listDatasetImages,
   setImageReviewed,
   type DatasetImageQuery,
+  type DatasetOut,
 } from '../../api/client'
 import { useJobStore } from '../../stores/jobStore'
 import AutoLabelModal from './AutoLabelModal'
+import ExportModal from './ExportModal'
+import GridFilters, { DEFAULT_FILTERS, type GridFilterState } from './GridFilters'
 import ImageGrid from './ImageGrid'
+import ImportModal from './ImportModal'
 import SelectionBar from './SelectionBar'
+import SplitModal from './SplitModal'
 
 const PAGE_SIZE = 60
 
@@ -44,28 +44,41 @@ interface Props {
   datasetId: string
   /** 이 패널이 보여주는 쪽 */
   reviewed: boolean
+  dataset: DatasetOut
 }
 
-export default function ImagePanel({ projectId, datasetId, reviewed }: Props) {
+export default function ImagePanel({ projectId, datasetId, reviewed, dataset }: Props) {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const [page, setPage] = useState(1)
-  const [q, setQ] = useState('')
+  const [filters, setFilters] = useState<GridFilterState>(DEFAULT_FILTERS)
   const [split, setSplit] = useState('all')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [autoLabelOpen, setAutoLabelOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+  const [splitOpen, setSplitOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
 
   const query: DatasetImageQuery = {
     reviewed,
     page,
     size: PAGE_SIZE,
-    ...(q ? { q } : {}),
+    sort: filters.sort,
+    order: filters.order,
+    ...(filters.q ? { q: filters.q } : {}),
+    ...(filters.cls !== null ? { cls: filters.cls } : {}),
     ...(reviewed && split !== 'all' ? { split: split as DatasetImageQuery['split'] } : {}),
   }
 
   const images = useQuery({
     queryKey: ['dataset-images', projectId, datasetId, query],
     queryFn: () => listDatasetImages(projectId, datasetId, query),
+  })
+
+  // 클래스 필터의 선택지 — 이 데이터셋의 클래스다
+  const classes = useQuery({
+    queryKey: ['dataset-classes', projectId, datasetId],
+    queryFn: () => listDatasetClasses(projectId, datasetId),
   })
 
   const invalidate = () => {
@@ -85,6 +98,12 @@ export default function ImagePanel({ projectId, datasetId, reviewed }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoLabelDone])
 
+  // 필터가 바뀌면 첫 페이지로. 안 그러면 3페이지짜리 결과의 7페이지를 보게 된다.
+  const applyFilters = (next: GridFilterState) => {
+    setFilters(next)
+    setPage(1)
+  }
+
   // 필터에 걸린 **전부**를 고른다 — 보이는 페이지가 아니다. 서버가 이름만 돌려주는
   // `names_only` 를 쓰므로 수천 장이어도 썸네일을 끌어오지 않는다.
   const selectAll = useMutation({
@@ -100,19 +119,16 @@ export default function ImagePanel({ projectId, datasetId, reviewed }: Props) {
   // 다른 페이지의 이미지가 조용히 빠진다.
   const selectedStems = () => [...selected].map((name) => name.replace(/\.[^.]+$/, ''))
 
-  const review = useMutation({
-    mutationFn: async (next: boolean) => {
+  const sendBack = useMutation({
+    mutationFn: async () => {
       const stems = selectedStems()
       for (const stem of stems) {
-        await setImageReviewed(projectId, datasetId, stem, next)
+        await setImageReviewed(projectId, datasetId, stem, false)
       }
       return stems.length
     },
-    onSuccess: (n, next) => {
-      notifications.show({
-        message: next ? `${n} images marked reviewed` : `${n} images sent back`,
-        color: 'green',
-      })
+    onSuccess: (n) => {
+      notifications.show({ message: `${n} images sent back`, color: 'green' })
       setSelected(new Set())
       invalidate()
     },
@@ -132,38 +148,49 @@ export default function ImagePanel({ projectId, datasetId, reviewed }: Props) {
   const data = images.data
   const items = data?.items ?? []
   const pages = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE_SIZE))
-  // 오토라벨링은 파일명을 받는다 — 선택 집합이 이미 파일명이라 그대로 넘긴다
-  const selectedNames = [...selected]
 
   return (
     <Stack gap="md">
       <Group justify="space-between" align="flex-end">
+        <GridFilters value={filters} onChange={applyFilters} classes={classes.data ?? []} />
         <Group gap="xs">
-          <TextInput
-            placeholder="Search by name"
-            value={q}
-            onChange={(e) => {
-              setQ(e.currentTarget.value)
-              setPage(1)
-            }}
-            w={220}
-          />
-          {reviewed && (
-            <SegmentedControl
-              value={split}
-              onChange={(v) => {
-                setSplit(v)
-                setPage(1)
-              }}
-              data={SPLIT_FILTERS}
-              size="xs"
-            />
+          {reviewed ? (
+            <>
+              <Button
+                variant="light"
+                leftSection={<IconArrowsSplit size={16} />}
+                onClick={() => setSplitOpen(true)}
+              >
+                Split
+              </Button>
+              <Button
+                variant="light"
+                leftSection={<IconPackageExport size={16} />}
+                onClick={() => setExportOpen(true)}
+              >
+                Export
+              </Button>
+            </>
+          ) : (
+            <Button leftSection={<IconPlus size={16} />} onClick={() => setImportOpen(true)}>
+              Import images
+            </Button>
           )}
         </Group>
-        <Badge variant="light" color="gray">
-          {data?.total ?? 0} images
-        </Badge>
       </Group>
+
+      {reviewed && (
+        <SegmentedControl
+          value={split}
+          onChange={(v) => {
+            setSplit(v)
+            setPage(1)
+          }}
+          data={SPLIT_FILTERS}
+          size="xs"
+          style={{ alignSelf: 'flex-start' }}
+        />
+      )}
 
       {images.isLoading ? (
         <Group justify="center" py="xl">
@@ -173,8 +200,8 @@ export default function ImagePanel({ projectId, datasetId, reviewed }: Props) {
         <Card withBorder radius="md" padding="xl">
           <Text size="sm" c="dimmed" ta="center">
             {reviewed
-              ? 'Nothing reviewed yet — mark images in the Unreviewed tab.'
-              : 'No unreviewed images. Import some above.'}
+              ? 'Nothing here — review images in the Unreviewed tab, or widen the filter.'
+              : 'No unreviewed images. Import some, or widen the filter.'}
           </Text>
         </Card>
       ) : (
@@ -184,9 +211,7 @@ export default function ImagePanel({ projectId, datasetId, reviewed }: Props) {
             selected={selected}
             onSelectedChange={setSelected}
             onOpen={(item) =>
-              navigate(
-                `/projects/${projectId}/datasets/${datasetId}/label/${item.stem}`,
-              )
+              navigate(`/projects/${projectId}/datasets/${datasetId}/label/${item.stem}`)
             }
           />
           {pages > 1 && (
@@ -199,12 +224,12 @@ export default function ImagePanel({ projectId, datasetId, reviewed }: Props) {
             selectedCount={selected.size}
             total={data?.total ?? 0}
             selectingAll={selectAll.isPending}
-            reviewPending={review.isPending}
+            reviewPending={sendBack.isPending}
             deletePending={remove.isPending}
             onSelectAll={() => selectAll.mutate()}
             onClear={() => setSelected(new Set())}
             onAutoLabel={() => setAutoLabelOpen(true)}
-            onReview={() => review.mutate(!reviewed)}
+            onSendBack={() => sendBack.mutate()}
             onDelete={() => {
               if (confirm(`Delete ${selected.size} images from this dataset?`)) remove.mutate()
             }}
@@ -212,12 +237,32 @@ export default function ImagePanel({ projectId, datasetId, reviewed }: Props) {
         </>
       )}
 
+      <ImportModal
+        projectId={projectId}
+        datasetId={datasetId}
+        opened={importOpen}
+        onClose={() => setImportOpen(false)}
+      />
+      <SplitModal
+        projectId={projectId}
+        datasetId={datasetId}
+        dataset={dataset}
+        opened={splitOpen}
+        onClose={() => setSplitOpen(false)}
+      />
+      <ExportModal
+        projectId={projectId}
+        datasetId={datasetId}
+        dataset={dataset}
+        opened={exportOpen}
+        onClose={() => setExportOpen(false)}
+      />
       <AutoLabelModal
         projectId={projectId}
         datasetId={datasetId}
         opened={autoLabelOpen}
         onClose={() => setAutoLabelOpen(false)}
-        names={selectedNames.length ? selectedNames : null}
+        names={[...selected]}
       />
     </Stack>
   )

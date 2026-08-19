@@ -9,16 +9,13 @@
 //
 // 지금은 껍데기다 — 가져오기(2단계) · 검수·오토라벨링(3단계) · 분할·내보내기(4단계)가
 // 각자 자기 자리에 붙는다.
-import { Anchor, Badge, Group, SimpleGrid, Stack, Tabs, Text, Title } from '@mantine/core'
+import { Anchor, Badge, Group, Stack, Tabs, Text, Title } from '@mantine/core'
 import { IconChevronLeft, IconChecks, IconInbox } from '@tabler/icons-react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { getDataset } from '../api/client'
 import StatTile from '../components/StatTile'
-import ExportCard from '../components/dataset/ExportCard'
 import ImagePanel from '../components/dataset/ImagePanel'
-import ImportPanel from '../components/dataset/ImportPanel'
-import SplitCard from '../components/dataset/SplitCard'
 
 const TABS = ['unreviewed', 'reviewed']
 
@@ -97,21 +94,19 @@ export default function DatasetDetailPage() {
           </Tabs.Tab>
         </Tabs.List>
 
+        {/* 가져오기 · 나누기 · 내보내기는 **모달**이다 — 가끔 하는 일이 매일 보는
+            그리드를 아래로 밀지 않도록. 버튼은 각 패널 위에 있다. */}
         <Tabs.Panel value="unreviewed" pt="md">
-          <Stack gap="md">
-            <ImportPanel projectId={projectId} datasetId={datasetId} />
-            <ImagePanel projectId={projectId} datasetId={datasetId} reviewed={false} />
-          </Stack>
+          <ImagePanel
+            projectId={projectId}
+            datasetId={datasetId}
+            reviewed={false}
+            dataset={ds}
+          />
         </Tabs.Panel>
 
         <Tabs.Panel value="reviewed" pt="md">
-          <Stack gap="md">
-            <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="md">
-              <SplitCard projectId={projectId} datasetId={datasetId} dataset={ds} />
-              <ExportCard projectId={projectId} datasetId={datasetId} dataset={ds} />
-            </SimpleGrid>
-            <ImagePanel projectId={projectId} datasetId={datasetId} reviewed />
-          </Stack>
+          <ImagePanel projectId={projectId} datasetId={datasetId} reviewed dataset={ds} />
         </Tabs.Panel>
       </Tabs>
     </Stack>
