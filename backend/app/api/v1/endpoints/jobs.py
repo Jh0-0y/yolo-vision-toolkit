@@ -41,6 +41,10 @@ def create_job(project_id: str, req: JobCreate, session: Session = Depends(get_s
         raise HTTPException(404, "Project not found")
     if not req.model_ids:
         raise HTTPException(422, "Select at least one model")
+    # **대상을 반드시 받는다.** 비우면 "데이터셋 전부"가 되어 검수 끝난 이미지의
+    # 라벨까지 모델 출력으로 덮어썼다. 오토라벨링은 고른 것에만 돈다.
+    if not req.names:
+        raise HTTPException(422, "Select the images to auto-label")
 
     model_paths = []
     model_names = []
@@ -86,7 +90,7 @@ def create_job(project_id: str, req: JobCreate, session: Session = Depends(get_s
     session.commit()
     session.refresh(job)
 
-    job_manager.submit_label_job(job.id, project_id, cfg)
+    job_manager.submit_label_job(job.id, ddir, cfg)
     session.refresh(job)
     return _to_out(job)
 

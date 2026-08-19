@@ -22,8 +22,8 @@ interface Props {
   datasetId: string
   opened: boolean
   onClose: () => void
-  /** 대상 파일 이름들. null 이면 이 데이터셋의 모든 이미지 */
-  names: string[] | null
+  /** 대상 이미지 파일명. **비울 수 없다** — 오토라벨링은 고른 것에만 돈다. */
+  names: string[]
 }
 
 export default function AutoLabelModal({
@@ -90,7 +90,7 @@ export default function AutoLabelModal({
         projectId,
         datasetId,
         job.id,
-        names ? `Auto-label · ${names.length} imgs` : 'Auto-label · all',
+        `Auto-label · ${names.length} imgs`,
       )
       onClose()
     },
@@ -115,7 +115,7 @@ export default function AutoLabelModal({
           </Alert>
         )}
         <Text size="sm" c="dimmed">
-          Target: {names ? `${names.length} selected images` : 'all images in the project'}.
+          Target: {names.length} selected images.
         </Text>
 
         <MultiSelect
