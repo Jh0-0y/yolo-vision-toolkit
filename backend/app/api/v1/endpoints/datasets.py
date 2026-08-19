@@ -60,6 +60,18 @@ def get_dataset(project_id: str, dataset_id: str, session: Session = Depends(get
     return datasets.to_out(project_id, dataset_id, meta)
 
 
+@router.get("/{dataset_id}/sources")
+def list_sources(project_id: str, dataset_id: str, session: Session = Depends(get_session)):
+    """이 데이터가 어디서 왔는지 — 최근 것이 먼저.
+
+    영상은 프레임을 뽑고 지우므로 **여기가 유일한 기록**이다. 같은 이름이 두 번
+    들어왔을 때 어느 쪽이 `(2)` 인지도 여기서 본다.
+    """
+    _require_dataset(session, project_id, dataset_id)
+    sources = datasets.read_sources(project_id, dataset_id)
+    return sorted(sources, key=lambda s: s.get("at") or "", reverse=True)
+
+
 @router.patch("/{dataset_id}", response_model=DatasetOut)
 def rename_dataset(
     project_id: str,

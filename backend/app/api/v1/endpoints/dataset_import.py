@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
@@ -25,7 +27,7 @@ from app.services import datasets
 from app.services.video_manager import video_manager
 from infra import jobs
 from lib.formats import VIDEO_EXTS
-from lib.fsutil import safe_stem
+from lib.fsutil import safe_stem, unique_stem
 from lib.labels.import_yolo import YoloImportError, import_zip
 from lib.media.extract import ExtractParams
 from lib.media.tiling import TilingParams
@@ -54,9 +56,25 @@ def _staging_dir(dataset: Path) -> Path:
     return d
 
 
-def _sanitize_stem(name: str) -> str:
-    """프레임 이름 앞부분 — 규칙은 `lib.fsutil.safe_stem` 한 곳에 있다."""
-    return safe_stem(name, fallback="video")
+def _frame_stem(project_id: str, dataset_id: str, raw_dir: Path, name: str) -> str:
+    """프레임 이름 앞부분. 규칙은 `lib.fsutil` 에 있고, 여기서 자리만 본다.
+
+    같은 이름으로 이미 뽑은 적이 있으면 `경기 영상 (2)` 로 갈라 준다. **프레임마다가
+    아니라 추출 단위로** 붙이는 이유는, 장마다 붙이면 `경기_00001 (2).jpg` 처럼 번호와
+    접미사가 뒤엉켜 어느 추출에서 나왔는지 알 수 없기 때문이다.
+
+    안 갈라 주면 더 나쁘다 — fps 만 바꿔 다시 뽑으면 앞 번호는 새 프레임으로 덮이고
+    뒤 번호는 옛 프레임이 남아 **두 설정이 섞인 데이터셋**이 되고, 그건 눈에 띄지 않는다.
+
+    쓴 이름은 **출처 기록**에서 본다. 파일만 보면 프레임을 지운 순간 "쓴 적 없는 이름"이
+    되어 다음 추출이 옛 이름을 다시 잡는다. 기록이 없던 시절 데이터셋을 위해 파일도
+    함께 본다.
+    """
+    used = datasets.used_stems(project_id, dataset_id)
+    return unique_stem(
+        safe_stem(name, fallback="video"),
+        lambda s: s in used or (raw_dir / f"{s}_00001.jpg").exists(),
+    )
 
 
 def _extract_params(
@@ -136,15 +154,46 @@ async def import_video(
         raise
 
     datasets.ensure_dirs(project_id, dataset_id)
-    video_manager.submit(
-        job_id,
-        source,
-        datasets.raw_dir(project_id, dataset_id),
-        _sanitize_stem(name),
-        params,
-        delete_source=True,
+    raw_dir = datasets.raw_dir(project_id, dataset_id)
+    stem = _frame_stem(project_id, dataset_id, raw_dir, name)
+
+    # 기록은 **시작할 때** 남긴다. 이름이 이 시점에 잡히므로, 추출이 죽더라도
+    # 그 이름은 쓴 것으로 쳐야 다음 추출이 덮어쓰지 않는다.
+    datasets.add_source(
+        project_id,
+        dataset_id,
+        {
+            "id": job_id,
+            "kind": "video",
+            "filename": name,
+            "stem": stem,
+            "at": datetime.now(timezone.utc).isoformat(),
+            "status": "running",
+            "frames": None,
+            # 타일링을 켜면 **프레임 수와 들어온 이미지 수가 다르다** — 프레임 하나가
+            # 타일 여러 장이 된다. 둘 다 남겨야 목록의 수치가 설명된다.
+            "tiles": None,
+            "params": asdict(params),
+        },
     )
-    return {"job_id": job_id, "filename": name, "status": "running"}
+
+    def _record(result: dict | None) -> None:
+        if result is None:
+            datasets.update_source(project_id, dataset_id, job_id, status="error")
+            return
+        datasets.update_source(
+            project_id,
+            dataset_id,
+            job_id,
+            status=result.get("status", "done"),
+            frames=result.get("saved", 0),
+            tiles=result.get("tiles", 0),
+        )
+
+    video_manager.submit(
+        job_id, source, raw_dir, stem, params, delete_source=True, on_done=_record
+    )
+    return {"job_id": job_id, "filename": name, "stem": stem, "status": "running"}
 
 
 @router.post("/dataset", status_code=201)
@@ -194,6 +243,25 @@ async def import_yolo_dataset(
             splits.update(imported_splits)
             datasets.write_splits(project_id, dataset_id, splits)
             assigned = len(imported_splits)
+
+    # zip 도 출처다 — "무슨 데이터를 썼나"는 영상만의 질문이 아니다.
+    # `stem` 은 없다: zip 은 이름 하나가 아니라 여러 이미지를 들여온다.
+    datasets.add_source(
+        project_id,
+        dataset_id,
+        {
+            "id": f"zip_{uuid.uuid4().hex[:10]}",
+            "kind": "dataset",
+            "filename": (file.filename or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1],
+            "stem": None,
+            "at": datetime.now(timezone.utc).isoformat(),
+            "status": "done",
+            "images": result.get("images", 0),
+            "labeled": result.get("labeled", 0),
+            "reviewed": reviewed,
+            "assigned": assigned,
+        },
+    )
     return {**result, "reviewed": reviewed, "assigned": assigned}
 
 

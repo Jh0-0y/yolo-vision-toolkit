@@ -39,6 +39,7 @@ META_NAME = "dataset.json"
 CLASSES_NAME = "classes.json"
 REVIEWED_NAME = "reviewed.json"
 SPLITS_NAME = "splits.json"
+SOURCES_NAME = "sources.json"
 
 SPLITS = ("train", "val", "test")
 
@@ -159,6 +160,47 @@ def write_splits(project_id: str, dataset_id: str, splits: dict[str, str]) -> No
         dataset_dir(project_id, dataset_id) / SPLITS_NAME,
         json.dumps(dict(sorted(splits.items())), ensure_ascii=False, indent=2),
     )
+
+
+# ---------- 출처 ----------
+#
+# 이 데이터가 **어디서 왔는지**의 유일한 기록이다. 영상은 프레임을 뽑고 지우므로,
+# 남기지 않으면 `경기 영상 (2)` 를 보고도 그게 무슨 영상이었는지 알 길이 없다.
+#
+# 이름이 겹치는지도 이 기록으로 판단한다 — 파일만 보면 프레임을 지운 순간 "쓴 적
+# 없는 이름"이 되어 다음 추출이 같은 이름을 덮어쓴다.
+
+
+def read_sources(project_id: str, dataset_id: str) -> list[dict]:
+    data = _read_json(dataset_dir(project_id, dataset_id) / SOURCES_NAME) or {}
+    sources = data.get("sources")
+    return sources if isinstance(sources, list) else []
+
+
+def write_sources(project_id: str, dataset_id: str, sources: list[dict]) -> None:
+    atomic_write_text(
+        dataset_dir(project_id, dataset_id) / SOURCES_NAME,
+        json.dumps({"sources": sources}, ensure_ascii=False, indent=2),
+    )
+
+
+def add_source(project_id: str, dataset_id: str, entry: dict) -> None:
+    write_sources(project_id, dataset_id, [*read_sources(project_id, dataset_id), entry])
+
+
+def update_source(project_id: str, dataset_id: str, source_id: str, **fields) -> None:
+    """끝난 뒤에야 아는 것(뽑힌 프레임 수 · 상태)을 채운다. 없으면 조용히 넘어간다."""
+    sources = read_sources(project_id, dataset_id)
+    for s in sources:
+        if s.get("id") == source_id:
+            s.update(fields)
+            write_sources(project_id, dataset_id, sources)
+            return
+
+
+def used_stems(project_id: str, dataset_id: str) -> set[str]:
+    """이미 쓴 프레임 이름 앞부분. 실패한 추출도 포함한다 — 이름은 이미 잡혔다."""
+    return {s["stem"] for s in read_sources(project_id, dataset_id) if s.get("stem")}
 
 
 # ---------- 수치 ----------
