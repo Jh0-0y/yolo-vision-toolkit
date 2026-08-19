@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { Anchor, CloseButton, Group, Paper, Progress, Text } from '@mantine/core'
-import { IconFileExport, IconFileZip, IconMovie, IconWand } from '@tabler/icons-react'
+import { IconMovie, IconWand } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
@@ -32,23 +32,20 @@ export default function JobIndicator() {
         const sig = `done:${id}:${j.seq}`
         if (handled.current.has(sig)) continue
         handled.current.add(sig)
-        if (j.kind === 'dataset') {
-          queryClient.invalidateQueries({ queryKey: ['train-datasets'] })
-          notifications.show({ message: `Dataset uploaded: ${j.title}`, color: 'green' })
-        } else if (j.kind === 'video') {
-          queryClient.invalidateQueries({ queryKey: ['images', j.projectId] })
-          queryClient.invalidateQueries({ queryKey: ['stats', j.projectId] })
-          notifications.show({ message: `Frames extracted: ${j.title}`, color: 'green' })
-        } else if (j.kind === 'autolabel') {
-          queryClient.invalidateQueries({ queryKey: ['images', j.projectId] })
-          queryClient.invalidateQueries({ queryKey: ['stats', j.projectId] })
-          notifications.show({ message: `Auto-labeling done: ${j.title}`, color: 'green' })
-        } else {
-          // export: finished export now appears in the list; download on the Exports page
-          queryClient.invalidateQueries({ queryKey: ['exports', j.projectId] })
-          queryClient.invalidateQueries({ queryKey: ['train-datasets'] })
-          notifications.show({ message: `Export ready: ${j.title} — download on the Exports page`, color: 'green' })
-        }
+        // 둘 다 **어떤 데이터셋**에 일어난 일이다 — 그 데이터셋의 그리드와 수치,
+        // 그리고 목록의 수치가 함께 바뀐다.
+        queryClient.invalidateQueries({
+          queryKey: ['dataset-images', j.projectId, j.datasetId],
+        })
+        queryClient.invalidateQueries({ queryKey: ['dataset', j.projectId, j.datasetId] })
+        queryClient.invalidateQueries({ queryKey: ['datasets', j.projectId] })
+        notifications.show({
+          message:
+            j.kind === 'import'
+              ? `Frames imported: ${j.title}`
+              : `Auto-labeling done: ${j.title}`,
+          color: 'green',
+        })
         // a sticky card is the handle to its own result — the user closes it
         if (!j.sticky) setTimeout(() => dismiss(id), 4000)
       } else if (j.status === 'error') {
@@ -68,7 +65,7 @@ export default function JobIndicator() {
   const blocking = order.some((id) => {
     const j = jobs[id]
     if (!j || j.status !== 'running') return false
-    return j.kind === 'dataset' || (j.kind === 'video' && j.phaseIndex === 0)
+    return j.kind === 'import' && j.phaseIndex === 0
   })
   useEffect(() => {
     if (!blocking) return
@@ -127,14 +124,10 @@ function JobCard({
     <Paper withBorder shadow="md" radius="md" p="sm">
       <Group justify="space-between" wrap="nowrap" mb={6}>
         <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
-          {job.kind === 'video' ? (
-            <IconMovie size={16} stroke={1.5} />
-          ) : job.kind === 'autolabel' ? (
+          {job.kind === 'autolabel' ? (
             <IconWand size={16} stroke={1.5} />
-          ) : job.kind === 'export' ? (
-            <IconFileExport size={16} stroke={1.5} />
           ) : (
-            <IconFileZip size={16} stroke={1.5} />
+            <IconMovie size={16} stroke={1.5} />
           )}
           <Text size="sm" fw={500} truncate>
             {job.title}

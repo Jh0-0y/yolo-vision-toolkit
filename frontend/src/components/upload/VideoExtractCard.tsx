@@ -15,17 +15,35 @@ import {
 } from '@mantine/core'
 import { Dropzone } from '@mantine/dropzone'
 import { IconMovie, IconSettings, IconX } from '@tabler/icons-react'
-import { useJobStore } from '../../stores/jobStore'
 import TilingOptions, { DEFAULT_TILING, type TilingState } from './TilingOptions'
 
 const VIDEO_MIME = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/webm']
 
-export default function VideoExtractCard({ projectId }: { projectId: string }) {
-  const startVideoJob = useJobStore((s) => s.startVideoJob)
-  // one extraction at a time (the server runs a single video worker)
-  const videoBusy = useJobStore((s) =>
-    Object.values(s.jobs).some((j) => j.kind === 'video' && j.status === 'running'),
-  )
+/** 추출 파라미터 — 어디로 보낼지는 이 카드가 모른다. */
+export interface VideoExtractParams {
+  target_fps: number
+  max_frames: number
+  start_sec: number
+  end_sec: number | null
+  dedup: boolean
+  dedup_threshold: number
+  tile: boolean
+  tile_size: number
+  stride: number
+}
+
+interface Props {
+  /** 서버가 영상 워커를 하나만 돌리므로 한 번에 하나다 — 누가 도는지는 호출자가 안다. */
+  busy: boolean
+  onStart: (file: File, params: VideoExtractParams) => void
+  /** 프레임이 어디로 들어가는지 한 줄 설명 (프로젝트 vs 데이터셋). */
+  hint?: string
+}
+
+/** 영상에서 프레임을 뽑는 폼. **잡을 직접 던지지 않는다** — 파라미터만 모아 넘긴다.
+ *  그래서 학습실 업로드와 데이터셋 가져오기가 같은 폼을 쓴다. */
+export default function VideoExtractCard({ busy, onStart, hint }: Props) {
+  const videoBusy = busy
   const [file, setFile] = useState<File | null>(null)
   const [targetFps, setTargetFps] = useState<number>(2)
   const [maxFrames, setMaxFrames] = useState<number>(2000)
@@ -38,9 +56,7 @@ export default function VideoExtractCard({ projectId }: { projectId: string }) {
 
   const start = () => {
     if (!file) return
-    // hand off to the global job store — upload % + server extraction progress
-    // are shown by the app-wide JobIndicator and survive navigation.
-    startVideoJob(projectId, file, {
+    onStart(file, {
       target_fps: targetFps,
       max_frames: maxFrames,
       start_sec: startSec,
@@ -62,9 +78,9 @@ export default function VideoExtractCard({ projectId }: { projectId: string }) {
             <IconMovie size={20} />
           </ThemeIcon>
           <div>
-            <Text fw={600}>Video upload</Text>
+            <Text fw={600}>Video</Text>
             <Text size="xs" c="dimmed">
-              Extract frames from a video into the dataset
+              {hint ?? 'Extract frames from a video'}
             </Text>
           </div>
         </Group>

@@ -39,19 +39,27 @@ class VideoManager:
         raw_dir: Path,
         stem: str,
         params: ExtractParams,
+        *,
+        delete_source: bool = False,
     ) -> None:
+        """프레임을 뽑는다. `delete_source` 면 끝난 뒤 원본 영상을 지운다.
+
+        데이터셋으로 가져올 때가 그렇다 — 영상은 프레임을 얻는 수단일 뿐이라
+        보관하지 않는다. 실패하든 취소하든 지운다(반쯤 올라온 파일이 남지 않게).
+        """
         # 재추출이면 이전 이벤트가 섞이지 않게 진행률을 비우고 시작한다
         job = jobs.at(settings.jobs_dir, video_id).reset()
 
-        future = self._get_executor().submit(
-            extract_frames,
-            video_path,
-            raw_dir,
-            stem,
-            params,
-            job.emit,
-            job.cancel_path,
-        )
+        def _run() -> dict:
+            try:
+                return extract_frames(
+                    video_path, raw_dir, stem, params, job.emit, job.cancel_path
+                )
+            finally:
+                if delete_source:
+                    video_path.unlink(missing_ok=True)
+
+        future = self._get_executor().submit(_run)
         self._futures[video_id] = future
         future.add_done_callback(lambda _f: self._futures.pop(video_id, None))
 
