@@ -6,7 +6,6 @@
 import { useEffect, useState } from 'react'
 import {
   Badge,
-  Button,
   Card,
   Group,
   Loader,
@@ -17,7 +16,6 @@ import {
   TextInput,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconSparkles, IconTrash, IconChecks, IconArrowBackUp } from '@tabler/icons-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -29,6 +27,7 @@ import {
 import { useJobStore } from '../../stores/jobStore'
 import AutoLabelModal from './AutoLabelModal'
 import ImageGrid from './ImageGrid'
+import SelectionBar from './SelectionBar'
 
 const PAGE_SIZE = 60
 
@@ -86,10 +85,20 @@ export default function ImagePanel({ projectId, datasetId, reviewed }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoLabelDone])
 
+  // 필터에 걸린 **전부**를 고른다 — 보이는 페이지가 아니다. 서버가 이름만 돌려주는
+  // `names_only` 를 쓰므로 수천 장이어도 썸네일을 끌어오지 않는다.
+  const selectAll = useMutation({
+    mutationFn: () => listDatasetImages(projectId, datasetId, { ...query, names_only: true }),
+    onSuccess: (r) => setSelected(new Set(r.names ?? [])),
+    onError: (e) => notifications.show({ message: String(e), color: 'red' }),
+  })
+
   // `ImageGrid` 의 선택 집합은 **파일명**이다(stem 이 아니다) — 검수 API 는 stem 을
   // 받으므로 여기서 벗겨 준다. 섞어 쓰면 조용히 404 만 난다.
-  const selectedStems = () =>
-    items.filter((i) => selected.has(i.name)).map((i) => i.stem)
+  //
+  // 이름에서 직접 벗긴다. 보이는 페이지(`items`)로 되짚으면 `Select all` 로 고른
+  // 다른 페이지의 이미지가 조용히 빠진다.
+  const selectedStems = () => [...selected].map((name) => name.replace(/\.[^.]+$/, ''))
 
   const review = useMutation({
     mutationFn: async (next: boolean) => {
@@ -151,39 +160,9 @@ export default function ImagePanel({ projectId, datasetId, reviewed }: Props) {
             />
           )}
         </Group>
-        <Group gap="xs">
-          {!reviewed && (
-            <Button
-              variant="light"
-              leftSection={<IconSparkles size={16} />}
-              onClick={() => setAutoLabelOpen(true)}
-            >
-              Auto-label{selected.size ? ` (${selected.size})` : ''}
-            </Button>
-          )}
-          {selected.size > 0 && (
-            <>
-              <Button
-                leftSection={reviewed ? <IconArrowBackUp size={16} /> : <IconChecks size={16} />}
-                loading={review.isPending}
-                onClick={() => review.mutate(!reviewed)}
-              >
-                {reviewed ? `Send back (${selected.size})` : `Mark reviewed (${selected.size})`}
-              </Button>
-              <Button
-                variant="light"
-                color="red"
-                leftSection={<IconTrash size={16} />}
-                loading={remove.isPending}
-                onClick={() => {
-                  if (confirm(`Delete ${selected.size} images from this dataset?`)) remove.mutate()
-                }}
-              >
-                Delete
-              </Button>
-            </>
-          )}
-        </Group>
+        <Badge variant="light" color="gray">
+          {data?.total ?? 0} images
+        </Badge>
       </Group>
 
       {images.isLoading ? (
@@ -200,14 +179,6 @@ export default function ImagePanel({ projectId, datasetId, reviewed }: Props) {
         </Card>
       ) : (
         <>
-          <Group gap="xs">
-            <Badge variant="light" color="gray">
-              {data?.total} images
-            </Badge>
-            {selected.size > 0 && (
-              <Badge variant="light">{selected.size} selected</Badge>
-            )}
-          </Group>
           <ImageGrid
             items={items}
             selected={selected}
@@ -223,6 +194,21 @@ export default function ImagePanel({ projectId, datasetId, reviewed }: Props) {
               <Pagination value={page} onChange={setPage} total={pages} />
             </Group>
           )}
+          <SelectionBar
+            reviewed={reviewed}
+            selectedCount={selected.size}
+            total={data?.total ?? 0}
+            selectingAll={selectAll.isPending}
+            reviewPending={review.isPending}
+            deletePending={remove.isPending}
+            onSelectAll={() => selectAll.mutate()}
+            onClear={() => setSelected(new Set())}
+            onAutoLabel={() => setAutoLabelOpen(true)}
+            onReview={() => review.mutate(!reviewed)}
+            onDelete={() => {
+              if (confirm(`Delete ${selected.size} images from this dataset?`)) remove.mutate()
+            }}
+          />
         </>
       )}
 
