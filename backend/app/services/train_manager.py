@@ -19,7 +19,6 @@ from app.db import session_scope
 from app.models import TrainRun
 from infra import jobs
 from lib.train.staging import stage_dataset, unstage
-from lib.train.uploads import delete_upload, is_auto_delete, upload_base
 
 
 class TrainManager:
@@ -161,10 +160,8 @@ class TrainManager:
         # worker's own finally blocks, so cleanup has to live out here)
         if settings.ssd_cache_dir is not None:
             unstage(settings.ssd_cache_dir, run_id)
-        # one-shot uploads flagged auto_delete: remove the HDD original once the
-        # run succeeds. Only on success — a failed/stopped run may be retried.
-        if status == "done":
-            self._maybe_delete_dataset(run_id)
+        # 학습이 먹은 트리(`run_dir/dataset`)는 **하드링크**라 디스크를 차지하지 않고,
+        # 런을 지울 때 함께 사라진다 — 여기서 따로 치울 것이 없다.
 
     @staticmethod
     def _append_progress(run_id: str, event: dict) -> None:
@@ -181,19 +178,6 @@ class TrainManager:
                 setattr(run, k, v)
             session.add(run)
             session.commit()
-
-    @staticmethod
-    def _maybe_delete_dataset(run_id: str) -> None:
-        """Delete the run's source dataset iff it's an uploaded zip flagged
-        auto_delete. Exports and unflagged uploads are left untouched."""
-        with session_scope() as session:
-            run = session.get(TrainRun, run_id)
-            dataset_path = run.dataset_path if run is not None else None
-        if not dataset_path:
-            return
-        base = upload_base(Path(dataset_path), settings.datasets_dir)
-        if base is not None and is_auto_delete(base):
-            delete_upload(base)
 
     def reconcile_on_boot(self) -> None:
         """Mark runs that were 'running' when the API died, and sweep any staged

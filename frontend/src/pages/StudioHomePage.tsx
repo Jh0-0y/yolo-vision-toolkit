@@ -19,25 +19,33 @@ import {
 } from '@mantine/core'
 import {
   IconChevronLeft,
+  IconDatabase,
   IconDotsVertical,
   IconFolderPlus,
   IconLibraryPhoto,
   IconSchool,
-  IconTags,
   IconTrash,
   IconUserCheck,
 } from '@tabler/icons-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { api, type ProjectOut, type StatsOut } from '../api/client'
+import { api, listDatasets, type ProjectOut } from '../api/client'
 import StatTile from '../components/StatTile'
 
 function ProjectCard({ project, onDelete }: { project: ProjectOut; onDelete: () => void }) {
-  const stats = useQuery({
-    queryKey: ['stats', project.id],
-    queryFn: () => api.get<StatsOut>(`/projects/${project.id}/stats`),
+  // 프로젝트는 수치를 갖지 않는다 — 데이터셋들이 갖는다. 여기서 합쳐 보여준다.
+  const datasets = useQuery({
+    queryKey: ['datasets', project.id],
+    queryFn: () => listDatasets(project.id),
   })
-  const s = stats.data
+  const s = datasets.data?.reduce(
+    (acc, d) => ({
+      datasets: acc.datasets + 1,
+      images: acc.images + d.images,
+      reviewed: acc.reviewed + d.reviewed,
+    }),
+    { datasets: 0, images: 0, reviewed: 0 },
+  )
 
   return (
     <Card
@@ -80,16 +88,16 @@ function ProjectCard({ project, onDelete }: { project: ProjectOut; onDelete: () 
 
       <Group gap="sm" mt="md" grow>
         <StatTile
+          label="Datasets"
+          value={s?.datasets ?? '–'}
+          color="blue"
+          icon={<IconDatabase size={13} />}
+        />
+        <StatTile
           label="Images"
           value={s?.images ?? '–'}
           color="gray.7"
           icon={<IconLibraryPhoto size={13} />}
-        />
-        <StatTile
-          label="Labeled"
-          value={s?.labeled ?? '–'}
-          color="blue"
-          icon={<IconTags size={13} />}
         />
         <StatTile
           label="Reviewed"
