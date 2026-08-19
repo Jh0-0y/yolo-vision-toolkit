@@ -44,7 +44,7 @@ def test_duration_ms_is_zero_when_frame_count_unknown():
 def test_probe_reads_geometry(tmp_path):
     path = tmp_path / "sample.mp4"
     if not _write_sample(path, frames=12):
-        pytest.skip("이 OpenCV 빌드는 mp4v 쓰기를 지원하지 않는다")
+        pytest.skip("this OpenCV build cannot write mp4v")
 
     meta = video.probe(path)
 

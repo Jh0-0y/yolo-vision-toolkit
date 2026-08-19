@@ -31,20 +31,23 @@ def _warning(info: dict) -> str | None:
     accel = info.get("accelerator")
     training = info.get("training_active")
     if training and accel == "mps":
-        return "학습이 진행 중입니다. 통합 메모리를 공유하므로 추론은 CPU 사용을 권장합니다."
+        return (
+            "Training is running. Unified memory is shared, "
+            "so running inference on the CPU is recommended."
+        )
     if training and accel == "cuda":
         free = info.get("vram_free_mb")
         if free is not None and free < 1500:
-            return f"학습 중이며 VRAM 여유가 적습니다 (≈{free}MB). OOM 위험이 있습니다."
-        return "학습이 GPU에서 진행 중입니다. 함께 실행하면 둘 다 느려질 수 있습니다."
+            return f"Training is running and VRAM is low (≈{free}MB). Risk of OOM."
+        return "Training is running on the GPU. Running both will slow each other down."
     if accel == "cuda":
         free = info.get("vram_free_mb")
         if free is not None and free < 800:
-            return f"VRAM 여유가 적습니다 (≈{free}MB)."
+            return f"VRAM is low (≈{free}MB)."
     else:
         avail, total = info.get("ram_available_mb"), info.get("ram_total_mb")
         if avail and total and avail < total * 0.1:
-            return f"시스템 메모리 여유가 적습니다 (≈{avail}MB)."
+            return f"System memory is low (≈{avail}MB)."
     return None
 
 

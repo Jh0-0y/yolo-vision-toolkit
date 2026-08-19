@@ -174,7 +174,7 @@ export default function LabCropRunsPage() {
                 <Table.Td>
                   <Text size="sm">{formatBytes(r.size_bytes)}</Text>
                   {r.wide_kind === 'link' && (
-                    <Text size="xs" c="dimmed" title="가로 영상은 원본 하드링크 — 디스크는 한 벌">
+                    <Text size="xs" c="dimmed" title="The wide video is a hard link to the original — one copy on disk">
                       linked
                     </Text>
                   )}

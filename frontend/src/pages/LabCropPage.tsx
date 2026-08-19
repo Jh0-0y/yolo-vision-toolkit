@@ -52,13 +52,13 @@ import TuningPanel from '../components/lab/TuningPanel'
 
 // 출력 세팅 — 그리기 도구 개별 토글. 하나도 안 켜면 가로 영상은 원본 그대로다.
 const TOGGLE_ROWS: { key: keyof CropToggles; label: string; hint: string }[] = [
-  { key: 'obj_boxes', label: 'Detection boxes', hint: '검출된 공·선수 박스' },
-  { key: 'player_trails', label: 'Player trails', hint: '선수별 최근 2초 이동 경로' },
-  { key: 'ball_trail', label: 'Ball trail', hint: '선정된 공의 최근 2초 경로' },
-  { key: 'target_highlight', label: 'Target highlight', hint: '크롭이 고른 공·소유선수' },
-  { key: 'crop_box', label: 'Crop box', hint: '잘리는 자리' },
-  { key: 'dead_zone', label: 'Dead zone', hint: '창이 안 움직이는 구간' },
-  { key: 'center_line', label: 'Center line', hint: '조준선 — 색은 타깃 종류' },
+  { key: 'obj_boxes', label: 'Detection boxes', hint: 'Detected ball and player boxes' },
+  { key: 'player_trails', label: 'Player trails', hint: 'Each player’s path over the last 2s' },
+  { key: 'ball_trail', label: 'Ball trail', hint: 'The chosen ball’s path over the last 2s' },
+  { key: 'target_highlight', label: 'Target highlight', hint: 'The ball and holder the crop picked' },
+  { key: 'crop_box', label: 'Crop box', hint: 'Where the cut lands' },
+  { key: 'dead_zone', label: 'Dead zone', hint: 'The band where the window stays put' },
+  { key: 'center_line', label: 'Center line', hint: 'Aim line — color shows the target type' },
 ]
 
 function formatBytes(n: number): string {

@@ -127,9 +127,9 @@ export default function TrainPage() {
       </div>
 
       {trainingActive && (
-        <Alert color="orange" icon={<IconAlertTriangle size={18} />} title="학습 진행 중">
-          이미 학습이 진행 중입니다. 새 학습을 시작하면 GPU를 두고 경쟁해 둘 다 느려지거나 실패할 수
-          있습니다.
+        <Alert color="orange" icon={<IconAlertTriangle size={18} />} title="Training in progress">
+          A training run is already active. Starting another makes them compete for the GPU — both
+          may slow down or fail.
         </Alert>
       )}
 

@@ -98,11 +98,11 @@ export default function ImportModal({ projectId, datasetId, opened, onClose }: P
               <Checkbox
                 checked={alreadyReviewed}
                 onChange={(e) => setAlreadyReviewed(e.currentTarget.checked)}
-                label="이미 검증이 끝난 데이터입니다"
+                label="This data has already been reviewed"
                 description={
                   alreadyReviewed
-                    ? '검수완료로 들어오고, zip 의 train/val/test 폴더가 그대로 분할이 됩니다. 폴더가 없으면 미할당으로 둡니다.'
-                    : '폴더 구조를 무시하고 전부 미검수로 들어옵니다 — 검수한 뒤 직접 나눕니다.'
+                    ? 'Images arrive as reviewed, and the zip’s train/val/test folders become the split. Left unassigned if there are no such folders.'
+                    : 'Folder structure is ignored — everything arrives unreviewed, to review and split yourself.'
                 }
               />
 

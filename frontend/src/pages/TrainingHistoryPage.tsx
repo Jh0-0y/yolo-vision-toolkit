@@ -61,7 +61,7 @@ export default function TrainingHistoryPage() {
           </Text>
         </div>
         <Button leftSection={<IconPlus size={16} />} onClick={() => navigate('new')}>
-          새 학습 시작
+          New training run
         </Button>
       </Group>
 

@@ -109,9 +109,9 @@ export default function AutoLabelModal({
     >
       <Stack>
         {trainingActive && (
-          <Alert color="orange" icon={<IconAlertTriangle size={18} />} title="학습 진행 중">
-            학습이 진행 중입니다. 오토라벨링은 같은 GPU를 사용하므로 느려지거나 메모리 부족이 날 수
-            있습니다.
+          <Alert color="orange" icon={<IconAlertTriangle size={18} />} title="Training in progress">
+            A training run is active. Auto-labeling uses the same GPU, so both may slow down or run
+            out of memory.
           </Alert>
         )}
         <Text size="sm" c="dimmed">

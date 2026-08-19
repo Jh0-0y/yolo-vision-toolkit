@@ -42,7 +42,7 @@ class TilingParams:
         if self.stride <= 0:
             errors.append("stride must be > 0")
         elif self.stride > self.tile_size:
-            errors.append("stride must be <= tile_size (겹침이 음수)")
+            errors.append("stride must be <= tile_size (overlap would be negative)")
         if not 0.0 <= self.min_visibility <= 1.0:
             errors.append("min_visibility must be in [0, 1]")
         return errors
