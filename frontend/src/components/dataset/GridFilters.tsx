@@ -8,10 +8,11 @@
 // 썸네일 위 박스 색과 같아야 눈이 헤매지 않는다.
 import { ActionIcon, Group, Select, Text, TextInput } from '@mantine/core'
 import {
-  IconArrowsSort,
   IconSearch,
   IconSortAscendingLetters,
+  IconSortAscendingNumbers,
   IconSortDescendingLetters,
+  IconSortDescendingNumbers,
   IconTag,
   IconX,
 } from '@tabler/icons-react'
@@ -40,16 +41,18 @@ interface Props {
   classes: { id: number; name: string }[]
 }
 
+// 문구를 **API 와 같은 말**로 둔다(`sort=created&order=desc`). "Newest first" 는
+// 읽기엔 부드럽지만 무엇을 기준으로 어느 방향인지 한 번 더 생각하게 만든다.
 const SORTS = [
-  { value: 'created:desc', label: 'Newest first' },
-  { value: 'created:asc', label: 'Oldest first' },
-  { value: 'name:asc', label: 'Name A–Z' },
-  { value: 'name:desc', label: 'Name Z–A' },
+  { value: 'created:desc', label: 'Created desc' },
+  { value: 'created:asc', label: 'Created asc' },
+  { value: 'name:asc', label: 'Name asc' },
+  { value: 'name:desc', label: 'Name desc' },
 ]
 
 const SORT_ICON: Record<string, React.ReactNode> = {
-  'created:desc': <IconArrowsSort size={16} />,
-  'created:asc': <IconArrowsSort size={16} />,
+  'created:desc': <IconSortDescendingNumbers size={16} />,
+  'created:asc': <IconSortAscendingNumbers size={16} />,
   'name:asc': <IconSortAscendingLetters size={16} />,
   'name:desc': <IconSortDescendingLetters size={16} />,
 }
