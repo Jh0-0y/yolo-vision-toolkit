@@ -30,7 +30,6 @@ from lib.formats import VIDEO_EXTS
 from lib.fsutil import safe_stem, unique_stem
 from lib.labels.import_yolo import YoloImportError, import_zip
 from lib.media.extract import ExtractParams
-from lib.media.tiling import TilingParams
 
 router = APIRouter(
     prefix="/projects/{project_id}/datasets/{dataset_id}/import", tags=["datasets"]
@@ -84,18 +83,11 @@ def _extract_params(
     end_sec: float | None,
     dedup: bool,
     dedup_threshold: float,
-    tile: bool,
-    tile_size: int,
-    stride: int,
 ) -> ExtractParams:
     if target_fps <= 0:
         raise HTTPException(422, "target_fps must be greater than 0")
     if max_frames <= 0:
         raise HTTPException(422, "max_frames must be greater than 0")
-    if tile:
-        errors = TilingParams(tile_size=tile_size, stride=stride).validate()
-        if errors:
-            raise HTTPException(422, f"Invalid tiling params: {errors}")
     return ExtractParams(
         target_fps=target_fps,
         max_frames=max_frames,
@@ -103,9 +95,6 @@ def _extract_params(
         end_sec=end_sec,
         dedup=dedup,
         dedup_threshold=dedup_threshold,
-        tile=tile,
-        tile_size=tile_size,
-        stride=stride,
     )
 
 
@@ -120,20 +109,16 @@ async def import_video(
     end_sec: float | None = Form(None),
     dedup: bool = Form(True),
     dedup_threshold: float = Form(0.92),
-    tile: bool = Form(False),  # 뽑은 프레임을 타일로 쪼개 저장
-    tile_size: int = Form(640),
-    stride: int = Form(480),  # 겹침 = tile_size - stride
     session: Session = Depends(get_session),
 ):
     """영상을 올려 프레임을 이 데이터셋으로 뽑는다. **영상은 끝나면 지운다.**
 
-    `tile` 이면 프레임을 그대로 두지 않고 타일로 쪼개 저장한다 — 데이터셋에 들어가는
-    이미지가 곧 타일이다.
+    프레임을 타일로 쪼개지 않는다 — 타일은 학습 전처리의 선택이다. 작은 객체는
+    오토라벨링의 `tiled` 추론이 맡는다.
     """
     dataset = _require_dataset(session, project_id, dataset_id)
     params = _extract_params(
-        target_fps, max_frames, start_sec, end_sec, dedup, dedup_threshold,
-        tile, tile_size, stride,
+        target_fps, max_frames, start_sec, end_sec, dedup, dedup_threshold
     )
 
     name = (file.filename or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
@@ -170,9 +155,6 @@ async def import_video(
             "at": datetime.now(timezone.utc).isoformat(),
             "status": "running",
             "frames": None,
-            # 타일링을 켜면 **프레임 수와 들어온 이미지 수가 다르다** — 프레임 하나가
-            # 타일 여러 장이 된다. 둘 다 남겨야 목록의 수치가 설명된다.
-            "tiles": None,
             "params": asdict(params),
         },
     )
@@ -187,7 +169,6 @@ async def import_video(
             job_id,
             status=result.get("status", "done"),
             frames=result.get("saved", 0),
-            tiles=result.get("tiles", 0),
         )
 
     video_manager.submit(

@@ -51,8 +51,6 @@ export interface DatasetSource {
   status: 'running' | 'done' | 'error' | 'cancelled'
   // 영상
   frames?: number | null
-  /** 타일링을 켰을 때 들어온 이미지 수 — 프레임 하나가 타일 여러 장이 된다 */
-  tiles?: number | null
   params?: Record<string, number | boolean | null>
   // zip
   images?: number
@@ -228,7 +226,8 @@ export const deleteDatasetClass = (projectId: string, datasetId: string, classId
 // 두 방식 모두 결과는 **미검수**로 들어온다. 동영상은 프레임을 얻는 수단일 뿐이라
 // 추출이 끝나면 서버가 지운다.
 
-/** 타일링을 켜면 데이터셋에 들어가는 이미지가 **프레임이 아니라 타일**이 된다. */
+// 타일링은 여기 없다 — 타일은 **학습 전처리**의 선택이지 데이터를 모으는 일이 아니다.
+// 작은 객체를 잡는 문제는 오토라벨링의 `tiled` 추론이 맡는다.
 export interface VideoImportParams {
   target_fps: number
   max_frames: number
@@ -236,9 +235,6 @@ export interface VideoImportParams {
   end_sec: number | null
   dedup: boolean
   dedup_threshold: number
-  tile?: boolean
-  tile_size?: number
-  stride?: number
 }
 
 export interface ImportProgressEvent {
@@ -268,11 +264,6 @@ export function importVideo(
   if (params.end_sec != null) form.append('end_sec', String(params.end_sec))
   form.append('dedup', String(params.dedup))
   form.append('dedup_threshold', String(params.dedup_threshold))
-  if (params.tile) {
-    form.append('tile', 'true')
-    if (params.tile_size != null) form.append('tile_size', String(params.tile_size))
-    if (params.stride != null) form.append('stride', String(params.stride))
-  }
   return xhrUpload<{ job_id: string; filename: string; status: string }>(
     `${importBase(projectId, datasetId)}/video`,
     form,

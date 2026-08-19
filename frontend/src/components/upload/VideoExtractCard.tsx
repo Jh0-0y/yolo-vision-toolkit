@@ -15,7 +15,6 @@ import {
 } from '@mantine/core'
 import { Dropzone } from '@mantine/dropzone'
 import { IconMovie, IconSettings, IconX } from '@tabler/icons-react'
-import TilingOptions, { DEFAULT_TILING, type TilingState } from './TilingOptions'
 
 const VIDEO_MIME = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/webm']
 
@@ -27,9 +26,6 @@ export interface VideoExtractParams {
   end_sec: number | null
   dedup: boolean
   dedup_threshold: number
-  tile: boolean
-  tile_size: number
-  stride: number
 }
 
 interface Props {
@@ -51,7 +47,6 @@ export default function VideoExtractCard({ busy, onStart, hint }: Props) {
   const [endSec, setEndSec] = useState<number | ''>('')
   const [dedup, setDedup] = useState(true)
   const [dedupThreshold, setDedupThreshold] = useState(0.92)
-  const [tiling, setTiling] = useState<TilingState>(DEFAULT_TILING)
   const [advanced, setAdvanced] = useState(false)
 
   const start = () => {
@@ -63,9 +58,6 @@ export default function VideoExtractCard({ busy, onStart, hint }: Props) {
       end_sec: endSec === '' ? null : Number(endSec),
       dedup,
       dedup_threshold: dedupThreshold,
-      tile: tiling.tile,
-      tile_size: tiling.tileSize,
-      stride: tiling.stride,
     })
     setFile(null)
   }
@@ -147,8 +139,6 @@ export default function VideoExtractCard({ busy, onStart, hint }: Props) {
           onChange={(e) => setDedup(e.currentTarget.checked)}
           disabled={videoBusy}
         />
-
-        <TilingOptions value={tiling} onChange={setTiling} disabled={videoBusy} />
 
         <Stack gap="sm">
           <Button

@@ -3,6 +3,10 @@
 Samples frames from a video into a project's ``raw/`` directory so the rest of
 the labeling pipeline (thumbnails, inference, review) can reuse them unchanged.
 CPU/IO only — never touches the GPU, so it runs off the GPU-serialized executor.
+
+프레임을 **타일로 쪼개지 않는다.** 타일은 학습 전처리의 선택이지 데이터를 모으는
+단계의 선택이 아니다 — 여기서 쪼개면 검수할 장수가 타일 수만큼 늘고, 타일은 다시
+프레임으로 합칠 수 없어 전처리 결정이 데이터셋에 박제된다.
 """
 
 from __future__ import annotations
@@ -13,7 +17,6 @@ from pathlib import Path
 
 import cv2
 
-from lib.media.tiling import TilingParams, tile_grid, tile_stem
 
 
 @dataclass
@@ -24,10 +27,6 @@ class ExtractParams:
     end_sec: float | None = None
     dedup: bool = True
     dedup_threshold: float = 0.92  # >= means "too similar", frame is skipped
-    # 타일링 — 프레임을 학습용 타일로 쪼개 저장 (라벨 전 단계라 가시 비율 없음)
-    tile: bool = False
-    tile_size: int = 640
-    stride: int = 480
 
 
 def _similarity(a, b) -> float:
@@ -76,7 +75,6 @@ def extract_frames(
 
     idx = 0
     saved = 0
-    tiles = 0
     skipped_dup = 0
     prev_small = None
     cancelled = False
@@ -111,15 +109,7 @@ def extract_frames(
                     # Sequential, contiguous frame numbering: {video-name}_00001.jpg,
                     # _00002.jpg ... in save order (not the sparse source frame index).
                     frame_stem = f"{stem}_{saved + 1:05d}"
-                    if params.tile:
-                        h, w = frame.shape[:2]
-                        grid = TilingParams(tile_size=params.tile_size, stride=params.stride)
-                        for col, row, tx, ty in tile_grid(w, h, grid):
-                            crop = frame[ty : ty + grid.tile_size, tx : tx + grid.tile_size]
-                            cv2.imwrite(str(raw_dir / f"{tile_stem(frame_stem, col, row)}.jpg"), crop)
-                            tiles += 1
-                    else:
-                        cv2.imwrite(str(raw_dir / f"{frame_stem}.jpg"), frame)
+                    cv2.imwrite(str(raw_dir / f"{frame_stem}.jpg"), frame)
                     saved += 1
                     if saved % 10 == 0 or saved == 1:
                         emit({
@@ -136,8 +126,8 @@ def extract_frames(
         cap.release()
 
     if cancelled:
-        emit({"phase": "cancelled", "saved": saved, "tiles": tiles})
-        return {"status": "cancelled", "saved": saved, "tiles": tiles, "skipped_dup": skipped_dup}
+        emit({"phase": "cancelled", "saved": saved})
+        return {"status": "cancelled", "saved": saved, "skipped_dup": skipped_dup}
 
-    emit({"phase": "done", "saved": saved, "tiles": tiles, "scanned": idx, "skipped_dup": skipped_dup})
-    return {"status": "done", "saved": saved, "tiles": tiles, "skipped_dup": skipped_dup, "scanned": idx}
+    emit({"phase": "done", "saved": saved, "scanned": idx, "skipped_dup": skipped_dup})
+    return {"status": "done", "saved": saved, "skipped_dup": skipped_dup, "scanned": idx}

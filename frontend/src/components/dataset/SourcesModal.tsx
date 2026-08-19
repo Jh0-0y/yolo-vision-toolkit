@@ -26,17 +26,14 @@ function videoParams(s: DatasetSource): string {
   const p = s.params ?? {}
   const parts: string[] = []
   if (p.target_fps != null) parts.push(`${p.target_fps} fps`)
-  if (p.tile) parts.push(`tiled ${p.tile_size ?? '?'}/${p.stride ?? '?'}`)
   if (p.dedup) parts.push('dedup')
   if (p.start_sec) parts.push(`from ${p.start_sec}s`)
   if (p.end_sec != null) parts.push(`to ${p.end_sec}s`)
   return parts.join(' · ')
 }
 
-/** 타일링을 켜면 **들어온 이미지 수가 프레임 수보다 많다** — 둘 다 보여야 설명이 된다. */
 function frameCount(s: DatasetSource): string {
-  if (s.frames == null) return '…'
-  return s.tiles ? `${s.frames} frames → ${s.tiles} tiles` : `${s.frames} frames`
+  return s.frames == null ? '…' : `${s.frames} frames`
 }
 
 function SourceRow({ s }: { s: DatasetSource }) {
