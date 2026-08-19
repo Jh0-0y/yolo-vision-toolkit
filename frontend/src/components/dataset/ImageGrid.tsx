@@ -1,13 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import { Badge, Checkbox, SimpleGrid, Stack, Text, Tooltip } from '@mantine/core'
-import type { ImageItem, LabelBox } from '../../api/client'
+import type { DatasetImage, LabelBox } from '../../api/client'
 import { classColor } from '../../stores/editorStore'
 
+/** split 배지 색 — 상단 수치 타일과 같은 색을 쓴다. */
+const SPLIT_COLOR: Record<string, string> = {
+  train: 'blue',
+  val: 'grape',
+  test: 'pink',
+}
+
 interface Props {
-  items: ImageItem[]
+  items: DatasetImage[]
   selected: Set<string>
   onSelectedChange: (next: Set<string>) => void
-  onOpen: (item: ImageItem) => void
+  onOpen: (item: DatasetImage) => void
 }
 
 interface DragRect {
@@ -200,9 +207,12 @@ export default function ImageGrid({ items, selected, onSelectedChange, onOpen }:
                     </Badge>
                   </Tooltip>
                 )}
-                {img.reviewed && (
-                  <Badge size="xs" variant="filled" color="teal">
-                    ✓
+                {/* 검수 여부 배지는 없다 — 탭이 이미 그것으로 갈라져 있어
+                    모든 카드에 같은 표시가 붙을 뿐이다. 대신 **어느 split 인지**를
+                    보인다. 색은 상단 수치 타일과 같다. */}
+                {img.split && (
+                  <Badge size="xs" variant="filled" color={SPLIT_COLOR[img.split]}>
+                    {img.split}
                   </Badge>
                 )}
               </div>
