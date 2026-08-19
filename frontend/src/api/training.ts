@@ -1,37 +1,7 @@
-// 학습 — 데이터셋 업로드/선택 · 실행 · 실시간 지표 · 산출물.
-import { BASE, api, xhrUpload } from './http'
-import type { UploadHandlers } from './http'
-
-
-export interface TrainDataset {
-  dataset: string // token: "export:{pid}:{eid}" | "upload:{uid}"
-  name: string
-  source: 'export' | 'upload'
-  train: number
-  val: number
-  classes: number
-  created_at: string
-  auto_delete?: boolean // uploads only: self-delete after a successful run
-}
-
-export function uploadTrainDataset(
-  file: File,
-  handlers: UploadHandlers = {},
-): Promise<TrainDataset & { id: string }> {
-  const form = new FormData()
-  form.append('file', file)
-  return xhrUpload<TrainDataset & { id: string }>('/training/datasets', form, handlers)
-}
-
-// dataset_id is the "{uid}" part of an "upload:{uid}" token
-export const deleteTrainDataset = (datasetId: string) =>
-  api.delete<void>(`/training/datasets/${datasetId}`)
-
-// toggle self-delete-after-training on an uploaded dataset
-export const patchTrainDataset = (datasetId: string, autoDelete: boolean) =>
-  api.patch<{ dataset: string; auto_delete: boolean }>(`/training/datasets/${datasetId}`, {
-    auto_delete: autoDelete,
-  })
+// 학습 — 실행 · 실시간 지표 · 산출물.
+//
+// 학습은 **데이터셋을 직접 먹는다.** 따로 올릴 것이 없으므로 여기에 업로드는 없다.
+import { BASE, api } from './http'
 
 export interface TrainParams {
   epochs: number
@@ -45,7 +15,7 @@ export interface TrainParams {
 export interface RunCreate {
   name?: string | null
   project_id?: string | null
-  dataset: string
+  dataset: string // 토큰: "dataset:{project_id}:{dataset_id}"
   base_model_id: string
   device?: string | null
   params: TrainParams

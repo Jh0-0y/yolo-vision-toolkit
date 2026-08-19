@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from sqlalchemy import or_
@@ -21,11 +21,11 @@ from sse_starlette.sse import EventSourceResponse
 from app.core.config import settings
 from app.db import get_session, session_scope
 from app.models import ModelEntry, Project, TrainRun, iso_utc
-from app.schemas.training import DatasetPatch, RegisterIn, RunCreate, RunOut
+from app.schemas.training import RegisterIn, RunCreate, RunOut
+from app.services import datasets
 from app.services.train_manager import train_manager
 from infra import jobs
-from lib.labels.io import atomic_write_text
-from lib.train import dataset as train_dataset
+from lib.labels import dataset_export
 from lib.train import results as train_results
 
 router = APIRouter(prefix="/training", tags=["training"])
@@ -66,163 +66,26 @@ def _to_out(run: TrainRun, session: Session) -> RunOut:
     )
 
 
-@router.get("/datasets")
-def list_datasets(project_id: str | None = None, session: Session = Depends(get_session)):
-    """Trainable datasets: project exports + uploaded zips, newest first.
 
-    Each item carries a `dataset` token consumed by POST /runs. When project_id
-    is given, only that project's exports are listed (uploaded zips have no
-    project and are always shown).
+def _parse_dataset_token(token: str) -> tuple[str, str]:
+    """`dataset:{project_id}:{dataset_id}` → `(project_id, dataset_id)`.
+
+    학습은 데이터셋을 **직접** 먹는다 — 내보내기를 먼저 할 필요가 없다.
     """
-    projects = {p.id: p.name for p in session.exec(select(Project)).all()}
-    if project_id is not None:
-        projects = {pid: name for pid, name in projects.items() if pid == project_id}
-    out = []
-    for pid, pname in projects.items():
-        exports_dir = settings.projects_dir / pid / "exports"
-        if not exports_dir.exists():
-            continue
-        for meta_path in exports_dir.glob("*/export.json"):
-            try:
-                meta = json.loads(meta_path.read_text())
-            except (json.JSONDecodeError, OSError):
-                continue
-            if meta.get("kind", "yolo") != "yolo":
-                continue  # image-only exports have no data.yaml
-            out.append(
-                {
-                    "dataset": f"export:{pid}:{meta['id']}",
-                    "name": meta.get("name") or meta["id"],
-                    "source": "export",
-                    "train": meta.get("train", 0),
-                    "val": meta.get("val", 0),
-                    "classes": meta.get("classes", 0),
-                    "created_at": meta.get("created_at", ""),
-                }
-            )
-    if settings.datasets_dir.exists():
-        for meta_path in settings.datasets_dir.glob("*/dataset.json"):
-            try:
-                meta = json.loads(meta_path.read_text())
-            except (json.JSONDecodeError, OSError):
-                continue
-            out.append(
-                {
-                    "dataset": f"upload:{meta['id']}",
-                    "name": meta.get("name", meta["id"]),
-                    "source": "upload",
-                    "train": meta.get("train", 0),
-                    "val": meta.get("val", 0),
-                    "classes": meta.get("classes", 0),
-                    "created_at": meta.get("created_at", ""),
-                    "auto_delete": meta.get("auto_delete", False),
-                }
-            )
-    out.sort(key=lambda d: d["created_at"], reverse=True)
-    return out
-
-
-@router.post("/datasets", status_code=201)
-async def upload_dataset(
-    file: UploadFile,
-    auto_delete: bool = Form(False),
-    session: Session = Depends(get_session),
-):
-    if not file.filename or not file.filename.lower().endswith(".zip"):
-        raise HTTPException(422, "Only zip files can be uploaded")
-    settings.datasets_dir.mkdir(parents=True, exist_ok=True)
-    tmp = settings.datasets_dir / f".upload_{uuid.uuid4().hex[:8]}.zip"
-    try:
-        with open(tmp, "wb") as f:
-            while chunk := await file.read(1 << 20):
-                f.write(chunk)
-        name = file.filename.rsplit("/", 1)[-1].removesuffix(".zip")
-        dataset_id = f"u_{uuid.uuid4().hex[:10]}"
-        try:
-            meta = await run_in_threadpool(
-                train_dataset.extract_zip,
-                tmp,
-                settings.datasets_dir / dataset_id,
-                dataset_id=dataset_id,
-                name=name,
-                auto_delete=auto_delete,
-                now=datetime.now(timezone.utc),
-            )
-        except train_dataset.DatasetError as e:
-            raise HTTPException(422, str(e))
-    finally:
-        tmp.unlink(missing_ok=True)
-    return {**meta, "dataset": f"upload:{meta['id']}", "source": "upload"}
-
-
-@router.patch("/datasets/{dataset_id}")
-def patch_dataset(dataset_id: str, req: DatasetPatch):
-    """Toggle the auto-delete flag on an uploaded dataset (uploads only)."""
-    if any(c in dataset_id for c in "/\\.."):
-        raise HTTPException(422, "Invalid dataset id")
-    meta_path = settings.datasets_dir / dataset_id / "dataset.json"
-    if not meta_path.exists():
-        raise HTTPException(404, "Dataset not found")
-    try:
-        meta = json.loads(meta_path.read_text())
-    except (json.JSONDecodeError, OSError):
-        raise HTTPException(422, "Corrupted dataset metadata")
-    meta["auto_delete"] = req.auto_delete
-    atomic_write_text(meta_path, json.dumps(meta, ensure_ascii=False))
-    return {"dataset": f"upload:{dataset_id}", "auto_delete": req.auto_delete}
-
-
-@router.delete("/datasets/{dataset_id}", status_code=204)
-def delete_dataset(dataset_id: str, session: Session = Depends(get_session)):
-    """Delete an uploaded dataset (the extracted folder on disk). Only uploads
-    are deletable here — project exports have their own lifecycle."""
-    if any(c in dataset_id for c in "/\\.."):
-        raise HTTPException(422, "Invalid dataset id")
-    base = settings.datasets_dir / dataset_id
-    if not (base / "dataset.json").exists():
-        raise HTTPException(404, "Dataset not found")
-    # block deletion while a non-finished run is still bound to this dataset
-    # (its files may be mid-staging onto fast scratch)
-    base_prefix = str(base.resolve())
-    in_use = session.exec(
-        select(TrainRun).where(
-            TrainRun.dataset_path.startswith(base_prefix),
-            ~TrainRun.status.in_(list(TERMINAL)),
-        )
-    ).first()
-    if in_use is not None:
-        raise HTTPException(409, "Dataset is in use by a running training run")
-    shutil.rmtree(base, ignore_errors=True)
-
-
-def _resolve_dataset_dir(token: str) -> Path:
     parts = token.split(":")
-    if parts[0] == "export" and len(parts) == 3:
-        pid, eid = parts[1], parts[2]
-        if any(c in pid + eid for c in "/\\.."):
-            raise HTTPException(422, "Invalid dataset token")
-        return settings.projects_dir / pid / "exports" / eid
-    if parts[0] == "upload" and len(parts) == 2:
-        uid = parts[1]
-        if any(c in uid for c in "/\\.."):
-            raise HTTPException(422, "Invalid dataset token")
-        base = settings.datasets_dir / uid
-        meta_path = base / "dataset.json"
-        if meta_path.exists():
-            try:
-                yaml_dir = json.loads(meta_path.read_text()).get("yaml_dir", ".")
-                return (base / yaml_dir).resolve()
-            except (json.JSONDecodeError, OSError):
-                pass
-        return base
-    raise HTTPException(422, f"Invalid dataset token: {token}")
+    if parts[0] != "dataset" or len(parts) != 3:
+        raise HTTPException(422, f"Invalid dataset token: {token}")
+    pid, dsid = parts[1], parts[2]
+    if any(c in pid + dsid for c in "/\\.."):
+        raise HTTPException(422, "Invalid dataset token")
+    if datasets.read_meta(pid, dsid) is None:
+        raise HTTPException(404, "Dataset not found")
+    return pid, dsid
 
 
 @router.post("/runs", response_model=RunOut, status_code=201)
 def create_run(req: RunCreate, session: Session = Depends(get_session)):
-    dataset_dir = _resolve_dataset_dir(req.dataset)
-    if not (dataset_dir / "data.yaml").exists():
-        raise HTTPException(422, "Dataset not found")
+    project_id, dataset_id = _parse_dataset_token(req.dataset)
     base = session.get(ModelEntry, req.base_model_id)
     if base is None:
         raise HTTPException(422, "Base model not found")
@@ -232,17 +95,11 @@ def create_run(req: RunCreate, session: Session = Depends(get_session)):
     if train_manager.has_active():
         raise HTTPException(409, "A training run is already in progress. Try again after it finishes.")
 
-    # for export-sourced datasets the project id is embedded in the token
-    project_id = req.project_id
-    if project_id is None and req.dataset.startswith("export:"):
-        parts = req.dataset.split(":")
-        if len(parts) >= 2:
-            project_id = parts[1]
-
+    ds_name = (datasets.read_meta(project_id, dataset_id) or {}).get("name", dataset_id)
     run = TrainRun(
-        name=req.name or f"{base.name}-{req.dataset.rsplit(':', 1)[-1][-4:]}",
+        name=req.name or f"{base.name}-{ds_name}",
         project_id=project_id,
-        dataset_path=str(dataset_dir),
+        dataset_path="",  # 아래에서 구체화한 자리로 채운다
         base_model_id=req.base_model_id,
         params_json=json.dumps(req.params.model_dump(exclude_none=True)),
     )
@@ -252,6 +109,28 @@ def create_run(req: RunCreate, session: Session = Depends(get_session)):
 
     run_dir = settings.run_dir(run.project_id, run.id)
     run_dir.mkdir(parents=True, exist_ok=True)
+
+    # 데이터셋의 train/val 을 이 런 아래에 **하드링크로** 펼친다. 이미지 바이트를
+    # 복제하지 않으므로 사실상 공짜고, 런이 끝난 뒤에도 그때 무엇으로 학습했는지가
+    # 그대로 남는다(데이터셋을 나중에 고쳐도 이 런의 기록은 안 흔들린다).
+    dataset_dir = run_dir / "dataset"
+    try:
+        dataset_export.materialize(
+            dataset_dir=datasets.dataset_dir(project_id, dataset_id),
+            out_dir=dataset_dir,
+            kind="train",
+            reviewed=datasets.read_reviewed(project_id, dataset_id)
+            & datasets.image_stems(project_id, dataset_id),
+            splits=datasets.read_splits(project_id, dataset_id),
+        )
+    except dataset_export.ExportError as e:
+        session.delete(run)
+        session.commit()
+        raise HTTPException(422, str(e)) from None
+    run.dataset_path = str(dataset_dir)
+    session.add(run)
+    session.commit()
+    session.refresh(run)
     (settings.jobs_dir / run.id).mkdir(parents=True, exist_ok=True)
     (run_dir / "config.json").write_text(
         json.dumps(

@@ -23,7 +23,7 @@ class TrainParams(BaseModel):
 class RunCreate(BaseModel):
     name: str | None = None
     project_id: str | None = None
-    # dataset token: "export:{project_id}:{export_id}" | "upload:{dataset_id}"
+    # dataset token: "dataset:{project_id}:{dataset_id}"
     dataset: str
     base_model_id: str
     device: str | None = None
@@ -42,11 +42,6 @@ class RunOut(BaseModel):
     error: str | None
     created_at: str
     finished_at: str | None
-
-
-class DatasetPatch(BaseModel):
-    # toggle self-delete-after-training on an uploaded dataset
-    auto_delete: bool
 
 
 class RegisterIn(BaseModel):

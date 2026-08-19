@@ -1,6 +1,7 @@
 import {
   ActionIcon,
   Badge,
+  Button,
   Card,
   Group,
   Loader,
@@ -11,7 +12,7 @@ import {
   Tooltip,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconTrash } from '@tabler/icons-react'
+import { IconPlus, IconTrash } from '@tabler/icons-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, type TrainRunOut } from '../api/client'
@@ -51,12 +52,18 @@ export default function TrainingHistoryPage() {
 
   return (
     <Stack gap="lg">
-      <div>
-        <Title order={3}>Training History</Title>
-        <Text c="dimmed" size="sm">
-          Click a run to see live progress and results.
-        </Text>
-      </div>
+      {/* 이력이 먼저다 — 학습은 여기서 시작한다 */}
+      <Group justify="space-between" align="flex-start">
+        <div>
+          <Title order={3}>Training History</Title>
+          <Text c="dimmed" size="sm">
+            Click a run to see live progress and results.
+          </Text>
+        </div>
+        <Button leftSection={<IconPlus size={16} />} onClick={() => navigate('new')}>
+          새 학습 시작
+        </Button>
+      </Group>
 
       <Card withBorder radius="md" padding="sm">
         <Table highlightOnHover verticalSpacing="sm">
