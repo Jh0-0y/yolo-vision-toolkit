@@ -8,7 +8,10 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     classes,
-    exports,
+    dataset_export,
+    dataset_images,
+    dataset_import,
+    datasets,
     files,
     jobs,
     lab_crops,
@@ -20,7 +23,6 @@ from app.api.v1.endpoints import (
     projects,
     system,
     training,
-    videos,
 )
 from app.core.config import settings
 
@@ -35,16 +37,18 @@ def health():
 for _router in (
     models.router,
     projects.router,
+    datasets.router,
+    dataset_import.router,
+    dataset_images.router,
+    dataset_export.router,
     predict.router,
     jobs.router,
-    exports.router,
     labs.router,
     lab_videos.router,
     lab_crops.router,
     training.router,
     files.router,
     system.router,
-    videos.router,
     labels.router,
     classes.router,
 ):

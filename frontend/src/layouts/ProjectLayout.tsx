@@ -13,36 +13,20 @@ import {
 import {
   IconBox,
   IconFolder,
-  IconHistory,
   IconLibraryPhoto,
-  IconPackageExport,
   IconPlayerPlay,
-  IconTag,
   IconTool,
-  IconUpload,
 } from '@tabler/icons-react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, Outlet, useLocation, useParams } from 'react-router-dom'
 import { api, type DeviceInfo, type Health, type ProjectOut } from '../api/client'
 
-const NAV_SECTIONS = [
-  {
-    label: 'Data',
-    items: [
-      { to: 'upload', label: 'Upload Data', icon: IconUpload },
-      { to: 'dataset', label: 'Dataset', icon: IconLibraryPhoto },
-      { to: 'classes', label: 'Classes', icon: IconTag },
-      { to: 'exports', label: 'Exports', icon: IconPackageExport },
-    ],
-  },
-  {
-    label: 'Model',
-    items: [
-      { to: 'train', label: 'Train', icon: IconPlayerPlay },
-      { to: 'history', label: 'Training History', icon: IconHistory },
-      { to: 'models', label: 'Models', icon: IconBox },
-    ],
-  },
+// 학습실은 셋뿐이다 — 데이터셋이 작업 단위이고, 업로드·클래스·내보내기는 전부
+// 데이터셋 안으로 들어갔다. 그룹이 하나라 소제목도 달지 않는다.
+const NAV_ITEMS = [
+  { to: 'datasets', label: 'DataSet', icon: IconLibraryPhoto },
+  { to: 'training', label: 'Training', icon: IconPlayerPlay },
+  { to: 'models', label: 'Models', icon: IconBox },
 ]
 
 export default function ProjectLayout() {
@@ -92,27 +76,22 @@ export default function ProjectLayout() {
         </AppShell.Section>
 
         <AppShell.Section grow>
-          {NAV_SECTIONS.map((section) => (
-            <Stack key={section.label} gap={2} mb="md">
-              <Text size="xs" fw={700} c="dimmed" tt="uppercase" px="sm" mb={2}>
-                {section.label}
-              </Text>
-              {section.items.map((item) => {
-                const to = `${base}/${item.to}`
-                return (
-                  <NavLink
-                    key={item.to}
-                    component={Link}
-                    to={to}
-                    label={item.label}
-                    leftSection={<item.icon size={18} stroke={1.6} />}
-                    active={location.pathname === to || location.pathname.startsWith(`${to}/`)}
-                    style={{ borderRadius: 6 }}
-                  />
-                )
-              })}
-            </Stack>
-          ))}
+          <Stack gap={2} mb="md">
+            {NAV_ITEMS.map((item) => {
+              const to = `${base}/${item.to}`
+              return (
+                <NavLink
+                  key={item.to}
+                  component={Link}
+                  to={to}
+                  label={item.label}
+                  leftSection={<item.icon size={18} stroke={1.6} />}
+                  active={location.pathname === to || location.pathname.startsWith(`${to}/`)}
+                  style={{ borderRadius: 6 }}
+                />
+              )
+            })}
+          </Stack>
         </AppShell.Section>
 
         <AppShell.Section>
