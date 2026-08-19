@@ -9,13 +9,15 @@
 //
 // 지금은 껍데기다 — 가져오기(2단계) · 검수·오토라벨링(3단계) · 분할·내보내기(4단계)가
 // 각자 자기 자리에 붙는다.
-import { Anchor, Badge, Group, Stack, Tabs, Text, Title } from '@mantine/core'
-import { IconChevronLeft, IconChecks, IconInbox } from '@tabler/icons-react'
+import { useState } from 'react'
+import { Anchor, Badge, Button, Group, Stack, Tabs, Text, Title } from '@mantine/core'
+import { IconChevronLeft, IconChecks, IconHistory, IconInbox } from '@tabler/icons-react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { getDataset } from '../api/client'
 import StatTile from '../components/StatTile'
 import ImagePanel from '../components/dataset/ImagePanel'
+import SourcesModal from '../components/dataset/SourcesModal'
 
 const TABS = ['unreviewed', 'reviewed']
 
@@ -24,6 +26,7 @@ export default function DatasetDetailPage() {
   // 탭을 URL 에 둔다 — 새로고침해도 보던 탭이다
   const [params, setParams] = useSearchParams()
   const tab = TABS.includes(params.get('tab') ?? '') ? (params.get('tab') as string) : 'unreviewed'
+  const [sourcesOpen, setSourcesOpen] = useState(false)
 
   const dataset = useQuery({
     queryKey: ['dataset', projectId, datasetId],
@@ -52,7 +55,22 @@ export default function DatasetDetailPage() {
             {ds.images} images in this dataset
           </Text>
         </div>
+        {/* 출처는 두 탭 어디서든 닿아야 하므로 탭 밖, 제목 옆에 둔다 */}
+        <Button
+          variant="default"
+          leftSection={<IconHistory size={16} />}
+          onClick={() => setSourcesOpen(true)}
+        >
+          Sources
+        </Button>
       </Group>
+
+      <SourcesModal
+        projectId={projectId}
+        datasetId={datasetId}
+        opened={sourcesOpen}
+        onClose={() => setSourcesOpen(false)}
+      />
 
       {/* 미검수 · 검수완료 가 먼저, 분할은 그 안의 갈래 */}
       <Group gap="sm" grow align="stretch">

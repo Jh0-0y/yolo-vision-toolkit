@@ -36,6 +36,34 @@ export const renameDataset = (projectId: string, datasetId: string, name: string
 export const deleteDataset = (projectId: string, datasetId: string) =>
   api.delete<void>(`/projects/${projectId}/datasets/${datasetId}`)
 
+// ---------- 출처 ----------
+//
+// 영상은 프레임을 뽑고 버리므로 **이 목록이 유일한 기록**이다. 같은 이름이 두 번
+// 들어왔을 때 어느 쪽이 `(2)` 인지도 여기서 본다.
+
+export interface DatasetSource {
+  id: string
+  kind: 'video' | 'dataset'
+  filename: string
+  /** 영상만. 이 출처에서 나온 프레임의 이름 앞부분 (`경기 영상` · `경기 영상 (2)`) */
+  stem: string | null
+  at: string
+  status: 'running' | 'done' | 'error' | 'cancelled'
+  // 영상
+  frames?: number | null
+  /** 타일링을 켰을 때 들어온 이미지 수 — 프레임 하나가 타일 여러 장이 된다 */
+  tiles?: number | null
+  params?: Record<string, number | boolean | null>
+  // zip
+  images?: number
+  labeled?: number
+  reviewed?: boolean
+  assigned?: number
+}
+
+export const listDatasetSources = (projectId: string, datasetId: string) =>
+  api.get<DatasetSource[]>(`/projects/${projectId}/datasets/${datasetId}/sources`)
+
 // ---------- 이미지 ----------
 
 /** `ImageItem` 에 분할만 얹은 것 — 그래서 `ImageGrid` 를 그대로 쓴다. */

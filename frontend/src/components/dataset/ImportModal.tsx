@@ -38,6 +38,7 @@ export default function ImportModal({ projectId, datasetId, opened, onClose }: P
     qc.invalidateQueries({ queryKey: ['dataset', projectId, datasetId] })
     qc.invalidateQueries({ queryKey: ['datasets', projectId] })
     qc.invalidateQueries({ queryKey: ['dataset-images', projectId, datasetId] })
+    qc.invalidateQueries({ queryKey: ['dataset-sources', projectId, datasetId] })
   }
 
   const importZip = useMutation({

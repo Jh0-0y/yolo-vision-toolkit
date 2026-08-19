@@ -39,6 +39,10 @@ export default function JobIndicator() {
         })
         queryClient.invalidateQueries({ queryKey: ['dataset', j.projectId, j.datasetId] })
         queryClient.invalidateQueries({ queryKey: ['datasets', j.projectId] })
+        // 추출이 끝나야 프레임 수가 채워진다 — 출처 목록도 다시 읽는다
+        queryClient.invalidateQueries({
+          queryKey: ['dataset-sources', j.projectId, j.datasetId],
+        })
         notifications.show({
           message:
             j.kind === 'import'
