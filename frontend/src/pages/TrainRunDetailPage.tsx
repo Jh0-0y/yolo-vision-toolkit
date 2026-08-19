@@ -76,9 +76,13 @@ export default function TrainRunDetailPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
+  // 워커가 `done` 을 찍는 것과 API 가 행을 done 으로 바꾸는 것 사이에 틈이 있다 —
+  // SSE 로 무효화한 재조회가 그 틈에 걸리면 `running` 인 응답을 받고, 스트림은 이미
+  // 닫혀 다시 깨울 것이 없다. 도는 동안은 폴링해 두어 반드시 따라잡게 한다.
   const run = useQuery({
     queryKey: ['train-run', runId],
     queryFn: () => api.get<TrainRunOut>(`/training/runs/${runId}`),
+    refetchInterval: (q) => (q.state.data?.status === 'running' ? 4000 : false),
   })
   const r = run.data
   const running = r?.status === 'running'
