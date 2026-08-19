@@ -59,17 +59,23 @@ export default function LabelEditorPage() {
   const [addClassOpen, setAddClassOpen] = useState(false)
   const [newClassName, setNewClassName] = useState('')
 
-  // the filtered/sorted name list this editor navigates within (frozen per filter set)
-  const filterQuery: DatasetImageQuery = useMemo(
-    () => ({
+  // 이 에디터가 오가는 목록 — **그리드에서 좁혀 놓은 그대로**여야 한다.
+  // 조건이 하나라도 빠지면 `3 / 128` 의 총 수가 달라지고 이전·다음이 엉뚱한 데로 간다.
+  const filterQuery: DatasetImageQuery = useMemo(() => {
+    const sort = searchParams.get('sort')
+    const order = searchParams.get('order')
+    const split = searchParams.get('split')
+    return {
       labeled: triToBool(searchParams.get('labeled') as TriFilter),
       reviewed: triToBool(searchParams.get('reviewed') as TriFilter),
       cls: searchParams.get('cls') != null ? Number(searchParams.get('cls')) : undefined,
       q: searchParams.get('q') || undefined,
+      sort: sort === 'name' ? 'name' : 'created',
+      order: order === 'asc' ? 'asc' : 'desc',
+      ...(split ? { split: split as DatasetImageQuery['split'] } : {}),
       names_only: true,
-    }),
-    [searchParams],
-  )
+    }
+  }, [searchParams])
   const names = useQuery({
     queryKey: ['image-names', projectId, datasetId, filterQuery],
     queryFn: () => listDatasetImages(projectId, datasetId, filterQuery),
@@ -126,8 +132,8 @@ export default function LabelEditorPage() {
     if (!s.dirty) return
     await putDatasetLabels(projectId, datasetId, stem, s.boxes as never)
     s.markSaved()
-    queryClient.invalidateQueries({ queryKey: ['images', projectId] })
-    queryClient.invalidateQueries({ queryKey: ['stats', projectId] })
+    // 박스가 바뀌면 그리드의 배지(L·N)와 클래스 필터 결과가 달라진다
+    queryClient.invalidateQueries({ queryKey: ['dataset-images', projectId, datasetId] })
     queryClient.invalidateQueries({ queryKey: ['labels', projectId, datasetId, stem] })
   }, [projectId, datasetId, stem, queryClient])
 
@@ -154,7 +160,12 @@ export default function LabelEditorPage() {
 
   const backToDataset = () => {
     saveNow().catch((e) => notifications.show({ message: String(e), color: 'red' }))
-    navigate(`/projects/${projectId}/datasets/${datasetId}`)
+    // 좁혀 놓은 목록으로 돌아간다 — 필터를 버리면 어디를 보고 있었는지 잃는다.
+    // 검수 여부는 그리드에서 `tab` 이라 이름이 다르다.
+    const back = new URLSearchParams(searchParams)
+    back.set('tab', searchParams.get('reviewed') === 'yes' ? 'reviewed' : 'unreviewed')
+    back.delete('reviewed')
+    navigate(`/projects/${projectId}/datasets/${datasetId}?${back.toString()}`)
   }
 
   const toggleReviewed = useMutation({
@@ -178,18 +189,21 @@ export default function LabelEditorPage() {
       // the deleted stem's autosave must not recreate its label file
       useEditorStore.getState().markSaved()
       notifications.show({ message: `Deleted ${detail.data?.name ?? stem}`, color: 'green' })
-      queryClient.invalidateQueries({ queryKey: ['images', projectId] })
-      queryClient.invalidateQueries({ queryKey: ['image-names', projectId] })
-      queryClient.invalidateQueries({ queryKey: ['stats', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['dataset-images', projectId, datasetId] })
+      queryClient.invalidateQueries({ queryKey: ['image-names', projectId, datasetId] })
+      queryClient.invalidateQueries({ queryKey: ['dataset', projectId, datasetId] })
+      queryClient.invalidateQueries({ queryKey: ['datasets', projectId] })
       queryClient.removeQueries({ queryKey: ['labels', projectId, datasetId, stem] })
       // jump to a neighbour to keep the flow going, else back to the gallery
       const target = nextStem ?? prevStem
-      navigate(
-        target
-          ? `/projects/${projectId}/datasets/${datasetId}/label/${encodeURIComponent(target)}?${searchParams.toString()}`
-          : `/projects/${projectId}/dataset?${searchParams.toString()}`,
-        { replace: true },
-      )
+      if (target) {
+        navigate(
+          `/projects/${projectId}/datasets/${datasetId}/label/${encodeURIComponent(target)}?${searchParams.toString()}`,
+          { replace: true },
+        )
+      } else {
+        backToDataset()
+      }
     },
     onError: (e) => notifications.show({ message: String(e), color: 'red' }),
   })
