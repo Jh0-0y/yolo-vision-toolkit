@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable
 
 from lib.detect.ensemble import Detection, FusedBox, merge_detections
+from lib.detect.tiled import TiledParams, collect, tiles_for
 from lib.formats import IMAGE_EXTS
 from lib.labels.io import atomic_write_text, write_box_meta, write_label_file
 from lib.labels.registry import ClassRegistry, normalize
@@ -40,17 +41,36 @@ class JobCancelled(Exception):
 
 
 @dataclass
+class DetectorSpec:
+    """모델 하나와 **그 모델의 추론 방식.**
+
+    엔트리마다 방식이 다를 수 있다 — 선수 모델은 풀 프레임으로 크게 보고, 공 모델은
+    타일로 잘게 보는 식이다. 어느 쪽이든 결과는 같은 `Detection` 목록이라 아래층은
+    구분하지 않는다.
+    """
+
+    model_path: Path
+    model_id: str
+    mode: str = "full"  # full | tiled
+    # 추론 해상도. **두 방식 모두 쓴다** — full 은 원본을, tiled 는 타일 하나를
+    # 이 크기로 맞춰 넣는다. 타일보다 크게 잡으면 확대되어 작은 객체가 살아난다
+    # (640 타일 안의 20px 공을 imgsz=1280 으로 보면 40px 이 된다).
+    imgsz: int = 640
+    tile_size: int = 640  # tiled 일 때 자르는 크기
+    stride: int = 480
+    merge_iou: float = 0.5  # 타일 경계 중복 병합 (모델 간 병합과 별개다)
+    border_margin_px: int = 4
+
+
+@dataclass
 class LabelJobConfig:
-    model_paths: list[Path]
+    detectors: list[DetectorSpec]
     images_dir: Path
     out_dir: Path
-    # display ids per model (defaults to the .pt filename stem)
-    model_names: list[str] | None = None
     conf: float = 0.4
     iou_wbf: float = 0.55
     device: str = "cpu"  # 이미 해석된 장치 문자열 — "auto" 를 넘기지 않는다
     batch_size: int = 16
-    imgsz: int = 640
     # restrict to these file names (None = all images in images_dir)
     image_names: list[str] | None = None
     # class name -> max boxes per image (unspecified names use DEFAULT_MAX_PER_CLASS)
@@ -98,6 +118,58 @@ def _cap_per_class(
     return kept
 
 
+def _detect_tiled(
+    model,
+    img_path: Path,
+    spec: DetectorSpec,
+    mapping: dict[int, int],
+    device: str,
+    floor: float,
+    max_det: int,
+) -> list[Detection]:
+    """이미지 한 장을 타일로 잘라 **한 번의 배치**로 추론한다.
+
+    좌표 규칙과 경계 처리는 `lib/detect/tiled.py` 에 있다 — 여기서는 자르고 모델에
+    넣는 일만 한다. 그래서 그쪽은 모델 없이 테스트된다.
+    """
+    import cv2
+
+    frame = cv2.imread(str(img_path))
+    if frame is None:
+        return []
+    img_h, img_w = frame.shape[:2]
+    params = TiledParams(
+        tile_size=spec.tile_size,
+        stride=spec.stride,
+        merge_iou=spec.merge_iou,
+        border_margin_px=spec.border_margin_px,
+    )
+    tiles = tiles_for(img_w, img_h, params)
+    crops = [frame[ty : ty + spec.tile_size, tx : tx + spec.tile_size] for tx, ty in tiles]
+
+    results = model.predict(
+        crops,
+        conf=floor,
+        imgsz=spec.imgsz,
+        device=device,
+        max_det=max_det,
+        verbose=False,
+    )
+
+    tile_boxes: list[tuple[int, int, tuple[float, float, float, float], int, float]] = []
+    for (tx, ty), r in zip(tiles, results):
+        if r.boxes is None:
+            continue
+        xyxy = r.boxes.xyxy.cpu().numpy()  # 타일 안 픽셀 좌표
+        clss = r.boxes.cls.cpu().numpy().astype(int)
+        confs = r.boxes.conf.cpu().numpy()
+        for k in range(len(clss)):
+            tile_boxes.append(
+                (tx, ty, tuple(float(v) for v in xyxy[k]), int(clss[k]), float(confs[k]))
+            )
+    return collect(tile_boxes, img_w, img_h, params, spec.model_id, mapping)
+
+
 def run_labeling(
     cfg: LabelJobConfig,
     progress: ProgressFn | None = None,
@@ -107,13 +179,12 @@ def run_labeling(
 
     device = cfg.device
 
-    models: list[tuple[str, "YOLO", dict[int, int]]] = []
+    models: list[tuple[DetectorSpec, "YOLO", dict[int, int]]] = []
     registry = _load_registry(cfg.out_dir)
-    for i, path in enumerate(cfg.model_paths):
-        model_id = cfg.model_names[i] if cfg.model_names else path.stem
-        model = YOLO(str(path))
-        mapping = registry.add_model(model_id, dict(model.names))
-        models.append((model_id, model, mapping))
+    for spec in cfg.detectors:
+        model = YOLO(str(spec.model_path))
+        mapping = registry.add_model(spec.model_id, dict(model.names))
+        models.append((spec, model, mapping))
 
     class_sources = registry.class_sources()
 
@@ -127,6 +198,8 @@ def run_labeling(
     # Open the per-model NMS cap wide enough that a high per-class limit isn't
     # pre-empted by ultralytics' default (max_det=300, counted across all classes).
     max_det = max(DEFAULT_MAX_PER_CLASS, sum(limit_by_cls.values()) or DEFAULT_MAX_PER_CLASS)
+
+    floor = min(cfg.conf, DETECT_FLOOR)
 
     images = list_images(cfg.images_dir)
     if cfg.image_names is not None:
@@ -148,11 +221,20 @@ def run_labeling(
         # detections per image index in this batch
         per_image: list[list[Detection]] = [[] for _ in batch]
 
-        for model_id, model, mapping in models:
+        for spec, model, mapping in models:
+            if spec.mode == "tiled":
+                for i, img_path in enumerate(batch):
+                    per_image[i].extend(
+                        _detect_tiled(model, img_path, spec, mapping, device, floor, max_det)
+                    )
+                continue
+
+            # full — 배치로 한 번에. ultralytics 가 letterbox 로 줄여 추론하고
+            # 박스를 **원본 정규화 좌표**로 되돌려 준다.
             results = model.predict(
                 [str(p) for p in batch],
-                conf=min(cfg.conf, DETECT_FLOOR),
-                imgsz=cfg.imgsz,
+                conf=floor,
+                imgsz=spec.imgsz,
                 device=device,
                 max_det=max_det,
                 verbose=False,
@@ -164,12 +246,15 @@ def run_labeling(
                 clss = r.boxes.cls.cpu().numpy().astype(int)
                 confs = r.boxes.conf.cpu().numpy()
                 for k in range(len(clss)):
+                    mapped = mapping.get(int(clss[k]))
+                    if mapped is None:
+                        continue
                     per_image[i].append(
                         Detection(
-                            cls=mapping[int(clss[k])],
+                            cls=mapped,
                             xyxy=tuple(float(v) for v in xyxyn[k]),  # type: ignore[arg-type]
                             score=float(confs[k]),
-                            model_id=model_id,
+                            model_id=spec.model_id,
                         )
                     )
 

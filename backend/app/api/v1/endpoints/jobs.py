@@ -16,6 +16,7 @@ from app.schemas.job import JobCreate, JobOut
 from app.services import datasets
 from app.services.label_manager import job_manager
 from infra import jobs
+from lib.detect.tiled import TiledParams
 
 router = APIRouter(prefix="", tags=["jobs"])
 
@@ -39,29 +40,49 @@ def _to_out(job: Job) -> JobOut:
 def create_job(project_id: str, req: JobCreate, session: Session = Depends(get_session)):
     if session.get(Project, project_id) is None:
         raise HTTPException(404, "Project not found")
-    if not req.model_ids:
+    if not req.detectors:
         raise HTTPException(422, "Select at least one model")
     # **대상을 반드시 받는다.** 비우면 "데이터셋 전부"가 되어 검수 끝난 이미지의
     # 라벨까지 모델 출력으로 덮어썼다. 오토라벨링은 고른 것에만 돈다.
     if not req.names:
         raise HTTPException(422, "Select the images to auto-label")
 
-    model_paths = []
-    model_names = []
-    for mid in req.model_ids:
-        entry = session.get(ModelEntry, mid)
+    detectors = []
+    used_names: list[str] = []
+    for d in req.detectors:
+        entry = session.get(ModelEntry, d.model_id)
         if entry is None:
-            raise HTTPException(422, f"Model not found: {mid}")
+            raise HTTPException(422, f"Model not found: {d.model_id}")
         # only this project's models or legacy/shared (project_id NULL) are usable
         if entry.project_id is not None and entry.project_id != project_id:
-            raise HTTPException(422, f"Model does not belong to this project: {mid}")
-        pt = settings.model_dir(entry.project_id, mid) / "model.pt"
+            raise HTTPException(422, f"Model does not belong to this project: {d.model_id}")
+        pt = settings.model_dir(entry.project_id, d.model_id) / "model.pt"
         if not pt.exists():
-            raise HTTPException(422, f"Model file missing: {mid}")
-        model_paths.append(str(pt))
+            raise HTTPException(422, f"Model file missing: {d.model_id}")
+        if d.mode not in ("full", "tiled"):
+            raise HTTPException(422, "detector mode must be 'full' or 'tiled'")
+        if d.mode == "tiled":
+            errors = TiledParams(
+                tile_size=d.tile_size,
+                stride=d.stride,
+                merge_iou=d.merge_iou,
+                border_margin_px=d.border_margin_px,
+            ).validate()
+            if errors:
+                raise HTTPException(422, f"Invalid tiling params: {errors}")
         # unique display id: name, disambiguated by registry id on collision
-        name = entry.name if entry.name not in model_names else f"{entry.name}#{mid[-4:]}"
-        model_names.append(name)
+        name = entry.name if entry.name not in used_names else f"{entry.name}#{d.model_id[-4:]}"
+        used_names.append(name)
+        detectors.append({
+            "model_path": str(pt),
+            "model_id": name,
+            "mode": d.mode,
+            "imgsz": d.imgsz,
+            "tile_size": d.tile_size,
+            "stride": d.stride,
+            "merge_iou": d.merge_iou,
+            "border_margin_px": d.border_margin_px,
+        })
 
     # 오토라벨링의 대상은 **데이터셋**이다 — 이미지도 라벨도 클래스도 그 안에 있다.
     if not req.dataset_id:
@@ -73,13 +94,11 @@ def create_job(project_id: str, req: JobCreate, session: Session = Depends(get_s
     ddir = datasets.dataset_dir(project_id, req.dataset_id)
 
     cfg = {
-        "model_paths": model_paths,
-        "model_names": model_names,
+        "detectors": detectors,
         "images_dir": str(ddir / "raw"),
         "out_dir": str(ddir),
         "conf": req.conf,
         "iou_wbf": req.iou_wbf,
-        "imgsz": req.imgsz,
         "batch_size": req.batch_size,
         "image_names": req.names,
         "max_boxes_per_class": req.max_boxes_per_class,

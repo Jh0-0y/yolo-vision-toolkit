@@ -8,7 +8,13 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from lib.detect.labeling import LabelJobConfig, run_labeling
+from lib.detect.labeling import DetectorSpec, LabelJobConfig, run_labeling
+
+
+def _spec(path, **kw):
+    """검출기 엔트리 하나. 기본은 풀 프레임 — 대부분의 테스트가 방식을 안 따진다."""
+    return DetectorSpec(model_path=path, model_id=path.stem, **kw)
+
 
 
 class _Arr:
@@ -88,7 +94,7 @@ def test_pipeline_end_to_end(tmp_path, fake_ultralytics):
     events = []
     result = run_labeling(
         LabelJobConfig(
-            model_paths=[tmp_path / "model_a.pt", tmp_path / "model_b.pt"],
+            detectors=[_spec(tmp_path / "model_a.pt"), _spec(tmp_path / "model_b.pt")],
             images_dir=images,
             out_dir=out,
             device="cpu",
@@ -134,7 +140,7 @@ def test_registry_seeded_from_existing_classes(tmp_path, fake_ultralytics):
 
     run_labeling(
         LabelJobConfig(
-            model_paths=[tmp_path / "model_a.pt", tmp_path / "model_b.pt"],
+            detectors=[_spec(tmp_path / "model_a.pt"), _spec(tmp_path / "model_b.pt")],
             images_dir=images,
             out_dir=out,
             device="cpu",
@@ -188,7 +194,7 @@ def test_conf_is_a_hard_filter(tmp_path, fake_ball):
 
     run_labeling(
         LabelJobConfig(
-            model_paths=[tmp_path / "m.pt"],
+            detectors=[_spec(tmp_path / "m.pt")],
             images_dir=images,
             out_dir=out,
             conf=0.4,
@@ -212,7 +218,7 @@ def test_max_boxes_per_class_keeps_top_n(tmp_path, fake_ball):
 
     run_labeling(
         LabelJobConfig(
-            model_paths=[tmp_path / "m.pt"],
+            detectors=[_spec(tmp_path / "m.pt")],
             images_dir=images,
             out_dir=out,
             conf=0.05,  # keep everything, then cap
@@ -235,7 +241,7 @@ def test_max_boxes_matches_class_name_case_insensitively(tmp_path, fake_ball):
 
     run_labeling(
         LabelJobConfig(
-            model_paths=[tmp_path / "m.pt"],
+            detectors=[_spec(tmp_path / "m.pt")],
             images_dir=images,
             out_dir=out,
             conf=0.05,
@@ -257,7 +263,7 @@ def test_image_names_filter(tmp_path, fake_ultralytics):
     out = tmp_path / "out"
     result = run_labeling(
         LabelJobConfig(
-            model_paths=[tmp_path / "model_a.pt"],
+            detectors=[_spec(tmp_path / "model_a.pt")],
             images_dir=images,
             out_dir=out,
             image_names=["img_agree.jpg"],
