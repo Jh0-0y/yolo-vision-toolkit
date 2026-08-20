@@ -3,7 +3,7 @@ import {
   ActionIcon,
   Badge,
   Button,
-  FileButton,
+  Card,
   Group,
   Menu,
   Modal,
@@ -24,12 +24,12 @@ import {
   IconDownload,
   IconPencil,
   IconTrash,
-  IconUpload,
 } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { api, modelDownloadUrl, patchModel, type ModelOut, type OfficialModel } from '../api/client'
+import AddModelMenu from '../components/models/AddModelMenu'
 import CompareMode from '../components/test/CompareMode'
 
 const SOURCE_LABEL: Record<string, { label: string; color: string }> = {
@@ -41,6 +41,9 @@ const SOURCE_LABEL: Record<string, { label: string; color: string }> = {
 export default function ModelsPage() {
   const { projectId = '' } = useParams()
   const queryClient = useQueryClient()
+  // 탭을 controlled 로 두는 이유는 하나다 — 모델을 들이는 버튼은 Registry 의 액션이라
+  // Compare 를 보는 동안에는 헤더에서 빠져야 한다.
+  const [tab, setTab] = useState<string | null>('registry')
   const [downloadOpen, setDownloadOpen] = useState(false)
   const [officialName, setOfficialName] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<ModelOut | null>(null)
@@ -103,14 +106,29 @@ export default function ModelsPage() {
   })
 
   const defaultOfficial = catalog.data?.find((c) => c.default)?.name ?? 'yolo26n'
+  const rows = models.data ?? []
+  // 불러오는 중에는 빈 상태를 띄우지 않는다 — 잠깐 "모델이 없다"가 번쩍이고 사라진다
+  const isEmpty = !models.isLoading && rows.length === 0
+
+  const addMenu = (variant?: 'filled' | 'light') => (
+    <AddModelMenu
+      variant={variant}
+      onDownload={() => setDownloadOpen(true)}
+      onUpload={(file) => upload.mutate(file)}
+      uploading={upload.isPending}
+    />
+  )
 
   return (
     <Stack gap="lg">
-      <div>
-        <Title order={3}>Models</Title>
-      </div>
+      <Group justify="space-between" align="flex-end">
+        <div>
+          <Title order={3}>Models</Title>
+        </div>
+        {tab === 'registry' && addMenu()}
+      </Group>
 
-      <Tabs defaultValue="registry">
+      <Tabs value={tab} onChange={setTab}>
         <Tabs.List>
           <Tabs.Tab value="registry" leftSection={<IconBox size={16} />}>
             Registry
@@ -121,109 +139,97 @@ export default function ModelsPage() {
         </Tabs.List>
 
         <Tabs.Panel value="registry" pt="md">
-          <Stack gap="lg">
-            <Group justify="flex-end">
-              <Button
-                leftSection={<IconCloudDownload size={16} />}
-                variant="light"
-                onClick={() => setDownloadOpen(true)}
-              >
-                Download official model
-              </Button>
-              <FileButton onChange={(f) => f && upload.mutate(f)} accept=".pt">
-                {(props) => (
-                  <Button
-                    {...props}
-                    variant="light"
-                    color="grape"
-                    leftSection={<IconUpload size={16} />}
-                    loading={upload.isPending}
-                  >
-                    Upload .pt
-                  </Button>
-                )}
-              </FileButton>
-            </Group>
-
-            <Table striped highlightOnHover>
-        <Table.Thead>
-          <Table.Tr>
-            <Table.Th>Name</Table.Th>
-            <Table.Th>Source</Table.Th>
-            <Table.Th>Classes</Table.Th>
-            <Table.Th>Registered</Table.Th>
-            <Table.Th w={40} />
-          </Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
-          {models.data?.map((m) => {
-            const names = Object.values(m.classes)
-            const source = SOURCE_LABEL[m.source] ?? SOURCE_LABEL.upload
-            return (
-              <Table.Tr key={m.id}>
-                <Table.Td fw={500}>{m.name}</Table.Td>
-                <Table.Td>
-                  <Badge variant="light" color={source.color}>
-                    {source.label}
-                  </Badge>
-                </Table.Td>
-                <Table.Td>
-                  <Tooltip label={names.slice(0, 30).join(', ') + (names.length > 30 ? ' …' : '')}>
-                    <Text size="sm">{names.length}</Text>
-                  </Tooltip>
-                </Table.Td>
-                <Table.Td>
-                  <Text size="sm" c="dimmed">
-                    {new Date(m.created_at).toLocaleString()}
-                  </Text>
-                </Table.Td>
-                <Table.Td>
-                  <Menu position="bottom-end" withinPortal>
-                    <Menu.Target>
-                      <ActionIcon variant="subtle" color="gray">
-                        <IconDotsVertical size={16} />
-                      </ActionIcon>
-                    </Menu.Target>
-                    <Menu.Dropdown>
-                      <Menu.Item
-                        leftSection={<IconDownload size={14} />}
-                        component="a"
-                        href={modelDownloadUrl(m.id)}
-                      >
-                        Download .pt
-                      </Menu.Item>
-                      <Menu.Item
-                        leftSection={<IconPencil size={14} />}
-                        onClick={() => {
-                          setRenaming(m)
-                          setRenameValue(m.name)
-                        }}
-                      >
-                        Rename
-                      </Menu.Item>
-                      <Menu.Item
-                        color="red"
-                        leftSection={<IconTrash size={14} />}
-                        onClick={() => {
-                          if (confirm(`Delete model "${m.name}"?`)) remove.mutate(m.id)
-                        }}
-                      >
-                        Delete
-                      </Menu.Item>
-                    </Menu.Dropdown>
-                  </Menu>
-                </Table.Td>
-              </Table.Tr>
-            )
-          })}
-        </Table.Tbody>
-      </Table>
-            {models.data?.length === 0 && (
-              <Text c="dimmed">
-                No models registered. Download an official model or upload a trained .pt.
-              </Text>
+          <Card withBorder radius="md" padding="sm">
+            {isEmpty ? (
+              // 모델은 **여기서** 추가할 수 있으니 빈 상태가 안내로 끝나지 않고 손잡이를 준다
+              // (학습 이력은 다른 화면에서 시작하므로 거기는 글줄 하나로 둔다).
+              <Stack align="center" gap="xs" py="xl">
+                <IconBox size={36} stroke={1.2} />
+                <Text c="dimmed" size="sm">
+                  No models registered yet. Download an official model or upload a trained .pt.
+                </Text>
+                {addMenu('light')}
+              </Stack>
+            ) : (
+              <Table highlightOnHover verticalSpacing="sm">
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Name</Table.Th>
+                    <Table.Th>Source</Table.Th>
+                    <Table.Th>Classes</Table.Th>
+                    <Table.Th>Registered</Table.Th>
+                    <Table.Th w={40} />
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {rows.map((m) => {
+                    const names = Object.values(m.classes)
+                    const source = SOURCE_LABEL[m.source] ?? SOURCE_LABEL.upload
+                    return (
+                      <Table.Tr key={m.id}>
+                        <Table.Td fw={500}>{m.name}</Table.Td>
+                        <Table.Td>
+                          <Badge variant="light" color={source.color}>
+                            {source.label}
+                          </Badge>
+                        </Table.Td>
+                        <Table.Td>
+                          <Tooltip
+                            label={
+                              names.slice(0, 30).join(', ') + (names.length > 30 ? ' …' : '')
+                            }
+                          >
+                            <Text size="sm">{names.length}</Text>
+                          </Tooltip>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="sm" c="dimmed">
+                            {new Date(m.created_at).toLocaleString()}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Menu position="bottom-end" withinPortal>
+                            <Menu.Target>
+                              <ActionIcon variant="subtle" color="gray">
+                                <IconDotsVertical size={16} />
+                              </ActionIcon>
+                            </Menu.Target>
+                            <Menu.Dropdown>
+                              <Menu.Item
+                                leftSection={<IconDownload size={14} />}
+                                component="a"
+                                href={modelDownloadUrl(m.id)}
+                              >
+                                Download .pt
+                              </Menu.Item>
+                              <Menu.Item
+                                leftSection={<IconPencil size={14} />}
+                                onClick={() => {
+                                  setRenaming(m)
+                                  setRenameValue(m.name)
+                                }}
+                              >
+                                Rename
+                              </Menu.Item>
+                              <Menu.Item
+                                color="red"
+                                leftSection={<IconTrash size={14} />}
+                                onClick={() => {
+                                  if (confirm(`Delete model "${m.name}"?`)) remove.mutate(m.id)
+                                }}
+                              >
+                                Delete
+                              </Menu.Item>
+                            </Menu.Dropdown>
+                          </Menu>
+                        </Table.Td>
+                      </Table.Tr>
+                    )
+                  })}
+                </Table.Tbody>
+              </Table>
             )}
-          </Stack>
+          </Card>
         </Tabs.Panel>
 
         <Tabs.Panel value="compare" pt="md">
