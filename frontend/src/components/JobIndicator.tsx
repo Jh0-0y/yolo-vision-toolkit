@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { Anchor, CloseButton, Group, Paper, Progress, Text } from '@mantine/core'
-import { IconGridDots, IconMovie, IconWand } from '@tabler/icons-react'
+import { IconMovie, IconWand } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
@@ -47,9 +47,7 @@ export default function JobIndicator() {
           message:
             j.kind === 'import'
               ? `Frames imported: ${j.title}`
-              : j.kind === 'tiling'
-                ? `Tiling done: ${j.title}`
-                : `Auto-labeling done: ${j.title}`,
+              : `Auto-labeling done: ${j.title}`,
           color: 'green',
         })
         // a sticky card is the handle to its own result — the user closes it
@@ -132,8 +130,6 @@ function JobCard({
         <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
           {job.kind === 'autolabel' ? (
             <IconWand size={16} stroke={1.5} />
-          ) : job.kind === 'tiling' ? (
-            <IconGridDots size={16} stroke={1.5} />
           ) : (
             <IconMovie size={16} stroke={1.5} />
           )}

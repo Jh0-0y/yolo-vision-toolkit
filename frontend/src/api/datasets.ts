@@ -43,7 +43,7 @@ export const deleteDataset = (projectId: string, datasetId: string) =>
 
 export interface DatasetSource {
   id: string
-  kind: 'video' | 'dataset' | 'tiling'
+  kind: 'video' | 'dataset'
   filename: string
   /** 영상만. 이 출처에서 나온 프레임의 이름 앞부분 (`경기 영상` · `경기 영상 (2)`) */
   stem: string | null
@@ -57,11 +57,6 @@ export interface DatasetSource {
   labeled?: number
   reviewed?: boolean
   assigned?: number
-  // 타일링 — 어느 데이터셋을 어떤 설정으로 쪼갰나
-  source_dataset_id?: string
-  tiles?: number
-  positive?: number
-  negative?: number
 }
 
 export const listDatasetSources = (projectId: string, datasetId: string) =>
@@ -320,99 +315,6 @@ export function subscribeImportEvents(
   const source = new EventSource(`${BASE}${importBase(projectId, datasetId)}/${jobId}/events`)
   source.addEventListener('progress', (e) => {
     const ev = JSON.parse((e as MessageEvent).data) as ImportProgressEvent
-    onEvent(ev)
-    if (ev.phase === 'done' || ev.phase === 'error' || ev.phase === 'cancelled') source.close()
-  })
-  source.onerror = () => {
-    // EventSource 는 일시적 끊김을 스스로 재시도한다 — CLOSED 만 진짜 실패다
-    if (source.readyState === EventSource.CLOSED) onError?.()
-  }
-  return () => source.close()
-}
-
-// ---------- 타일링 ----------
-//
-// 검수완료 이미지를 타일로 쪼개 **새 데이터셋**을 만든다. 결과가 그냥 데이터셋이라
-// 분할·내보내기·학습은 아무것도 달라지지 않는다. 타일은 전부 미할당으로 나오고,
-// 분할은 파생 데이터셋에서 따로 한다 — 흐름이 `검수 → 타일링 → 분할` 이다.
-
-export interface TileParams {
-  tile_size?: number
-  stride?: number
-  min_visibility?: number
-  /** 포지티브 장수 대비 비율 (0.1 = 10%). `keep_all_negatives` 면 무시된다 */
-  negative_ratio?: number
-  keep_all_negatives?: boolean
-  seed?: number
-}
-
-export interface TileSize {
-  w: number
-  h: number
-  images: number
-  cols: number
-  rows: number
-}
-
-export interface TileEstimate {
-  images: number
-  /** 격자가 내는 전부 — 네거티브를 걸러내기 전 */
-  tiles: number
-  positive: number
-  /** 네거티브 후보 (샘플링 전) */
-  negative: number
-  negative_kept: number
-  /** 실제로 만들어질 장수 */
-  total: number
-  sizes: TileSize[]
-  /** 타일보다 작아 한 장으로 나오는 이미지 수 */
-  undersized: number
-}
-
-export interface TileStarted {
-  dataset_id: string
-  job_id: string
-  name: string
-  status: string
-}
-
-export interface TileProgressEvent {
-  phase: 'start' | 'tile' | 'done' | 'error' | 'cancelled'
-  done?: number
-  total?: number
-  images?: number
-  tiles?: number
-  positive?: number
-  negative?: number
-  saved?: number
-  msg?: string
-}
-
-const tileBase = (projectId: string, datasetId: string) =>
-  `/projects/${projectId}/datasets/${datasetId}/tile`
-
-export const estimateTiling = (projectId: string, datasetId: string, params: TileParams) =>
-  api.post<TileEstimate>(`${tileBase(projectId, datasetId)}/estimate`, params)
-
-export const createTiledDataset = (
-  projectId: string,
-  datasetId: string,
-  params: TileParams & { name?: string },
-) => api.post<TileStarted>(tileBase(projectId, datasetId), params)
-
-export const cancelTiling = (projectId: string, datasetId: string, tileId: string) =>
-  api.post(`${tileBase(projectId, datasetId)}/${tileId}/cancel`)
-
-export function subscribeTilingEvents(
-  projectId: string,
-  datasetId: string,
-  tileId: string,
-  onEvent: (ev: TileProgressEvent) => void,
-  onError?: () => void,
-): () => void {
-  const source = new EventSource(`${BASE}${tileBase(projectId, datasetId)}/${tileId}/events`)
-  source.addEventListener('progress', (e) => {
-    const ev = JSON.parse((e as MessageEvent).data) as TileProgressEvent
     onEvent(ev)
     if (ev.phase === 'done' || ev.phase === 'error' || ev.phase === 'cancelled') source.close()
   })

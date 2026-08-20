@@ -3,7 +3,7 @@
 // 영상은 프레임을 뽑고 **버리므로** 이 목록이 유일한 기록이다. 같은 이름이 두 번
 // 들어왔을 때 어느 쪽이 `(2)` 인지도 여기서 본다 — 파일명만 보고는 알 수 없다.
 import { Badge, Card, Group, Loader, Modal, Stack, Text } from '@mantine/core'
-import { IconFileZip, IconGridDots, IconMovie } from '@tabler/icons-react'
+import { IconFileZip, IconMovie } from '@tabler/icons-react'
 import { useQuery } from '@tanstack/react-query'
 import { listDatasetSources, type DatasetSource } from '../../api/client'
 
@@ -36,25 +36,10 @@ function frameCount(s: DatasetSource): string {
   return s.frames == null ? '…' : `${s.frames} frames`
 }
 
-/** 타일링 설정 중 **결과를 바꾼 것만** 한 줄로 — `videoParams` 와 같은 원칙. */
-function tileParams(s: DatasetSource): string {
-  const p = s.params ?? {}
-  const parts: string[] = []
-  if (p.tile_size != null) parts.push(`${p.tile_size}px`)
-  if (p.stride != null) parts.push(`stride ${p.stride}`)
-  return parts.join(' / ')
-}
-
-function tileCounts(s: DatasetSource): string {
-  return `${s.tiles ?? 0} tiles · ${s.positive ?? 0} positive · ${s.negative ?? 0} negative`
-}
-
 function SourceRow({ s }: { s: DatasetSource }) {
   const icon =
     s.kind === 'video' ? (
       <IconMovie size={18} stroke={1.5} />
-    ) : s.kind === 'tiling' ? (
-      <IconGridDots size={18} stroke={1.5} />
     ) : (
       <IconFileZip size={18} stroke={1.5} />
     )
@@ -70,11 +55,9 @@ function SourceRow({ s }: { s: DatasetSource }) {
             <Text size="xs" c="dimmed">
               {s.kind === 'video'
                 ? `${frameCount(s)}${videoParams(s) ? ` · ${videoParams(s)}` : ''}`
-                : s.kind === 'tiling'
-                  ? `${tileCounts(s)}${tileParams(s) ? ` · ${tileParams(s)}` : ''}`
-                  : `${s.images ?? 0} images · ${s.labeled ?? 0} labeled${
-                      s.reviewed ? ` · reviewed, ${s.assigned ?? 0} placed` : ' · unreviewed'
-                    }`}
+                : `${s.images ?? 0} images · ${s.labeled ?? 0} labeled${
+                    s.reviewed ? ` · reviewed, ${s.assigned ?? 0} placed` : ' · unreviewed'
+                  }`}
             </Text>
             {/* 프레임 이름의 앞부분 — 그리드에서 이 출처를 찾는 검색어이기도 하다 */}
             {s.stem && (

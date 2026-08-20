@@ -2,14 +2,11 @@ import { create } from 'zustand'
 import {
   cancelAutoLabel,
   cancelImport,
-  cancelTiling,
   importVideo,
   subscribeImportEvents,
   subscribeJobEvents,
-  subscribeTilingEvents,
   type ImportProgressEvent,
   type JobProgressEvent,
-  type TileProgressEvent,
   type VideoImportParams,
 } from '../api/client'
 
@@ -22,13 +19,10 @@ import {
 //    앱 안에서 이동해도 살아 있지만, 새로고침하면 업로드는 끊긴다.
 //  - `autolabel` — 순수 SSE. 서버가 progress.jsonl 을 처음부터 재생하므로 새로고침도
 //    견딘다 — 잡 참조를 저장해 두고 hydrate 때 다시 붙는다.
-//  - `tiling` — 순수 SSE. 검수완료 이미지를 타일로 쪼개 **새 데이터셋**을 만든다.
-//    결과를 볼 자리가 따로 있지만 사용자는 원본 화면에 그대로 머무르므로,
-//    진행률은 여기서 들고 완료 카드가 파생 데이터셋으로 가는 링크를 준다.
 //
 // 크롭 런과 학습 런은 **여기 없다.** 각자 상세페이지가 진행률을 직접 보여준다 —
 // progress.jsonl 을 처음부터 재생하므로 전역 카드에 얹지 않아도 견딘다.
-export type JobKind = 'import' | 'autolabel' | 'tiling'
+export type JobKind = 'import' | 'autolabel'
 export type JobStatus = 'running' | 'done' | 'error'
 
 export interface JobPhase {
@@ -71,12 +65,6 @@ interface JobStore {
     projectId: string,
     datasetId: string,
     jobId: string,
-    title: string,
-  ) => string
-  trackTiling: (
-    projectId: string,
-    datasetId: string,
-    tileDatasetId: string,
     title: string,
   ) => string
   cancel: (id: string) => void
@@ -171,29 +159,6 @@ function mapAutolabel(ev: JobProgressEvent): Mapped {
   if (ev.phase === 'done') return { phase, status: 'done' }
   if (ev.phase === 'error' || ev.phase === 'cancelled')
     return { phase, status: 'error', error: ev.msg || 'Job stopped' }
-  return { phase, status: 'running' }
-}
-
-function mapTiling(ev: TileProgressEvent): Mapped {
-  const pct =
-    ev.total && ev.done !== undefined
-      ? Math.min(100, Math.round((ev.done / ev.total) * 100))
-      : ev.phase === 'done'
-        ? 100
-        : 0
-  const phase: JobPhase = {
-    key: 'tiling',
-    label: 'Tiling',
-    indeterminate: !ev.total,
-    value: pct,
-    detail:
-      ev.phase === 'done'
-        ? `${ev.saved ?? ev.tiles ?? '-'} tiles`
-        : `${ev.done ?? 0}/${ev.total ?? '?'}`,
-  }
-  if (ev.phase === 'done') return { phase, status: 'done' }
-  if (ev.phase === 'error' || ev.phase === 'cancelled')
-    return { phase, status: 'error', error: ev.msg || 'Tiling stopped' }
   return { phase, status: 'running' }
 }
 
@@ -323,33 +288,6 @@ export const useJobStore = create<JobStore>((set, get) => {
       return id
     },
 
-    trackTiling: (projectId, datasetId, tileDatasetId, title) => {
-      const id = newId()
-      addJob({
-        id,
-        kind: 'tiling',
-        title,
-        projectId,
-        datasetId,
-        status: 'running',
-        phaseIndex: 0,
-        phases: [{ key: 'tiling', label: 'Tiling', indeterminate: true, value: 0 }],
-        seq: 0,
-        refId: tileDatasetId,
-        // 카드가 결과로 가는 유일한 손잡이라 자동으로 닫지 않는다
-        sticky: true,
-        resultHref: `/projects/${projectId}/datasets/${tileDatasetId}`,
-        resultLabel: 'Open dataset',
-      })
-      persistAdd({ id, kind: 'tiling', title, projectId, datasetId, refId: tileDatasetId })
-      attachServerJob(
-        id,
-        (onEv, onErr) => subscribeTilingEvents(projectId, datasetId, tileDatasetId, onEv, onErr),
-        mapTiling,
-      )
-      return id
-    },
-
     cancel: (id) => {
       const j = get().jobs[id]
       if (!j || j.status !== 'running') return
@@ -358,8 +296,6 @@ export const useJobStore = create<JobStore>((set, get) => {
         if (j.kind === 'import' && j.datasetId)
           cancelImport(j.projectId, j.datasetId, j.refId).catch(() => {})
         else if (j.kind === 'autolabel') cancelAutoLabel(j.refId).catch(() => {})
-        else if (j.kind === 'tiling' && j.datasetId)
-          cancelTiling(j.projectId, j.datasetId, j.refId).catch(() => {})
       }
       // reflect immediately; the SSE / upload rejection will also settle it
       patch(id, (jj) => ({ ...jj, status: 'error', error: 'Cancelled' }))
@@ -375,7 +311,7 @@ export const useJobStore = create<JobStore>((set, get) => {
         return { jobs, order: s.order.filter((x) => x !== id) }
       }),
 
-    // 저장되는 것은 **순수 서버 잡**뿐이다 — 지금은 오토라벨링과 타일링.
+    // 저장되는 것은 **순수 서버 잡**뿐이다 — 지금은 오토라벨링.
     // 가져오기는 브라우저가 바이트를 쥐고 있어 새로고침하면 어차피 끊긴다.
     hydrate: () => {
       for (const v of readPersisted()) {
@@ -394,29 +330,6 @@ export const useJobStore = create<JobStore>((set, get) => {
             refId: v.refId,
           })
           attachServerJob(v.id, (onEv, onErr) => subscribeJobEvents(v.refId, onEv, onErr), mapAutolabel)
-          continue
-        }
-        if (v.kind === 'tiling') {
-          addJob({
-            id: v.id,
-            kind: 'tiling',
-            title: v.title,
-            projectId: v.projectId,
-            datasetId: v.datasetId,
-            status: 'running',
-            phaseIndex: 0,
-            phases: [serverPhase('Tiling')],
-            seq: 0,
-            refId: v.refId,
-            sticky: true,
-            resultHref: `/projects/${v.projectId}/datasets/${v.refId}`,
-            resultLabel: 'Open dataset',
-          })
-          attachServerJob(
-            v.id,
-            (onEv, onErr) => subscribeTilingEvents(v.projectId, v.datasetId, v.refId, onEv, onErr),
-            mapTiling,
-          )
           continue
         }
         persistRemove(v.id)
