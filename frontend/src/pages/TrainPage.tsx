@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Anchor,
@@ -86,6 +86,9 @@ export default function TrainPage() {
 
   const [tiling, setTiling] = useState<TilingParams>(DEFAULT_TILING)
   const [preview, setPreview] = useState<TilingPreview | null>(null)
+  // 타일링을 켜면서 imgsz 를 tile size 로 덮어쓴다 — 껐을 때 사용자가 원래 갖고
+  // 있던 값으로 되돌리기 위해 켜기 직전 값을 기억해 둔다.
+  const prevImgszRef = useRef<number | string>(imgsz)
 
   // 격자를 흔드는 노브가 바뀌면 미리보기는 더 이상 이 설정의 것이 아니다
   useEffect(() => {
@@ -236,6 +239,12 @@ export default function TrainPage() {
               <NumberInput label="Image size" value={imgsz} onChange={setImgsz} min={64} step={32} />
               <NumberInput label="Batch" value={batch} onChange={setBatch} min={1} />
             </Group>
+            {tiling.enabled && Number(imgsz) !== tiling.tile_size && (
+              <Text size="xs" c="yellow.7">
+                Image size ({imgsz}px) does not match the tile size ({tiling.tile_size}px) — tiles
+                will be resized before training.
+              </Text>
+            )}
 
             <Stack gap="sm">
               <Switch
@@ -245,8 +254,14 @@ export default function TrainPage() {
                 onChange={(e) => {
                   const enabled = e.currentTarget.checked
                   setTiling((t) => ({ ...t, enabled }))
-                  // 타일 크기와 학습 imgsz 가 어긋나면 타일링의 이득이 사라진다
-                  if (enabled) setImgsz(tiling.tile_size)
+                  if (enabled) {
+                    // 타일 크기와 학습 imgsz 가 어긋나면 타일링의 이득이 사라진다 —
+                    // 켜기 직전 값을 기억해 뒀다가 끌 때 되돌린다
+                    prevImgszRef.current = imgsz
+                    setImgsz(tiling.tile_size)
+                  } else {
+                    setImgsz(prevImgszRef.current)
+                  }
                 }}
               />
 
@@ -347,6 +362,7 @@ export default function TrainPage() {
                         <Text key={s.split} size="xs" c="dimmed">
                           <b>{s.split}</b> {s.positive} pos · {negativeKept} neg ({s.hard} hard +{' '}
                           {negativeKept - s.hard} incidental) = {total}
+                          {s.excluded ? ` · ${s.excluded} excluded (min visibility)` : ''}
                           {overshoot ? ' ⚠ over target' : ''}
                         </Text>
                       )
