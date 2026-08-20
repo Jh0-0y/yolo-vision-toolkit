@@ -18,10 +18,6 @@ async def lifespan(app: FastAPI):
 
     # 크롭 워커 풀은 이 프로세스가 소유한다 — 재시작하면 돌던 런은 죽었다.
     lab_crop_runs.reconcile_on_boot()
-    from app.services import tile_manager as tile_manager_module
-
-    # 타일링 스레드 풀도 마찬가지다.
-    tile_manager_module.reconcile_on_boot()
     yield
     # release the warm inference worker (and its framework context) on shutdown
     from app.services.infer_manager import infer_manager
