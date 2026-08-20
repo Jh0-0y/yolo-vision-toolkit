@@ -18,6 +18,10 @@ async def lifespan(app: FastAPI):
 
     # 크롭 워커 풀은 이 프로세스가 소유한다 — 재시작하면 돌던 런은 죽었다.
     lab_crop_runs.reconcile_on_boot()
+    from app.services import benchmarks
+
+    # 벤치마크 워커 풀도 이 프로세스가 소유한다 — 재시작하면 돌던 런은 죽었다.
+    benchmarks.reconcile_on_boot()
     yield
     # release the warm inference worker (and its framework context) on shutdown
     from app.services.infer_manager import infer_manager
