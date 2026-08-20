@@ -9,7 +9,7 @@
 import { useEffect, useState } from 'react'
 import { Button, Card, Group, Loader, Pagination, SegmentedControl, Stack, Text } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconArrowsSplit, IconPackageExport, IconPlus } from '@tabler/icons-react'
+import { IconArrowsSplit, IconGridDots, IconPackageExport, IconPlus } from '@tabler/icons-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
@@ -36,6 +36,7 @@ import ImageGrid from './ImageGrid'
 import ImportModal from './ImportModal'
 import SelectionBar from './SelectionBar'
 import SplitModal from './SplitModal'
+import TilingModal from './TilingModal'
 
 const PAGE_SIZE = 60
 
@@ -69,6 +70,7 @@ export default function ImagePanel({ projectId, datasetId, reviewed, dataset }: 
   const [importOpen, setImportOpen] = useState(false)
   const [splitOpen, setSplitOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
+  const [tileOpen, setTileOpen] = useState(false)
 
   // 에디터도 **같은 조건**으로 목록을 받는다 — 조건이 어긋나면 순서와 총 수가 달라진다
   const query: DatasetImageQuery = {
@@ -173,6 +175,13 @@ export default function ImagePanel({ projectId, datasetId, reviewed, dataset }: 
             <>
               <Button
                 variant="light"
+                leftSection={<IconGridDots size={16} />}
+                onClick={() => setTileOpen(true)}
+              >
+                Tile
+              </Button>
+              <Button
+                variant="light"
                 leftSection={<IconArrowsSplit size={16} />}
                 onClick={() => setSplitOpen(true)}
               >
@@ -260,6 +269,13 @@ export default function ImagePanel({ projectId, datasetId, reviewed, dataset }: 
         datasetId={datasetId}
         opened={importOpen}
         onClose={() => setImportOpen(false)}
+      />
+      <TilingModal
+        projectId={projectId}
+        datasetId={datasetId}
+        dataset={dataset}
+        opened={tileOpen}
+        onClose={() => setTileOpen(false)}
       />
       <SplitModal
         projectId={projectId}
