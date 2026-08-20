@@ -14,8 +14,8 @@
     plan()         이미지 크기 + 라벨만 읽는다 (픽셀 디코딩 없음).
                    어떤 타일이 나오고 어느 게 포지티브고 어느 네거티브를
                    남길지까지 여기서 전부 결정한다.
-    estimate()     plan 을 센다        → 미리보기
-    materialize()  plan 을 실행한다     → 실제 타일 저장
+    estimate()                  plan 을 센다        → 미리보기
+    materialize_for_training()  plan 을 분할별로 실행한다 → train/val 트리 저장
 
 미리보기와 결과가 갈라지는 건 두 곳에서 따로 세기 때문이다. 하나로 묶으면
 **"1,122장"이라고 했으면 반드시 1,122장이 나온다.**
@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+import json
 import random
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,7 +32,7 @@ from typing import Callable
 from PIL import Image
 
 from lib.formats import IMAGE_EXTS
-from lib.labels.io import read_label_file, write_label_file
+from lib.labels.io import read_label_file, write_data_yaml, write_label_file
 from lib.media.tiling import (
     TilingParams,
     clip_boxes_to_tile,
@@ -346,18 +347,98 @@ def _save_tile(im: Image.Image, dst: Path) -> None:
         im.save(dst)
 
 
-def materialize(
+TRAIN_SPLITS = ("train", "val")
+
+
+@dataclass(frozen=True)
+class SplitPlan:
+    """한 분할이 무엇을 낼지. 화면 미리보기와 실체화가 같은 값을 본다."""
+
+    split: str
+    positive: int
+    hard: int
+    incidental: int
+    negative_kept: int
+    excluded: int
+    total: int
+    overshoot: bool  # 하드 네거티브만으로 목표를 넘었나
+
+
+def _stems_of(reviewed: set[str], splits: dict[str, str], split: str) -> set[str]:
+    return {s for s in reviewed if splits.get(s) == split}
+
+
+def _split_plan(split: str, p: TilePlan, params: TileDatasetParams) -> SplitPlan:
+    target = round(p.positive * params.negative_ratio)
+    return SplitPlan(
+        split=split,
+        positive=p.positive,
+        hard=p.hard,
+        incidental=p.incidental,
+        negative_kept=p.negative_kept,
+        excluded=p.excluded,
+        total=p.total,
+        overshoot=not params.keep_all_negatives and p.hard > target,
+    )
+
+
+_EMPTY_SPLIT = dict(
+    positive=0, hard=0, incidental=0, negative_kept=0, excluded=0, total=0, overshoot=False
+)
+
+
+def plan_for_training(
+    *,
+    dataset_dir: Path,
+    reviewed: set[str],
+    splits: dict[str, str],
+    params: TileDatasetParams,
+) -> list[SplitPlan]:
+    """train 과 val 을 **각각 따로** 계획한다. `test` 는 건드리지 않는다.
+
+    분할마다 독립적으로 비율을 맞추는 이유: train 의 비율은 학습 하이퍼파라미터고,
+    val 의 비율은 에폭별 곡선을 안정시키는 값이다. 둘을 합산해 맞추면 어느 쪽도
+    의도한 균형이 되지 않는다.
+    """
+    out: list[SplitPlan] = []
+    for split in TRAIN_SPLITS:
+        stems = _stems_of(reviewed, splits, split)
+        if not stems:
+            out.append(SplitPlan(split=split, **_EMPTY_SPLIT))
+            continue
+        p = plan(dataset_dir=dataset_dir, reviewed=stems, params=params)
+        out.append(_split_plan(split, p, params))
+    return out
+
+
+def _class_names(dataset_dir: Path) -> dict[int, str]:
+    """`data.yaml` 에 넣을 클래스 이름. `dataset_export.py` 와 같은 규칙이다 —
+    데이터셋의 classes.json 을 읽는 방식은 하나뿐이라 형태를 맞춰 둔다."""
+    path = dataset_dir / "classes.json"
+    if not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text()).get("classes", [])
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return {int(c["id"]): c["name"] for c in raw}
+
+
+def materialize_for_training(
     *,
     dataset_dir: Path,
     out_dir: Path,
     reviewed: set[str],
+    splits: dict[str, str],
     params: TileDatasetParams,
     emit: Emit | None = None,
     cancel_path: Path | None = None,
 ) -> dict:
-    """`plan` 이 정한 타일을 `out_dir/raw` 와 `out_dir/labels` 에 쓴다.
+    """타일을 `out_dir/images/{split}` · `out_dir/labels/{split}` 에 쓰고 `data.yaml`
+    을 만든다. `dataset_export.materialize` 가 내는 것과 같은 모양이라 ultralytics 는
+    타일인지 원본인지 모른다.
 
-    같은 원본을 여러 타일이 쓰므로 원본은 **한 번만 연다.**
+    **`test` 는 다루지 않는다** — 온전한 원본으로 남겨 두는 것이 이 함수의 존재 이유다.
     """
 
     def _tick(ev: dict) -> None:
@@ -368,40 +449,62 @@ def materialize(
         if cancel_path is not None and cancel_path.exists():
             raise TileCancelled()
 
-    p = plan(dataset_dir=dataset_dir, reviewed=reviewed, params=params)
+    plans: dict[str, TilePlan | None] = {}
+    for split in TRAIN_SPLITS:
+        stems = _stems_of(reviewed, splits, split)
+        plans[split] = (
+            plan(dataset_dir=dataset_dir, reviewed=stems, params=params) if stems else None
+        )
+
+    train_plan = plans["train"]
+    if train_plan is None or train_plan.total == 0:
+        raise TileError("Nothing to train on — assign some reviewed images to train")
+
     images = _images_by_stem(dataset_dir / "raw")
-    raw_out = out_dir / "raw"
-    labels_out = out_dir / "labels"
-    raw_out.mkdir(parents=True, exist_ok=True)
-    labels_out.mkdir(parents=True, exist_ok=True)
-
-    by_src: dict[str, list[TilePlanItem]] = {}
-    for item in p.items:
-        by_src.setdefault(item.src_stem, []).append(item)
-
-    total = p.total
-    _tick({"phase": "start", "total": total})
+    total = sum(p.total for p in plans.values() if p is not None)
+    _tick({"phase": "tiling", "done": 0, "total": total})
 
     saved = 0
-    for src_stem in sorted(by_src):
-        _check_cancel()
-        src = images[src_stem]
-        with Image.open(src) as im:
-            im.load()
-            for item in by_src[src_stem]:
-                tile = im.crop((item.x, item.y, item.x + item.w, item.y + item.h))
-                _save_tile(tile, raw_out / f"{item.stem}{src.suffix}")
-                # 박스가 없어도 빈 파일을 쓴다 — "여기엔 없다"는 학습 신호다
-                write_label_file(labels_out / f"{item.stem}.txt", item.boxes)
-                saved += 1
-                if saved % 20 == 0 or saved == total:
-                    _check_cancel()
-                    _tick({"phase": "tile", "done": saved, "total": total})
+    counts: dict[str, dict] = {}
+    for split in TRAIN_SPLITS:
+        p = plans[split]
+        counts[split] = {
+            "positive": p.positive if p else 0,
+            "negative": p.negative_kept if p else 0,
+            "total": p.total if p else 0,
+        }
+        if p is None:
+            continue
+        img_out = out_dir / "images" / split
+        lbl_out = out_dir / "labels" / split
+        img_out.mkdir(parents=True, exist_ok=True)
+        lbl_out.mkdir(parents=True, exist_ok=True)
 
-    return {
-        "images": p.images,
-        "tiles": total,
-        "positive": p.positive,
-        "negative": p.negative_kept,
-        "saved": saved,
-    }
+        by_src: dict[str, list[TilePlanItem]] = {}
+        for item in p.items:
+            by_src.setdefault(item.src_stem, []).append(item)
+
+        # 같은 원본을 여러 타일이 쓰므로 원본은 한 번만 연다
+        for src_stem in sorted(by_src):
+            _check_cancel()
+            src = images[src_stem]
+            with Image.open(src) as im:
+                im.load()
+                for item in by_src[src_stem]:
+                    tile = im.crop((item.x, item.y, item.x + item.w, item.y + item.h))
+                    _save_tile(tile, img_out / f"{item.stem}{src.suffix}")
+                    # 박스가 없어도 빈 파일을 쓴다 — "여기엔 없다"는 학습 신호다
+                    write_label_file(lbl_out / f"{item.stem}.txt", item.boxes)
+                    saved += 1
+                    if saved % 20 == 0 or saved == total:
+                        _check_cancel()
+                        _tick({"phase": "tiling", "done": saved, "total": total})
+
+    # val 이 비면 ultralytics 가 학습을 못 돈다 — train 을 가리켜 두면 최소한 돈다
+    write_data_yaml(
+        out_dir / "data.yaml",
+        _class_names(dataset_dir),
+        train="images/train",
+        val="images/val" if counts["val"]["total"] else "images/train",
+    )
+    return {**counts, "saved": saved}
