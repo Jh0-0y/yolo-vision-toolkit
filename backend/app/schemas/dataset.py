@@ -95,3 +95,44 @@ class AutoLabelIn(BaseModel):
     imgsz: int = 1280
     only_unlabeled: bool = False
     params: dict[str, Any] = {}
+
+
+class TileParamsIn(BaseModel):
+    """타일링 노브. `negative_ratio` 는 **포지티브 대비 비율**이다 (0.1 = 10%)."""
+
+    tile_size: int = 640
+    stride: int = 480
+    min_visibility: float = 0.6
+    negative_ratio: float = 0.1
+    keep_all_negatives: bool = False
+    seed: int = 0
+
+
+class TileIn(TileParamsIn):
+    name: str = ""  # 비우면 "{원본 이름} (tiled {tile_size})"
+
+
+class TileSizeOut(BaseModel):
+    w: int
+    h: int
+    images: int
+    cols: int
+    rows: int
+
+
+class TileEstimateOut(BaseModel):
+    images: int = 0
+    tiles: int = 0  # 네거티브를 걸러내기 전, 격자가 내는 전부
+    positive: int = 0
+    negative: int = 0  # 후보 (샘플링 전)
+    negative_kept: int = 0
+    total: int = 0  # 실제로 만들어질 장수
+    sizes: list[TileSizeOut] = []
+    undersized: int = 0  # 타일보다 작아 한 장으로 나오는 이미지 수
+
+
+class TileOut(BaseModel):
+    dataset_id: str  # 파생 데이터셋
+    job_id: str  # == dataset_id
+    name: str
+    status: str
