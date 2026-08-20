@@ -246,7 +246,8 @@ export default function TrainPage() {
               </Text>
             )}
 
-            <Stack gap="sm">
+            {/* 학습 설정 입력줄과 붙어 보이지 않게 띄운다 — 전처리는 별개 결정이다 */}
+            <Stack gap="sm" mt="md">
               <Switch
                 label="Tile into patches before training"
                 description="Cuts each frame into overlapping tiles so small objects survive downscaling. The test split is never tiled."
@@ -339,9 +340,13 @@ export default function TrainPage() {
                     <Checkbox
                       label="Keep every negative tile"
                       checked={tiling.keep_all_negatives}
-                      onChange={(e) =>
-                        setTiling((t) => ({ ...t, keep_all_negatives: e.currentTarget.checked }))
-                      }
+                      onChange={(e) => {
+                        // 값을 **먼저** 꺼낸다 — 업데이터 함수는 다음 렌더 때 불리는데
+                        // 그때 React 는 이미 event.currentTarget 을 null 로 비워 뒀다.
+                        // 안에서 읽으면 렌더 도중 터져 화면이 통째로 빈다.
+                        const keepAll = e.currentTarget.checked
+                        setTiling((t) => ({ ...t, keep_all_negatives: keepAll }))
+                      }}
                       size="xs"
                     />
                   </div>
