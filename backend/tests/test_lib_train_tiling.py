@@ -6,6 +6,7 @@ import pytest
 from PIL import Image
 
 from lib.labels.dataset_tile import (
+    TileCancelled,
     TileDatasetParams,
     TileError,
     materialize_for_training,
@@ -169,3 +170,45 @@ def test_empty_val_split_points_data_yaml_at_train(tmp_path):
 
     text = (out / "data.yaml").read_text()
     assert "images/train" in text
+
+
+def test_progress_events_are_emitted(tmp_path):
+    root, reviewed, splits = _seed(tmp_path, n_train=4, n_val=2)
+    events: list[dict] = []
+
+    materialize_for_training(
+        dataset_dir=root, out_dir=tmp_path / "run", reviewed=reviewed, splits=splits,
+        params=TileDatasetParams(negative_ratio=0.25), emit=events.append,
+    )
+
+    total = events[0]["total"]
+    assert events[0]["phase"] == "tiling"
+    assert total > 0
+    assert events[-1]["done"] == total
+
+
+def test_cancel_sentinel_stops_the_run(tmp_path):
+    """CANCEL 센티널이 보이면 남은 타일을 쓰지 않고 즉시 멈춘다."""
+    root, reviewed, splits = _seed(tmp_path, n_train=20, n_val=0)
+    cancel = tmp_path / "CANCEL"
+    cancel.touch()  # 시작 전부터 켜 둔다 — 그래야 진짜로 일찍 멈추는지 드러난다
+
+    with pytest.raises(TileCancelled):
+        materialize_for_training(
+            dataset_dir=root, out_dir=tmp_path / "run", reviewed=reviewed, splits=splits,
+            params=TileDatasetParams(keep_all_negatives=True), cancel_path=cancel,
+        )
+
+
+def test_empty_tiles_get_an_empty_label_file(tmp_path):
+    """빈 라벨은 "안 그렸다"가 아니라 "여기엔 없다"는 학습 신호다."""
+    root, reviewed, splits = _seed(tmp_path, n_train=1, n_val=0)
+    out = tmp_path / "run"
+
+    materialize_for_training(
+        dataset_dir=root, out_dir=out, reviewed=reviewed, splits=splits,
+        params=TileDatasetParams(keep_all_negatives=True),
+    )
+
+    empties = [p for p in (out / "labels" / "train").iterdir() if p.read_text().strip() == ""]
+    assert empties  # 네거티브 타일도 라벨 파일이 존재하되 내용이 없다
