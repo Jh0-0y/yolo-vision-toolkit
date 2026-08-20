@@ -129,12 +129,12 @@ def test_hard_negative_dataset_is_not_blocked(tmp_path):
     assert p.total == 8
 
 
-def test_ratio_against_zero_positives_yields_nothing_but_does_not_raise(tmp_path):
-    """포지티브가 0이면 "포지티브 대비 %" 는 0장이다. 그래도 예외는 아니다 —
-    무엇을 만들지는 사람이 정하고, 화면이 0장임을 보여준다."""
+def test_ratio_against_zero_positives_keeps_the_hard_negatives(tmp_path):
+    """포지티브가 없으면 "포지티브 대비 %" 는 0이지만, 하드 네거티브는 지시라서 남는다."""
     root = make_dataset(tmp_path / "ds", {"a": (1920, 1080)})
     p = plan(dataset_dir=root, reviewed={"a"}, params=TileDatasetParams(negative_ratio=0.1))
-    assert p.total == 0
+    assert p.hard == 8
+    assert p.total == 8
 
 
 def test_clipped_below_threshold_is_neither_positive_nor_negative(tmp_path):
@@ -313,3 +313,58 @@ def test_cancel_sentinel_stops_the_run(tmp_path):
     with pytest.raises(TileCancelled):
         materialize(dataset_dir=root, out_dir=tmp_path / "tiled", reviewed=set(images),
                     params=TileDatasetParams(keep_all_negatives=True), cancel_path=cancel)
+
+
+def test_hard_negatives_are_kept_whole_regardless_of_ratio(tmp_path):
+    """라벨 없는 프레임의 타일은 일부러 넣은 배경이다 — 샘플러가 지우지 않는다."""
+    boxes = [(0, (960 / 1920, 500 / 1080, 1000 / 1920, 540 / 1080))]
+    images = {f"pos{i:02d}": (1920, 1080) for i in range(4)}
+    images["neg00"] = (1920, 1080)  # 라벨 없음 = 하드 네거티브
+    root = make_dataset(tmp_path / "ds", images, {s: boxes for s in images if s != "neg00"})
+
+    # 목표 0% 인데도 하드 네거티브 8장은 전부 담긴다
+    p = plan(dataset_dir=root, reviewed=set(images), params=TileDatasetParams(negative_ratio=0.0))
+
+    assert p.hard == 8
+    assert p.negative_kept == 8
+    assert all(not i.positive for i in p.items if i.src_stem == "neg00")
+
+
+def test_incidental_negatives_fill_the_remainder(tmp_path):
+    """하드가 목표에 못 미치면 라벨 있는 프레임의 빈 타일로 정확히 채운다."""
+    boxes = [(0, (960 / 1920, 500 / 1080, 1000 / 1920, 540 / 1080))]
+    images = {f"pos{i:02d}": (1920, 1080) for i in range(10)}
+    root = make_dataset(tmp_path / "ds", images, {s: boxes for s in images})
+
+    # 포지티브 40장 · 하드 0 · 목표 50% = 20장 전부 우연한 배경에서
+    p = plan(dataset_dir=root, reviewed=set(images), params=TileDatasetParams(negative_ratio=0.5))
+
+    assert p.hard == 0
+    assert p.negative_kept == 20
+    assert p.total == p.positive + 20
+
+
+def test_hard_negatives_can_overshoot_the_target(tmp_path):
+    """하드만으로 목표를 넘으면 넘긴 채로 간다 — 큐레이션한 데이터를 버리지 않는다."""
+    boxes = [(0, (960 / 1920, 500 / 1080, 1000 / 1920, 540 / 1080))]
+    images = {"pos00": (1920, 1080), "neg00": (1920, 1080), "neg01": (1920, 1080)}
+    root = make_dataset(tmp_path / "ds", images, {"pos00": boxes})
+
+    # 포지티브 4장 · 목표 10% = 0장 │ 하드 16장 → 16장 그대로
+    p = plan(dataset_dir=root, reviewed=set(images), params=TileDatasetParams(negative_ratio=0.1))
+
+    assert p.positive == 4
+    assert p.hard == 16
+    assert p.negative_kept == 16
+
+
+def test_labelled_frame_empty_tiles_are_incidental_not_hard(tmp_path):
+    """박스가 있는 프레임의 빈 구석은 우연한 배경이다 — 하드로 세지 않는다."""
+    boxes = [(0, (960 / 1920, 500 / 1080, 1000 / 1920, 540 / 1080))]
+    root = make_dataset(tmp_path / "ds", {"a": (1920, 1080)}, {"a": boxes})
+
+    p = plan(dataset_dir=root, reviewed={"a"}, params=TileDatasetParams(keep_all_negatives=True))
+
+    assert p.hard == 0
+    assert p.incidental == 4
+    assert p.negative_candidates == 4

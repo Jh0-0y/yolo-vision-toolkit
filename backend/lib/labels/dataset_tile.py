@@ -115,12 +115,17 @@ class SizeGroup:
 class TilePlan:
     items: list[TilePlanItem]  # **남길 것만** — 네거티브 샘플링이 이미 적용됐다
     positive: int
-    negative_candidates: int
+    hard: int          # 라벨 없는 프레임에서 나온 네거티브 후보 (전부 담긴다)
+    incidental: int    # 라벨 있는 프레임의 빈 타일 (목표까지만 담긴다)
     negative_kept: int
     sizes: list[SizeGroup]
     undersized: int
-    images: int
     excluded: int  # 박스와 겹쳤지만 min_visibility 미만이라 통째로 뺀 타일 수
+    images: int
+
+    @property
+    def negative_candidates(self) -> int:
+        return self.hard + self.incidental
 
     @property
     def total(self) -> int:
@@ -217,7 +222,8 @@ def plan(
 
     grid = params.tiling()
     positives: list[TilePlanItem] = []
-    negatives: dict[str, list[TilePlanItem]] = {}
+    hard: dict[str, list[TilePlanItem]] = {}
+    incidental: dict[str, list[TilePlanItem]] = {}
     sizes: dict[tuple[int, int], int] = {}
     undersized = 0
     counted = 0
@@ -255,22 +261,33 @@ def plan(
                 item = TilePlanItem(
                     src_stem=stem, col=col, row=row, x=x, y=y, w=tw, h=th, boxes=kept
                 )
-                negatives.setdefault(stem, []).append(item)
+                # 라벨이 하나도 없는 프레임 = 일부러 넣은 배경(하드 네거티브).
+                # 라벨이 있는 프레임의 빈 구석 = 우연히 생긴 배경.
+                pool = incidental if boxes else hard
+                pool.setdefault(stem, []).append(item)
 
     # **포지티브가 하나도 없어도 막지 않는다.** 오탐이 많이 나는 배경 프레임만
     # 모은 데이터셋(하드 네거티브)은 정당한 입력이고, 그걸 전부 담아 학습에 섞는
     # 것이 바로 하려는 일이다. 다만 "포지티브 대비 %" 는 그때 의미를 잃으므로
     # (0의 10% 는 0) 화면이 슬라이더를 잠그고 '전부 담기'를 권한다.
-    candidates = sum(len(v) for v in negatives.values())
+    n_hard = sum(len(v) for v in hard.values())
+    n_incidental = sum(len(v) for v in incidental.values())
 
-    target = (
-        candidates
-        if params.keep_all_negatives
-        else min(candidates, round(len(positives) * params.negative_ratio))
+    # 하드 네거티브는 **언제나 전부** 담는다 — 사용자가 넣은 지시이지 후보가 아니다.
+    kept_hard = [item for stem in sorted(hard) for item in hard[stem]]
+
+    if params.keep_all_negatives:
+        kept_incidental = [
+            item for stem in sorted(incidental) for item in incidental[stem]
+        ]
+    else:
+        target = round(len(positives) * params.negative_ratio)
+        remaining = max(0, target - len(kept_hard))
+        kept_incidental = _sample_negatives(incidental, remaining, params.seed)
+
+    items = sorted(
+        [*positives, *kept_hard, *kept_incidental], key=lambda it: it.stem
     )
-    kept_negatives = _sample_negatives(negatives, target, params.seed)
-
-    items = sorted([*positives, *kept_negatives], key=lambda it: it.stem)
     size_groups = [
         SizeGroup(
             w=w,
@@ -284,12 +301,13 @@ def plan(
     return TilePlan(
         items=items,
         positive=len(positives),
-        negative_candidates=candidates,
-        negative_kept=len(kept_negatives),
+        hard=n_hard,
+        incidental=n_incidental,
+        negative_kept=len(kept_hard) + len(kept_incidental),
         sizes=size_groups,
         undersized=undersized,
-        images=counted,
         excluded=excluded,
+        images=counted,
     )
 
 
@@ -303,6 +321,8 @@ def estimate(
         "tiles": p.positive + p.negative_candidates,
         "positive": p.positive,
         "negative": p.negative_candidates,
+        "hard": p.hard,
+        "incidental": p.incidental,
         "negative_kept": p.negative_kept,
         "total": p.total,
         "sizes": [
