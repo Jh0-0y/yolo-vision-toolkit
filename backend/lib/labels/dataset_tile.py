@@ -26,11 +26,12 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from PIL import Image
 
 from lib.formats import IMAGE_EXTS
-from lib.labels.io import read_label_file
+from lib.labels.io import read_label_file, write_label_file
 from lib.media.tiling import (
     TilingParams,
     clip_boxes_to_tile,
@@ -40,6 +41,7 @@ from lib.media.tiling import (
 )
 
 Box = tuple[int, tuple[float, float, float, float]]
+Emit = Callable[[dict], None]
 
 
 class TileError(Exception):
@@ -276,4 +278,77 @@ def estimate(
             for s in p.sizes
         ],
         "undersized": p.undersized,
+    }
+
+
+def _save_tile(im: Image.Image, dst: Path) -> None:
+    """원본 확장자를 따라 저장한다.
+
+    타일은 잘라낸 새 픽셀이라 하드링크가 불가능하다 — 어차피 다시 인코딩하므로
+    JPEG 는 품질을 높게 잡는다. 학습 데이터에 압축 잡음을 얹을 이유가 없다.
+    """
+    if dst.suffix.lower() in (".jpg", ".jpeg"):
+        im.convert("RGB").save(dst, "JPEG", quality=95, subsampling=0)
+    else:
+        im.save(dst)
+
+
+def materialize(
+    *,
+    dataset_dir: Path,
+    out_dir: Path,
+    reviewed: set[str],
+    params: TileDatasetParams,
+    emit: Emit | None = None,
+    cancel_path: Path | None = None,
+) -> dict:
+    """`plan` 이 정한 타일을 `out_dir/raw` 와 `out_dir/labels` 에 쓴다.
+
+    같은 원본을 여러 타일이 쓰므로 원본은 **한 번만 연다.**
+    """
+
+    def _tick(ev: dict) -> None:
+        if emit is not None:
+            emit(ev)
+
+    def _check_cancel() -> None:
+        if cancel_path is not None and cancel_path.exists():
+            raise TileCancelled()
+
+    p = plan(dataset_dir=dataset_dir, reviewed=reviewed, params=params)
+    images = _images_by_stem(dataset_dir / "raw")
+    raw_out = out_dir / "raw"
+    labels_out = out_dir / "labels"
+    raw_out.mkdir(parents=True, exist_ok=True)
+    labels_out.mkdir(parents=True, exist_ok=True)
+
+    by_src: dict[str, list[TilePlanItem]] = {}
+    for item in p.items:
+        by_src.setdefault(item.src_stem, []).append(item)
+
+    total = p.total
+    _tick({"phase": "start", "total": total})
+
+    saved = 0
+    for src_stem in sorted(by_src):
+        _check_cancel()
+        src = images[src_stem]
+        with Image.open(src) as im:
+            im.load()
+            for item in by_src[src_stem]:
+                tile = im.crop((item.x, item.y, item.x + item.w, item.y + item.h))
+                _save_tile(tile, raw_out / f"{item.stem}{src.suffix}")
+                # 박스가 없어도 빈 파일을 쓴다 — "여기엔 없다"는 학습 신호다
+                write_label_file(labels_out / f"{item.stem}.txt", item.boxes)
+                saved += 1
+                if saved % 20 == 0 or saved == total:
+                    _check_cancel()
+                    _tick({"phase": "tile", "done": saved, "total": total})
+
+    return {
+        "images": p.images,
+        "tiles": total,
+        "positive": p.positive,
+        "negative": p.negative_kept,
+        "saved": saved,
     }

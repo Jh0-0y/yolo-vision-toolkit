@@ -6,12 +6,14 @@ import pytest
 from PIL import Image
 
 from lib.labels.dataset_tile import (
+    TileCancelled,
     TileDatasetParams,
     TileError,
     estimate,
+    materialize,
     plan,
 )
-from lib.labels.io import write_label_file
+from lib.labels.io import read_label_file, write_label_file
 
 P = TileDatasetParams()  # 640 / 480 / 0.6 / 10%
 
@@ -170,3 +172,90 @@ def test_estimate_matches_plan(tmp_path):
     assert e["tiles"] == 8
     assert e["images"] == 1
     assert e["sizes"][0] == {"w": 1920, "h": 1080, "images": 1, "cols": 4, "rows": 2}
+
+
+def test_materialize_writes_exactly_what_estimate_promised(tmp_path):
+    """예상 장수와 실제 파일 수가 같다 — 이게 어긋나면 미리보기가 거짓말이다."""
+    boxes = [(0, (960 / 1920, 500 / 1080, 1000 / 1920, 540 / 1080))]
+    images = {f"img{i:03d}": (1920, 1080) for i in range(4)}
+    root = make_dataset(tmp_path / "ds", images, {s: boxes for s in images})
+    out = tmp_path / "tiled"
+    params = TileDatasetParams(negative_ratio=0.5)
+
+    e = estimate(dataset_dir=root, reviewed=set(images), params=params)
+    r = materialize(dataset_dir=root, out_dir=out, reviewed=set(images), params=params)
+
+    written = sorted(p.name for p in (out / "raw").iterdir())
+    assert len(written) == e["total"]
+    assert r["saved"] == e["total"]
+    assert len(list((out / "labels").iterdir())) == e["total"]
+
+
+def test_tile_images_are_tile_sized(tmp_path):
+    boxes = [(0, (0.0, 0.0, 1.0, 1.0))]
+    root = make_dataset(tmp_path / "ds", {"a": (1920, 1080)}, {"a": boxes})
+    out = tmp_path / "tiled"
+    materialize(dataset_dir=root, out_dir=out, reviewed={"a"},
+                params=TileDatasetParams(keep_all_negatives=True))
+    for p in (out / "raw").iterdir():
+        with Image.open(p) as im:
+            assert im.size == (640, 640)
+
+
+def test_tile_names_carry_grid_position(tmp_path):
+    boxes = [(0, (0.0, 0.0, 1.0, 1.0))]
+    root = make_dataset(tmp_path / "ds", {"game_00001": (1920, 1080)}, {"game_00001": boxes})
+    out = tmp_path / "tiled"
+    materialize(dataset_dir=root, out_dir=out, reviewed={"game_00001"},
+                params=TileDatasetParams(keep_all_negatives=True))
+    names = {p.stem for p in (out / "raw").iterdir()}
+    assert "game_00001_r0c0" in names
+    assert "game_00001_r1c3" in names
+
+
+def test_empty_tiles_get_an_empty_label_file(tmp_path):
+    """빈 라벨은 "안 그렸다"가 아니라 "여기엔 없다"는 학습 신호다."""
+    boxes = [(0, (960 / 1920, 500 / 1080, 1000 / 1920, 540 / 1080))]
+    root = make_dataset(tmp_path / "ds", {"a": (1920, 1080)}, {"a": boxes})
+    out = tmp_path / "tiled"
+    materialize(dataset_dir=root, out_dir=out, reviewed={"a"},
+                params=TileDatasetParams(keep_all_negatives=True))
+    empties = [p for p in (out / "labels").iterdir() if p.read_text().strip() == ""]
+    assert empties  # 라벨 파일이 존재하되 내용이 없다
+
+
+def test_clipped_boxes_are_renormalized_to_the_tile(tmp_path):
+    """타일 (0,0) 안에 온전히 든 박스는 타일 기준 좌표로 다시 매겨진다."""
+    # 원본 320~640px, 320~640px → 타일 0 (0~640) 안에서 0.5~1.0
+    boxes = [(0, (320 / 1920, 320 / 1080, 640 / 1920, 640 / 1080))]
+    root = make_dataset(tmp_path / "ds", {"a": (1920, 1080)}, {"a": boxes})
+    out = tmp_path / "tiled"
+    materialize(dataset_dir=root, out_dir=out, reviewed={"a"},
+                params=TileDatasetParams(keep_all_negatives=True))
+    got = read_label_file(out / "labels" / "a_r0c0.txt")
+    assert len(got) == 1
+    _cls, (x1, y1, x2, y2) = got[0]
+    assert (x1, y1, x2, y2) == pytest.approx((0.5, 0.5, 1.0, 1.0), abs=1e-3)
+
+
+def test_progress_events_are_emitted(tmp_path):
+    boxes = [(0, (0.0, 0.0, 1.0, 1.0))]
+    root = make_dataset(tmp_path / "ds", {"a": (1920, 1080)}, {"a": boxes})
+    events: list[dict] = []
+    materialize(dataset_dir=root, out_dir=tmp_path / "tiled", reviewed={"a"},
+                params=TileDatasetParams(keep_all_negatives=True), emit=events.append)
+    assert events[0]["phase"] == "start"
+    assert events[0]["total"] == 8
+    assert events[-1]["phase"] == "tile"
+    assert events[-1]["done"] == 8
+
+
+def test_cancel_sentinel_stops_the_run(tmp_path):
+    boxes = [(0, (0.0, 0.0, 1.0, 1.0))]
+    images = {f"img{i:03d}": (1920, 1080) for i in range(20)}
+    root = make_dataset(tmp_path / "ds", images, {s: boxes for s in images})
+    cancel = tmp_path / "CANCEL"
+    cancel.touch()  # 시작 전부터 켜 둔다 — 첫 확인 지점에서 멈춰야 한다
+    with pytest.raises(TileCancelled):
+        materialize(dataset_dir=root, out_dir=tmp_path / "tiled", reviewed=set(images),
+                    params=TileDatasetParams(keep_all_negatives=True), cancel_path=cancel)
