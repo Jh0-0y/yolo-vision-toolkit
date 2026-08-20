@@ -20,6 +20,39 @@ class TrainParams(BaseModel):
     mixup: float | None = Field(default=None, ge=0, le=1)
 
 
+class TilingIn(BaseModel):
+    """학습 전처리 타일링. 끄면(`enabled=False`) 지금까지와 완전히 같다."""
+
+    enabled: bool = False
+    tile_size: int = Field(default=640, ge=64, le=4096)
+    stride: int = Field(default=480, ge=32, le=4096)
+    min_visibility: float = Field(default=0.6, ge=0, le=1)
+    # 포지티브 타일 수 대비 비율 (0.1 = 10%). 분할마다 따로 적용된다.
+    negative_ratio: float = Field(default=0.1, ge=0)
+    keep_all_negatives: bool = False
+    seed: int = 0
+
+
+class SplitPreviewOut(BaseModel):
+    split: str
+    positive: int = 0
+    hard: int = 0
+    incidental: int = 0
+    negative_kept: int = 0
+    excluded: int = 0
+    total: int = 0
+    overshoot: bool = False
+
+
+class TilingPreviewOut(BaseModel):
+    splits: list[SplitPreviewOut] = []
+
+
+class TilingPreviewIn(BaseModel):
+    dataset: str  # "dataset:{project_id}:{dataset_id}"
+    tiling: TilingIn
+
+
 class RunCreate(BaseModel):
     name: str | None = None
     project_id: str | None = None
@@ -28,6 +61,7 @@ class RunCreate(BaseModel):
     base_model_id: str
     device: str | None = None
     params: TrainParams = Field(default_factory=TrainParams)
+    tiling: TilingIn = Field(default_factory=TilingIn)
 
 
 class RunOut(BaseModel):

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -53,6 +54,31 @@ def main(run_dir_arg: str) -> int:
     # loading torch/ultralytics + model weights takes a few seconds — tell the UI
     # we're in the prep stage so it doesn't look frozen before epoch 1.
     jobs.emit(progress_path, {"phase": "preparing"})
+
+    # 타일링을 켰으면 여기서 학습 트리를 만든다. 수천 장 인코딩이라 HTTP 요청
+    # 안에서 하면 "학습 시작"이 몇 분 매달린다 — 런의 첫 국면으로 옮겼다.
+    tiling_cfg = cfg.get("tiling")
+    if tiling_cfg:
+        from app.services import datasets
+        from lib.labels.dataset_tile import TileDatasetParams, materialize_for_training
+
+        src = Path(cfg["dataset_dir"])
+        pid, dsid = src.parent.parent.name, src.name
+        materialize_for_training(
+            dataset_dir=src,
+            out_dir=Path(dataset_path),
+            reviewed=datasets.read_reviewed(pid, dsid) & datasets.image_stems(pid, dsid),
+            splits=datasets.read_splits(pid, dsid),
+            params=TileDatasetParams(
+                tile_size=tiling_cfg["tile_size"],
+                stride=tiling_cfg["stride"],
+                min_visibility=tiling_cfg["min_visibility"],
+                negative_ratio=tiling_cfg["negative_ratio"],
+                keep_all_negatives=tiling_cfg["keep_all_negatives"],
+                seed=tiling_cfg["seed"],
+            ),
+            emit=lambda ev: jobs.emit(progress_path, ev),
+        )
 
     from ultralytics import YOLO
 
@@ -128,6 +154,12 @@ def main(run_dir_arg: str) -> int:
     except Exception as e:
         jobs.emit(progress_path, {"phase": "error", "msg": str(e)})
         return 1
+    finally:
+        # 타일은 진짜 바이트다. seed 까지 고정된 결정론적 산물이고 설정이
+        # config.json 에 남으므로 언제든 같은 것을 다시 만들 수 있다 —
+        # 런마다 한 벌씩 쌓아 둘 이유가 없다. 하드링크로 펼친 것은 공짜라 남긴다.
+        if tiling_cfg:
+            shutil.rmtree(dataset_path, ignore_errors=True)
 
     # per-class metrics (P/R/AP) from the final validation — not in results.csv
     try:

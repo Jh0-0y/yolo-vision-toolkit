@@ -21,11 +21,20 @@ from sse_starlette.sse import EventSourceResponse
 from app.core.config import settings
 from app.db import get_session, session_scope
 from app.models import ModelEntry, Project, TrainRun, iso_utc
-from app.schemas.training import RegisterIn, RunCreate, RunOut
+from app.schemas.training import (
+    RegisterIn,
+    RunCreate,
+    RunOut,
+    SplitPreviewOut,
+    TilingIn,
+    TilingPreviewIn,
+    TilingPreviewOut,
+)
 from app.services import datasets
 from app.services.train_manager import train_manager
 from infra import jobs
 from lib.labels import dataset_export
+from lib.labels.dataset_tile import TileDatasetParams, TileError, plan_for_training
 from lib.train import results as train_results
 
 router = APIRouter(prefix="/training", tags=["training"])
@@ -83,6 +92,39 @@ def _parse_dataset_token(token: str) -> tuple[str, str]:
     return pid, dsid
 
 
+def _tiling_params(body: TilingIn) -> TileDatasetParams:
+    params = TileDatasetParams(
+        tile_size=body.tile_size,
+        stride=body.stride,
+        min_visibility=body.min_visibility,
+        negative_ratio=body.negative_ratio,
+        keep_all_negatives=body.keep_all_negatives,
+        seed=body.seed,
+    )
+    errors = params.validate()
+    if errors:
+        raise HTTPException(422, f"Invalid tiling params: {'; '.join(errors)}")
+    return params
+
+
+@router.post("/tiling/preview", response_model=TilingPreviewOut)
+def preview_tiling(body: TilingPreviewIn):
+    """만들기 전에 분할별로 몇 장이 나오는지 센다. 픽셀을 디코딩하지 않아 빠르다."""
+    project_id, dataset_id = _parse_dataset_token(body.dataset)
+    params = _tiling_params(body.tiling)
+    try:
+        plans = plan_for_training(
+            dataset_dir=datasets.dataset_dir(project_id, dataset_id),
+            reviewed=datasets.read_reviewed(project_id, dataset_id)
+            & datasets.image_stems(project_id, dataset_id),
+            splits=datasets.read_splits(project_id, dataset_id),
+            params=params,
+        )
+    except TileError as e:
+        raise HTTPException(422, str(e)) from None
+    return TilingPreviewOut(splits=[SplitPreviewOut(**vars(p)) for p in plans])
+
+
 @router.post("/runs", response_model=RunOut, status_code=201)
 def create_run(req: RunCreate, session: Session = Depends(get_session)):
     project_id, dataset_id = _parse_dataset_token(req.dataset)
@@ -114,19 +156,40 @@ def create_run(req: RunCreate, session: Session = Depends(get_session)):
     # 복제하지 않으므로 사실상 공짜고, 런이 끝난 뒤에도 그때 무엇으로 학습했는지가
     # 그대로 남는다(데이터셋을 나중에 고쳐도 이 런의 기록은 안 흔들린다).
     dataset_dir = run_dir / "dataset"
-    try:
-        dataset_export.materialize(
-            dataset_dir=datasets.dataset_dir(project_id, dataset_id),
-            out_dir=dataset_dir,
-            kind="train",
-            reviewed=datasets.read_reviewed(project_id, dataset_id)
-            & datasets.image_stems(project_id, dataset_id),
-            splits=datasets.read_splits(project_id, dataset_id),
-        )
-    except dataset_export.ExportError as e:
-        session.delete(run)
-        session.commit()
-        raise HTTPException(422, str(e)) from None
+    tiling = _tiling_params(req.tiling) if req.tiling.enabled else None
+    if tiling is not None:
+        # 무거운 쓰기는 워커가 한다. 여기서는 **픽셀을 읽지 않는** 계획만 돌려
+        # "나올 게 없다"를 즉시 422 로 돌려준다.
+        try:
+            plans = plan_for_training(
+                dataset_dir=datasets.dataset_dir(project_id, dataset_id),
+                reviewed=datasets.read_reviewed(project_id, dataset_id)
+                & datasets.image_stems(project_id, dataset_id),
+                splits=datasets.read_splits(project_id, dataset_id),
+                params=tiling,
+            )
+        except TileError as e:
+            session.delete(run)
+            session.commit()
+            raise HTTPException(422, str(e)) from None
+        if not any(p.split == "train" and p.total for p in plans):
+            session.delete(run)
+            session.commit()
+            raise HTTPException(422, "Nothing to train on — assign some reviewed images to train")
+    else:
+        try:
+            dataset_export.materialize(
+                dataset_dir=datasets.dataset_dir(project_id, dataset_id),
+                out_dir=dataset_dir,
+                kind="train",
+                reviewed=datasets.read_reviewed(project_id, dataset_id)
+                & datasets.image_stems(project_id, dataset_id),
+                splits=datasets.read_splits(project_id, dataset_id),
+            )
+        except dataset_export.ExportError as e:
+            session.delete(run)
+            session.commit()
+            raise HTTPException(422, str(e)) from None
     run.dataset_path = str(dataset_dir)
     session.add(run)
     session.commit()
@@ -139,6 +202,8 @@ def create_run(req: RunCreate, session: Session = Depends(get_session)):
                 "base_model_path": str(base_pt),
                 "device": req.device or settings.device,
                 "params": req.params.model_dump(exclude_none=True),
+                "dataset_dir": str(datasets.dataset_dir(project_id, dataset_id)),
+                "tiling": req.tiling.model_dump() if req.tiling.enabled else None,
             }
         )
     )
