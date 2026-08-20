@@ -147,7 +147,7 @@ export default function TilingCard({ projectId, datasetId, dataset, onStarted }:
 
         <NumberInput
           label="Min visibility (0–1)"
-          description="이보다 덜 보이는 박스는 버린다 — 반쪽 박스로 학습을 오염시키지 않는다"
+          description="Boxes less visible than this are dropped — half-boxes don't poison training"
           value={minVisibility}
           onChange={(v) => setMinVisibility(v === '' || v == null ? DEFAULTS.minVisibility : Number(v))}
           min={0}
@@ -231,8 +231,14 @@ export default function TilingCard({ projectId, datasetId, dataset, onStarted }:
 
         <Button
           loading={create.isPending}
-          // 서버가 막지 않으므로 여기서 "0장짜리 데이터셋" 만 걸러낸다
-          disabled={overlap <= 0 || dataset.reviewed === 0 || (est !== null && totalOut === 0)}
+          // 서버가 막지 않으므로 여기서 "0장짜리 데이터셋" 만 걸러낸다.
+          // 마운트 때 돈 첫 estimate 가 아직 안 끝났으면 급한 클릭을 막는다.
+          disabled={
+            overlap <= 0 ||
+            dataset.reviewed === 0 ||
+            estimateRun.isPending ||
+            (est !== null && totalOut === 0)
+          }
           onClick={() => create.mutate()}
         >
           Create tiled dataset
