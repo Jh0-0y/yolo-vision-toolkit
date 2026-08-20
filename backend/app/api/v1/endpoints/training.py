@@ -136,6 +136,7 @@ def create_run(req: RunCreate, session: Session = Depends(get_session)):
         raise HTTPException(422, "Base model file missing")
     if train_manager.has_active():
         raise HTTPException(409, "A training run is already in progress. Try again after it finishes.")
+    tiling = _tiling_params(req.tiling) if req.tiling.enabled else None
 
     ds_name = (datasets.read_meta(project_id, dataset_id) or {}).get("name", dataset_id)
     run = TrainRun(
@@ -156,7 +157,6 @@ def create_run(req: RunCreate, session: Session = Depends(get_session)):
     # 복제하지 않으므로 사실상 공짜고, 런이 끝난 뒤에도 그때 무엇으로 학습했는지가
     # 그대로 남는다(데이터셋을 나중에 고쳐도 이 런의 기록은 안 흔들린다).
     dataset_dir = run_dir / "dataset"
-    tiling = _tiling_params(req.tiling) if req.tiling.enabled else None
     if tiling is not None:
         # 무거운 쓰기는 워커가 한다. 여기서는 **픽셀을 읽지 않는** 계획만 돌려
         # "나올 게 없다"를 즉시 422 로 돌려준다.
