@@ -35,6 +35,7 @@ import {
   putDatasetLabels,
   setImageReviewed,
   type DatasetImageQuery,
+  type DatasetLabels,
 } from '../api/client'
 import BBoxCanvas from '../components/editor/BBoxCanvas'
 import { classColor, useEditorStore, type EditorTool } from '../stores/editorStore'
@@ -55,7 +56,6 @@ export default function LabelEditorPage() {
 
   const canvasBox = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 800, h: 560 })
-  const [reviewed, setReviewed] = useState(false)
   const [addClassOpen, setAddClassOpen] = useState(false)
   const [newClassName, setNewClassName] = useState('')
 
@@ -95,13 +95,16 @@ export default function LabelEditorPage() {
     queryFn: () => getDatasetLabels(projectId, datasetId, stem),
   })
 
+  // 검수 여부는 **캐시가 진실이다.** 따로 useState 로 복사해 두면 이전·다음으로
+  // 오갈 때 캐시에 남은 옛 값이 스위치를 되돌려 놓는다.
+  const reviewed = detail.data?.reviewed ?? false
+
   // load boxes into the shared editor store when the image arrives
   const loadedFor = useRef<string | null>(null)
   useEffect(() => {
     const d = detail.data
     if (d && loadedFor.current !== d.stem) {
       loadedFor.current = d.stem
-      setReviewed(d.reviewed)
       store.load(d.boxes.map((b, i) => ({ ...b, id: b.id ?? `b${i}` })) as never)
     }
   }, [detail.data]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -174,8 +177,12 @@ export default function LabelEditorPage() {
       return setImageReviewed(projectId, datasetId, stem, flag)
     },
     onSuccess: (res) => {
+      // 이 이미지의 상세 캐시를 바로 고쳐 둔다 — 다시 돌아왔을 때 옛 값을 읽지 않도록.
+      queryClient.setQueryData<DatasetLabels>(
+        ['labels', projectId, datasetId, stem],
+        (old) => (old ? { ...old, reviewed: res.reviewed } : old),
+      )
       // 검수를 켜면 이 이미지는 검수완료 탭으로 넘어간다 — 수치도 함께 다시 읽는다
-      setReviewed(res.reviewed)
       queryClient.invalidateQueries({ queryKey: ['dataset-images', projectId, datasetId] })
       queryClient.invalidateQueries({ queryKey: ['dataset', projectId, datasetId] })
       queryClient.invalidateQueries({ queryKey: ['datasets', projectId] })
