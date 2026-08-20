@@ -21,4 +21,6 @@ dist/
 .idea/
 .vscode/
 .DS_Store
-.claude
+.claude/*
+!.claude/launch.json
+superpowers
