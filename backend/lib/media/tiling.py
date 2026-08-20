@@ -78,14 +78,21 @@ def clip_boxes_to_tile(
     tx: int,
     ty: int,
     params: TilingParams,
+    tile_w: int | None = None,
+    tile_h: int | None = None,
 ) -> list[tuple[int, tuple[float, float, float, float]]]:
     """타일 (tx, ty)에 대한 라벨 자동 변환.
 
     boxes: 원본 이미지 정규화 xyxy [(cls, (x1,y1,x2,y2)), ...].
     각 박스의 타일 내 가시 비율(교차면적/원면적)을 계산해
     min_visibility 이상이면 타일 경계로 클립 후 타일 좌표로 재정규화, 미만이면 버린다.
+
+    `tile_w`·`tile_h` 는 **실제** 타일 크기다. 이미지가 타일보다 작으면
+    `tile_offsets` 가 `[0]` 하나를 돌려주고 그 타일은 이미지 크기 그대로라,
+    `params.tile_size` 로 나누면 좌표가 찌그러진다. 생략하면 `params.tile_size`.
     """
-    tile = params.tile_size
+    tw = tile_w if tile_w is not None else params.tile_size
+    th = tile_h if tile_h is not None else params.tile_size
     out: list[tuple[int, tuple[float, float, float, float]]] = []
     for cls, (x1n, y1n, x2n, y2n) in boxes:
         # 픽셀 좌표로
@@ -95,7 +102,7 @@ def clip_boxes_to_tile(
             continue
         # 타일과 교차
         ix1, iy1 = max(x1, tx), max(y1, ty)
-        ix2, iy2 = min(x2, tx + tile), min(y2, ty + tile)
+        ix2, iy2 = min(x2, tx + tw), min(y2, ty + th)
         inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
         if inter / area < params.min_visibility:
             continue  # 너무 잘림 — 반쪽 박스로 학습 오염 방지
@@ -104,10 +111,10 @@ def clip_boxes_to_tile(
             (
                 cls,
                 (
-                    (ix1 - tx) / tile,
-                    (iy1 - ty) / tile,
-                    (ix2 - tx) / tile,
-                    (iy2 - ty) / tile,
+                    (ix1 - tx) / tw,
+                    (iy1 - ty) / th,
+                    (ix2 - tx) / tw,
+                    (iy2 - ty) / th,
                 ),
             )
         )

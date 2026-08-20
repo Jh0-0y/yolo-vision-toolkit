@@ -4,6 +4,8 @@
 라벨 자동 처리(min_visibility 클립/삭제, 기본 0.6).
 """
 
+import pytest
+
 from lib.media.tiling import (
     TilingParams,
     clip_boxes_to_tile,
@@ -127,3 +129,28 @@ def test_merge_tile_boxes_keeps_distinct_boxes():
     a = (0.0, 0.0, 40.0, 40.0, 0.9)
     b = (100.0, 100.0, 140.0, 140.0, 0.3)
     assert len(merge_tile_boxes([a, b], iou_threshold=0.5)) == 2
+
+
+def test_clip_uses_actual_tile_size_when_image_is_smaller():
+    """이미지가 타일보다 작으면 실제 타일 크기로 재정규화한다.
+
+    400×300 이미지의 가운데 박스(200~280px)는 400 기준 0.5~0.7 이다.
+    640 으로 나누면 0.3125~0.4375 로 찌그러진다.
+    """
+    boxes = [(0, (0.5, 0.5, 0.7, 0.7))]  # 400×300 기준 200~280, 150~210
+    out = clip_boxes_to_tile(boxes, 400, 300, 0, 0, P, tile_w=400, tile_h=300)
+    assert len(out) == 1
+    _cls, (x1, y1, x2, y2) = out[0]
+    assert x1 == pytest.approx(0.5)
+    assert y1 == pytest.approx(0.5)
+    assert x2 == pytest.approx(0.7)
+    assert y2 == pytest.approx(0.7)
+
+
+def test_clip_defaults_to_params_tile_size():
+    """인자를 안 주면 예전 그대로 params.tile_size 로 나눈다."""
+    boxes = [(0, (0.0, 0.0, 640 / 1920, 640 / 1080))]  # 타일 0 을 꽉 채우는 박스
+    out = clip_boxes_to_tile(boxes, 1920, 1080, 0, 0, P)
+    _cls, (x1, y1, x2, y2) = out[0]
+    assert (x1, y1) == pytest.approx((0.0, 0.0))
+    assert (x2, y2) == pytest.approx((1.0, 1.0))
