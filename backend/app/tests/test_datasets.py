@@ -153,3 +153,39 @@ def test_list_is_newest_first(data_dir):
 @pytest.mark.parametrize("bad", ["", ".", "../secrets", "a/b", "a\\b"])
 def test_invalid_ids_are_rejected(bad):
     assert datasets.valid_id(bad) is False
+
+
+def test_split_stratifies_by_whether_a_frame_has_labels(data_dir):
+    """라벨 없는 프레임도 train/val/test 에 비례해 흩어진다 — 한쪽에 몰리지 않는다.
+
+    안 그러면 val 에 배경이 하나도 없어, 배경 오검출을 학습 내내 못 잰다.
+    """
+    from app.api.v1.endpoints.dataset_export import stratified_assign
+    from lib.labels.io import write_label_file
+
+    ds = datasets.create("p1", "mixed")
+    datasets.ensure_dirs("p1", ds)
+    labeled, unlabeled = [], []
+    for i in range(90):
+        stem = f"pos{i:03d}"
+        _images("p1", ds, stem)
+        write_label_file(datasets.labels_dir("p1", ds) / f"{stem}.txt", [(0, (0.4, 0.4, 0.6, 0.6))])
+        labeled.append(stem)
+    for i in range(10):
+        stem = f"neg{i:03d}"
+        _images("p1", ds, stem)
+        unlabeled.append(stem)
+    datasets.write_reviewed("p1", ds, set(labeled) | set(unlabeled))
+
+    assigned = stratified_assign(
+        "p1", ds, sorted(labeled + unlabeled), {}, train=8, val=1, test=1, seed=0,
+        reassign_all=False,
+    )
+
+    # 라벨 없는 10장이 세 분할에 흩어진다 (한 곳에 10장이 몰리지 않는다)
+    per_split = {"train": 0, "val": 0, "test": 0}
+    for stem in unlabeled:
+        per_split[assigned[stem]] += 1
+    assert per_split["train"] == 8
+    assert per_split["val"] == 1
+    assert per_split["test"] == 1

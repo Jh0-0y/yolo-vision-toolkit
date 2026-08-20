@@ -25,8 +25,40 @@ from app.schemas.dataset import DatasetOut, ExportIn, ExportOut, SplitIn
 from app.services import datasets
 from lib.labels import split as split_lib
 from lib.labels.dataset_export import ExportError, build
+from lib.labels.io import read_label_file
 
 router = APIRouter(prefix="/projects/{project_id}/datasets/{dataset_id}", tags=["datasets"])
+
+
+def _has_boxes(labels_dir: Path, stem: str) -> bool:
+    """라벨 파일이 없거나 박스가 0개면 '라벨 없는 프레임'이다."""
+    path = labels_dir / f"{stem}.txt"
+    return path.exists() and bool(read_label_file(path))
+
+
+def stratified_assign(
+    project_id: str,
+    dataset_id: str,
+    stems: list[str],
+    current: dict[str, str],
+    **kwargs,
+) -> dict[str, str]:
+    """라벨 유무로 두 무더기를 나눠 **각각** 비율대로 배정한 뒤 합친다.
+
+    통째로 섞으면 라벨 없는 프레임이 한 분할에 몰릴 수 있고, 그러면 그 분할은
+    "배경을 오검출하지 않는가"에 대해 아무것도 말하지 못한다. 층화가 보장하는 것은
+    **측정이 성립한다**는 것이지 어떤 목표 비율이 아니다.
+
+    클래스 단위 층화는 하지 않는다 — 한 이미지에 여러 클래스가 있어 그 이미지가
+    어느 층인지 정의되지 않는다.
+    """
+    labels_dir = datasets.labels_dir(project_id, dataset_id)
+    labeled = [s for s in stems if _has_boxes(labels_dir, s)]
+    unlabeled = [s for s in stems if not _has_boxes(labels_dir, s)]
+    return {
+        **split_lib.assign(labeled, current, **kwargs),
+        **split_lib.assign(unlabeled, current, **kwargs),
+    }
 
 
 def _require_dataset(session: Session, project_id: str, dataset_id: str) -> Path:
@@ -56,7 +88,9 @@ def split_dataset(
         raise HTTPException(422, "Nothing to split — review some images first")
 
     try:
-        assigned = split_lib.assign(
+        assigned = stratified_assign(
+            project_id,
+            dataset_id,
             stems,
             datasets.read_splits(project_id, dataset_id),
             train=body.train,
