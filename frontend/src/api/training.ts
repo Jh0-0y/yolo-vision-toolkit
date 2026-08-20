@@ -12,6 +12,50 @@ export interface TrainParams {
   optimizer?: string | null
 }
 
+/** 학습 전처리 타일링. 끄면 지금까지와 완전히 같다. */
+export interface TilingParams {
+  enabled: boolean
+  tile_size: number
+  stride: number
+  min_visibility: number
+  /** 포지티브 타일 수 대비 비율 (0.1 = 10%). **분할마다 따로** 적용된다 */
+  negative_ratio: number
+  keep_all_negatives: boolean
+  seed: number
+}
+
+export const DEFAULT_TILING: TilingParams = {
+  enabled: false,
+  tile_size: 640,
+  stride: 480,
+  min_visibility: 0.6,
+  negative_ratio: 0.1,
+  keep_all_negatives: false,
+  seed: 0,
+}
+
+export interface SplitPreview {
+  split: string
+  positive: number
+  /** 라벨 없는 프레임에서 나온 네거티브 — 비율과 무관하게 전부 담긴다 */
+  hard: number
+  /** 라벨 있는 프레임의 빈 타일 — 목표까지만 담긴다 */
+  incidental: number
+  negative_kept: number
+  /** 박스가 걸쳤으나 가시비율 미달 — 어디에도 안 들어간다 */
+  excluded: number
+  total: number
+  /** 하드 네거티브만으로 목표를 넘었나 */
+  overshoot: boolean
+}
+
+export interface TilingPreview {
+  splits: SplitPreview[]
+}
+
+export const previewTiling = (dataset: string, tiling: TilingParams) =>
+  api.post<TilingPreview>('/training/tiling/preview', { dataset, tiling })
+
 export interface RunCreate {
   name?: string | null
   project_id?: string | null
@@ -19,6 +63,7 @@ export interface RunCreate {
   base_model_id: string
   device?: string | null
   params: TrainParams
+  tiling?: TilingParams
 }
 
 export interface TrainRunOut {
