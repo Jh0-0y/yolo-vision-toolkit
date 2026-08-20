@@ -335,7 +335,9 @@ export default function TrainPage() {
                         { value: 100, label: '1:1' },
                         { value: 300, label: '3:1' },
                       ]}
-                      mb="md"
+                      // 눈금 라벨이 트랙 바깥 아래로 그려져 md(16px)를 거의 다 먹는다 —
+                      // 아래 체크박스와 사이가 벌어지려면 한 단계 더 필요하다
+                      mb="xl"
                     />
                     <Checkbox
                       label="Keep every negative tile"
