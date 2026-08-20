@@ -174,17 +174,21 @@ def test_empty_val_split_points_data_yaml_at_train(tmp_path):
 
 def test_progress_events_are_emitted(tmp_path):
     root, reviewed, splits = _seed(tmp_path, n_train=4, n_val=2)
+    params = TileDatasetParams(negative_ratio=0.25)
     events: list[dict] = []
+
+    # 실행이 스스로 보고한 값이 아니라 plan_for_training 의 예측과 맞춰 본다
+    expected_total = sum(p.total for p in plan_for_training(
+        dataset_dir=root, reviewed=reviewed, splits=splits, params=params))
 
     materialize_for_training(
         dataset_dir=root, out_dir=tmp_path / "run", reviewed=reviewed, splits=splits,
-        params=TileDatasetParams(negative_ratio=0.25), emit=events.append,
+        params=params, emit=events.append,
     )
 
-    total = events[0]["total"]
     assert events[0]["phase"] == "tiling"
-    assert total > 0
-    assert events[-1]["done"] == total
+    assert events[0]["total"] == expected_total
+    assert events[-1]["done"] == expected_total
 
 
 def test_cancel_sentinel_stops_the_run(tmp_path):
