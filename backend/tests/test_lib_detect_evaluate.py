@@ -44,3 +44,43 @@ def test_map_from_accumulated_excludes_classes_without_gt():
     assert out["map50"] == 1.0
     assert out["map"] == 1.0
     assert set(out["per_class"]) == {0}  # -1 excluded
+
+
+def test_build_cls_map_maps_known_names_to_dataset_ids():
+    from lib.detect.evaluate import build_cls_map
+
+    model_names = {0: "ball", 1: "player"}
+    ds_by_norm = {"ball": 3, "player": 7}
+
+    assert build_cls_map(model_names, ds_by_norm) == {0: 3, 1: 7}
+
+
+def test_build_cls_map_sends_unknown_classes_to_the_sentinel():
+    """데이터셋에 없는 클래스는 **버리지 않고** 오검출로 센다 — 풀 프레임 경로와
+    같은 처리라야 두 방식의 점수를 나란히 놓을 수 있다."""
+    from lib.detect.evaluate import build_cls_map
+
+    model_names = {0: "ball", 1: "referee"}
+    ds_by_norm = {"ball": 0}
+
+    assert build_cls_map(model_names, ds_by_norm) == {0: 0, 1: -1}
+
+
+def test_build_cls_map_covers_every_model_class():
+    """하나라도 빠지면 collect 가 그 클래스를 조용히 버린다."""
+    from lib.detect.evaluate import build_cls_map
+
+    model_names = {0: "a", 1: "b", 2: "c"}
+
+    assert set(build_cls_map(model_names, {}).keys()) == {0, 1, 2}
+    assert set(build_cls_map(model_names, {}).values()) == {-1}
+
+
+def test_build_cls_map_normalizes_names():
+    """이름 대조는 정규화해서 한다 — 'Ball' 과 'ball' 은 같은 클래스다."""
+    from lib.detect.evaluate import build_cls_map
+    from lib.labels.registry import normalize
+
+    ds_by_norm = {normalize("Ball"): 2}
+
+    assert build_cls_map({0: "ball"}, ds_by_norm) == {0: 2}

@@ -175,3 +175,23 @@ def aggregate(total: dict[int, dict[str, int]], names: dict[int, str]) -> dict:
     prec, rec, f1 = _prf(tp, fp, fn)
     overall = {"tp": tp, "fp": fp, "fn": fn, "precision": prec, "recall": rec, "f1": f1}
     return {"per_class": rows, "overall": overall}
+
+
+def build_cls_map(
+    model_names: dict[int, str], ds_by_norm: dict[str, int], other: int = -1
+) -> dict[int, int]:
+    """모델의 클래스 id → 데이터셋의 클래스 id. **모르는 것은 버리지 않고 `other` 로.**
+
+    타일 추론(`lib/detect/tiled.py:collect`)은 이 매핑에 없는 클래스를 조용히 버린다.
+    그런데 채점에서 데이터셋에 없는 클래스 예측은 **오검출로 세야** 한다 — 안 그러면
+    어휘 밖 오검출만 사라져 그 모델이 실제보다 정확해 보인다. 그래서 모든 모델
+    클래스를 빠짐없이 담고, 대조에 실패한 것은 `other`(기본 -1)로 보낸다.
+
+    이름 대조는 `lib/labels/registry.normalize` 로 정규화해서 한다.
+    """
+    from lib.labels.registry import normalize
+
+    return {
+        int(cid): ds_by_norm.get(normalize(name), other)
+        for cid, name in model_names.items()
+    }
