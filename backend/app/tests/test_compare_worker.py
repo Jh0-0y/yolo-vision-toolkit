@@ -83,23 +83,40 @@ def _seed_dataset(tmp_path, names=("ball",)):
     return ds
 
 
-def _run(job, ds, specs, model_names):
+def _entry(entry_id, model_id, name, pt):
+    """A `full`-mode entry — the tile knobs are unused on this path but the
+    cfg contract requires every entry to carry them."""
+    return {
+        "entry_id": entry_id,
+        "model_id": model_id,
+        "name": name,
+        "pt": pt,
+        "mode": "full",
+        "imgsz": 640,
+        "tile_size": 640,
+        "stride": 480,
+        "merge_iou": 0.5,
+        "border_margin_px": 4,
+    }
+
+
+def _run(job, ds, out_dir, entries):
     (settings.jobs_dir / job).mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
     run_compare(
         job,
         {
             "project_id": "p1",
-            "specs": specs,
-            "model_names": model_names,
+            "entries": entries,
             "dataset_dir": str(ds),
+            "out_dir": str(out_dir),
             "conf": 0.4,
             "iou": 0.5,
-            "imgsz": 640,
             "device": "cpu",
         },
         str(settings.jobs_dir),
     )
-    return json.loads((settings.jobs_dir / job / "result.json").read_text())
+    return json.loads((out_dir / "result.json").read_text())
 
 
 def test_compare_scores_each_model_and_counts_unknown_class_as_fp(
@@ -109,15 +126,19 @@ def test_compare_scores_each_model_and_counts_unknown_class_as_fp(
     # the image route confines served files to test_dir/compare/{job}; the worker
     # writes absolute image paths into the manifest regardless, so just seed a ds.
     ds = _seed_dataset(tmp_path)
+    out_dir = tmp_path / "out1"
 
-    result = _run("job1", ds, [("m1", "m1.pt"), ("m2", "m2.pt")], {"m1": "Model A", "m2": "Model B"})
-    by_id = {m["model_id"]: m for m in result["per_model"]}
+    entries = [_entry("m1", "m1", "Model A", "m1.pt"), _entry("m2", "m2", "Model B", "m2.pt")]
+    result = _run("job1", ds, out_dir, entries)
+    by_id = {e["entry_id"]: e for e in result["per_entry"]}
 
     # m1 predicted "ball" over the GT → true positive, perfect scores + mAP 1.0
     assert by_id["m1"]["overall"]["tp"] == 1
     assert by_id["m1"]["overall"]["fp"] == 0
     assert by_id["m1"]["overall"]["fn"] == 0
+    assert by_id["m1"]["model_id"] == "m1"
     assert by_id["m1"]["name"] == "Model A"
+    assert by_id["m1"]["mode"] == "full"
     assert by_id["m1"]["map50"] == 1.0
     assert by_id["m1"]["map"] == 1.0
 
@@ -131,15 +152,16 @@ def test_compare_scores_each_model_and_counts_unknown_class_as_fp(
     ball = next(c for c in by_id["m1"]["per_class"] if c["name"] == "ball")
     assert ball["ap50"] == 1.0 and ball["ap"] == 1.0
 
-    # per-image structure carries GT + each model's predicted boxes
+    # per-image structure carries GT + each entry's predicted boxes
     img = result["images"][0]
     assert img["stem"] == "img1"
     assert len(img["gt_boxes"]) == 1
-    assert len(img["per_model"]) == 2
+    assert len(img["per_entry"]) == 2
     assert result["warning"] is None
 
-    # manifest maps the image index → an existing file (for the overlay route)
-    manifest = json.loads((settings.jobs_dir / "job1" / "images_manifest.json").read_text())
+    # manifest maps the image index → an existing file (for the overlay route);
+    # it lives in the benchmark's out_dir, not the job directory
+    manifest = json.loads((out_dir / "images_manifest.json").read_text())
     assert "0" in manifest
 
 
@@ -147,9 +169,10 @@ def test_compare_warns_when_dataset_has_no_class_names(tmp_path, fake_ultralytic
     monkeypatch.setattr(settings, "data_dir", tmp_path)
     ds = _seed_dataset(tmp_path)
     (ds / "data.yaml").write_text(yaml.safe_dump({"names": {}, "nc": 0}))  # no names
+    out_dir = tmp_path / "out2"
 
-    result = _run("job2", ds, [("m1", "m1.pt")], {"m1": "Model A"})
+    result = _run("job2", ds, out_dir, [_entry("m1", "m1", "Model A", "m1.pt")])
     assert result["warning"]  # non-empty warning string
     # with no dataset classes, the "ball" prediction can't map → FP, GT → FN
-    overall = result["per_model"][0]["overall"]
+    overall = result["per_entry"][0]["overall"]
     assert overall["fp"] == 1 and overall["fn"] == 1
