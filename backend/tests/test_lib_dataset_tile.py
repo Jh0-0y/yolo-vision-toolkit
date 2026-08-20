@@ -137,6 +137,49 @@ def test_ratio_against_zero_positives_yields_nothing_but_does_not_raise(tmp_path
     assert p.total == 0
 
 
+def test_clipped_below_threshold_is_neither_positive_nor_negative(tmp_path):
+    """박스와 겹쳤지만 min_visibility 미만이면 그 타일은 아예 빠진다 —
+    네거티브로 재활용되면 잘린 객체 픽셀을 배경이라고 가르치게 된다.
+
+    1120×640 이미지 → x 오프셋 [0, 480], 타일 두 장(col0: 0~640, col1: 480~1120).
+    박스 600~700 × 100~200 (100×100): col0 와는 40px 만 겹쳐 가시비율 0.4(<0.6)라
+    통째로 버려지고, col1 은 박스를 전부 담아(가시비율 1.0) 포지티브다.
+    """
+    boxes = [(0, (600 / 1120, 100 / 640, 700 / 1120, 200 / 640))]
+    root = make_dataset(tmp_path / "ds", {"a": (1120, 640)}, {"a": boxes})
+    p = plan(dataset_dir=root, reviewed={"a"}, params=TileDatasetParams(keep_all_negatives=True))
+    assert p.positive == 1
+    assert p.negative_candidates == 0
+    assert p.excluded == 1
+    assert p.total == 1
+    # 잘려나간 col0 타일은 포지티브에도 네거티브에도 없다
+    stems = {i.stem for i in p.items}
+    assert "a_r0c1" in stems
+    assert "a_r0c0" not in stems
+
+
+def test_min_visibility_one_drops_boundary_tile_instead_of_making_it_negative(tmp_path):
+    """min_visibility=1.0(전부 보여야 포지티브)에서, 경계에 걸친 객체는 두 타일
+    모두 가시비율이 1.0 미만이라 둘 다 빠진다 — 어느 쪽도 네거티브가 아니다.
+
+    1120×640 이미지, 박스 400~750 × 100~200(폭 350) — 두 타일(0~640, 480~1120)
+    모두와 겹치지만 어느 쪽도 박스를 전부 담지 못한다.
+    """
+    boxes = [(0, (400 / 1120, 100 / 640, 750 / 1120, 200 / 640))]
+    root = make_dataset(tmp_path / "ds", {"a": (1120, 640)}, {"a": boxes})
+    p = plan(
+        dataset_dir=root,
+        reviewed={"a"},
+        params=TileDatasetParams(min_visibility=1.0, keep_all_negatives=True),
+    )
+    assert p.positive == 0
+    assert p.negative_candidates == 0
+    assert p.excluded == 2
+    assert p.total == 0
+    negatives = [i for i in p.items if not i.positive]
+    assert negatives == []
+
+
 def test_nothing_reviewed_is_rejected(tmp_path):
     root = make_dataset(tmp_path / "ds", {"a": (1920, 1080)})
     with pytest.raises(TileError):
@@ -192,19 +235,27 @@ def test_materialize_writes_exactly_what_estimate_promised(tmp_path):
 
 
 def test_tile_images_are_tile_sized(tmp_path):
-    boxes = [(0, (0.0, 0.0, 1.0, 1.0))]
-    root = make_dataset(tmp_path / "ds", {"a": (1920, 1080)}, {"a": boxes})
+    # 라벨 없음 — 여기서 보는 건 저장된 타일의 픽셀 크기지 박스 판정이 아니다.
+    # (예전엔 전체 프레임 박스를 넣었는데, 어느 타일에서도 min_visibility 를
+    # 못 넘겨 finding 3 의 버그로 "네거티브"가 되던 것에 우연히 기대고 있었다.
+    # 고친 뒤엔 그 박스가 모든 타일에서 판정 불가로 빠져 raw/ 가 비고, for 루프가
+    # 한 번도 안 돌아 assert 가 공허하게 통과했다.)
+    root = make_dataset(tmp_path / "ds", {"a": (1920, 1080)})
     out = tmp_path / "tiled"
     materialize(dataset_dir=root, out_dir=out, reviewed={"a"},
                 params=TileDatasetParams(keep_all_negatives=True))
-    for p in (out / "raw").iterdir():
+    written = list((out / "raw").iterdir())
+    assert written  # 실제로 뭔가 써졌는지부터 확인 — 빈 루프의 공허한 통과를 막는다
+    for p in written:
         with Image.open(p) as im:
             assert im.size == (640, 640)
 
 
 def test_tile_names_carry_grid_position(tmp_path):
-    boxes = [(0, (0.0, 0.0, 1.0, 1.0))]
-    root = make_dataset(tmp_path / "ds", {"game_00001": (1920, 1080)}, {"game_00001": boxes})
+    # 라벨 없음 — 여기서 보는 건 타일 파일명 규칙이지 박스 판정이 아니다.
+    # (전체 프레임 박스는 모든 타일에서 min_visibility 미만이라 finding 3 이후
+    # "판정 불가"로 빠져 raw/ 가 통째로 비어버린다 — 이름을 볼 타일 자체가 없었다.)
+    root = make_dataset(tmp_path / "ds", {"game_00001": (1920, 1080)})
     out = tmp_path / "tiled"
     materialize(dataset_dir=root, out_dir=out, reviewed={"game_00001"},
                 params=TileDatasetParams(keep_all_negatives=True))
@@ -239,8 +290,10 @@ def test_clipped_boxes_are_renormalized_to_the_tile(tmp_path):
 
 
 def test_progress_events_are_emitted(tmp_path):
-    boxes = [(0, (0.0, 0.0, 1.0, 1.0))]
-    root = make_dataset(tmp_path / "ds", {"a": (1920, 1080)}, {"a": boxes})
+    # 라벨 없음 — 여기서 보는 건 진행률 이벤트지 박스 판정이 아니다.
+    # (전체 프레임 박스는 모든 타일에서 min_visibility 미만이라 finding 3 이후
+    # "판정 불가"로 빠져 total 이 0이 된다 — 8을 보려면 진짜 네거티브가 있어야 한다.)
+    root = make_dataset(tmp_path / "ds", {"a": (1920, 1080)})
     events: list[dict] = []
     materialize(dataset_dir=root, out_dir=tmp_path / "tiled", reviewed={"a"},
                 params=TileDatasetParams(keep_all_negatives=True), emit=events.append)
@@ -251,9 +304,10 @@ def test_progress_events_are_emitted(tmp_path):
 
 
 def test_cancel_sentinel_stops_the_run(tmp_path):
-    boxes = [(0, (0.0, 0.0, 1.0, 1.0))]
+    # 라벨 없음 — 여기서 보는 건 취소 동작이지 박스 판정이 아니다. (같은 이유로
+    # 전체 프레임 박스를 빼야 실제로 취소할 타일이 생긴다.)
     images = {f"img{i:03d}": (1920, 1080) for i in range(20)}
-    root = make_dataset(tmp_path / "ds", images, {s: boxes for s in images})
+    root = make_dataset(tmp_path / "ds", images)
     cancel = tmp_path / "CANCEL"
     cancel.touch()  # 시작 전부터 켜 둔다 — 첫 확인 지점에서 멈춰야 한다
     with pytest.raises(TileCancelled):

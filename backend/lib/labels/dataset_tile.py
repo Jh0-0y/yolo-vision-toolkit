@@ -120,6 +120,7 @@ class TilePlan:
     sizes: list[SizeGroup]
     undersized: int
     images: int
+    excluded: int  # 박스와 겹쳤지만 min_visibility 미만이라 통째로 뺀 타일 수
 
     @property
     def total(self) -> int:
@@ -175,6 +176,28 @@ def _sample_negatives(
     return picked
 
 
+def _tile_overlaps_any_box(
+    boxes: list[Box], img_w: int, img_h: int, tx: int, ty: int, tw: int, th: int
+) -> bool:
+    """타일 사각형이 박스 중 하나와 조금이라도 겹치는지 — `clip_boxes_to_tile` 이
+    쓰는 것과 같은 교차 계산(픽셀 좌표, 면적 기준)이라야 두 판정이 어긋나지 않는다.
+
+    여기서 "겹친다"는 `min_visibility` 를 따지지 않는다 — 미만이라 잘려 나간 박스도
+    겹친 것으로 친다. 그래야 그 타일을 "객체가 아예 없는 배경"과 구분할 수 있다.
+    """
+    for _cls, (x1n, y1n, x2n, y2n) in boxes:
+        x1, y1, x2, y2 = x1n * img_w, y1n * img_h, x2n * img_w, y2n * img_h
+        area = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+        if area <= 0:
+            continue
+        ix1, iy1 = max(x1, tx), max(y1, ty)
+        ix2, iy2 = min(x2, tx + tw), min(y2, ty + th)
+        inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+        if inter > 0:
+            return True
+    return False
+
+
 def plan(
     *, dataset_dir: Path, reviewed: set[str], params: TileDatasetParams
 ) -> TilePlan:
@@ -198,6 +221,7 @@ def plan(
     sizes: dict[tuple[int, int], int] = {}
     undersized = 0
     counted = 0
+    excluded = 0
 
     for stem in stems:
         try:
@@ -218,12 +242,19 @@ def plan(
             kept = clip_boxes_to_tile(
                 boxes, img_w, img_h, x, y, grid, tile_w=tw, tile_h=th
             )
-            item = TilePlanItem(
-                src_stem=stem, col=col, row=row, x=x, y=y, w=tw, h=th, boxes=kept
-            )
             if kept:
+                item = TilePlanItem(
+                    src_stem=stem, col=col, row=row, x=x, y=y, w=tw, h=th, boxes=kept
+                )
                 positives.append(item)
+            elif _tile_overlaps_any_box(boxes, img_w, img_h, x, y, tw, th):
+                # 박스와 겹쳤지만 살아남지 못했다 — 배경이 아니라 "판정 불가".
+                # 네거티브로 재활용하면 잘린 객체 픽셀을 배경이라고 가르치게 된다.
+                excluded += 1
             else:
+                item = TilePlanItem(
+                    src_stem=stem, col=col, row=row, x=x, y=y, w=tw, h=th, boxes=kept
+                )
                 negatives.setdefault(stem, []).append(item)
 
     # **포지티브가 하나도 없어도 막지 않는다.** 오탐이 많이 나는 배경 프레임만
@@ -258,6 +289,7 @@ def plan(
         sizes=size_groups,
         undersized=undersized,
         images=counted,
+        excluded=excluded,
     )
 
 
@@ -278,6 +310,7 @@ def estimate(
             for s in p.sizes
         ],
         "undersized": p.undersized,
+        "excluded": p.excluded,
     }
 
 

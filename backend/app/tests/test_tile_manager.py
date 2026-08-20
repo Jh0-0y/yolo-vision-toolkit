@@ -10,7 +10,6 @@ from app.services import datasets
 from app.services.tile_manager import reconcile_on_boot, tile_manager
 from infra import jobs
 from lib.labels.dataset_tile import TileDatasetParams
-from lib.labels.io import write_label_file
 
 
 @pytest.fixture
@@ -33,11 +32,13 @@ def _wait_done(job_id: str, timeout: float = 30.0) -> str:
 
 
 def test_submit_writes_tiles_and_a_done_event(data_dir, tmp_path):
+    # 라벨 없음 — 여기서 보는 건 잡 배선과 완료 이벤트지 박스 판정이 아니다.
+    # (전체 프레임 박스는 모든 타일에서 min_visibility 미만이라 finding 3 이후
+    # "판정 불가"로 빠져 raw/ 가 통째로 비어버린다.)
     src = tmp_path / "src"
     (src / "raw").mkdir(parents=True)
     (src / "labels").mkdir(parents=True)
     Image.new("RGB", (1920, 1080)).save(src / "raw" / "a.jpg")
-    write_label_file(src / "labels" / "a.txt", [(0, (0.0, 0.0, 1.0, 1.0))])
     out = tmp_path / "out"
 
     recorded: list[dict | None] = []
