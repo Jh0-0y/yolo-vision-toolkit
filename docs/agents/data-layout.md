@@ -34,7 +34,7 @@ DATA_DIR/                     # 기본 <repo>/data — git 이 추적하지 않�
 │       ├── classes.json      # **이 데이터셋만의** 클래스
 │       ├── reviewed.json     # {stem: true}
 │       ├── splits.json       # {stem: "train"|"val"|"test"}
-│       └── sources.json      # 이 데이터가 어디서 왔는지 (영상 · zip · 타일링)
+│       └── sources.json      # 이 데이터가 어디서 왔는지 (영상은 버리므로 유일한 기록)
 ├── labs/{lab_id}/            # 연구실
 │   ├── lab.json              # 사람이 읽는 표시(이름) — 진실은 DB 행이다
 │   ├── videos/{video_id}.mp4 # 원본 + {video_id}.json 사이드카 (프레임 추출 없음)
