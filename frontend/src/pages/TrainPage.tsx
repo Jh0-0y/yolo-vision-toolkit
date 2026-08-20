@@ -34,11 +34,21 @@ import {
   type TrainRunOut,
 } from '../api/client'
 
+/** 파이썬 `round()` 와 같은 규칙 — 정확히 .5 면 짝수 쪽으로 간다.
+ *  JS 의 Math.round 는 올림이라 백엔드와 한 장씩 어긋난다. */
+function roundHalfToEven(v: number): number {
+  const floor = Math.floor(v)
+  const diff = v - floor
+  if (diff > 0.5) return floor + 1
+  if (diff < 0.5) return floor
+  return floor % 2 === 0 ? floor : floor + 1
+}
+
 // 미리보기는 스캔 결과(positive/hard/incidental)만 서버에서 받는다 — 비율·keep_all_negatives 는
 // 스캔에 영향을 주지 않으므로 재요청 없이 여기서 백엔드와 같은 규칙으로 다시 계산한다.
 // (하드 네거티브를 전부 채우고 나서, 인시덴탈로 목표까지 채운다)
 function computeActual(s: SplitPreview, tiling: TilingParams) {
-  const target = Math.round(s.positive * tiling.negative_ratio)
+  const target = roundHalfToEven(s.positive * tiling.negative_ratio)
   const keptIncidental = tiling.keep_all_negatives
     ? s.incidental
     : Math.min(s.incidental, Math.max(0, target - s.hard))
