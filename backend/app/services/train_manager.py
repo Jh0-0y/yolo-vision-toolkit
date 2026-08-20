@@ -160,13 +160,34 @@ class TrainManager:
         # worker's own finally blocks, so cleanup has to live out here)
         if settings.ssd_cache_dir is not None:
             unstage(settings.ssd_cache_dir, run_id)
-        # 학습이 먹은 트리(`run_dir/dataset`)는 **하드링크**라 디스크를 차지하지 않고,
-        # 런을 지울 때 함께 사라진다 — 여기서 따로 치울 것이 없다.
+        # 타일 런의 `run_dir/dataset` 는 실제 바이트다(하드링크가 아니다) — 워커의
+        # finally 는 SIGTERM 을 못 받으므로 여기가 마지막 안전망이다. 하드링크 런은
+        # config.json 에 `tiling` 블록이 없으니 건드리지 않는다.
+        self._cleanup_tiles(run_id)
 
     @staticmethod
     def _append_progress(run_id: str, event: dict) -> None:
         """워커가 죽어서 스스로 남기지 못한 종료 이벤트를 API 프로세스가 대신 쓴다."""
         jobs.at(settings.jobs_dir, run_id).ensure().emit(event)
+
+    @staticmethod
+    def _cleanup_tiles(run_id: str) -> None:
+        """타일 트리를 지운다. 판단은 오직 `config.json` 의 `tiling` 블록으로만
+        한다 — 하드링크 런은 그 블록이 없으므로 절대 지우지 않는다."""
+        with session_scope() as session:
+            run = session.get(TrainRun, run_id)
+            if run is None or not run.dataset_path:
+                return
+            project_id, dataset_path = run.project_id, run.dataset_path
+        config_path = settings.run_dir(project_id, run_id) / "config.json"
+        if not config_path.exists():
+            return
+        try:
+            cfg = json.loads(config_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return
+        if cfg.get("tiling"):
+            shutil.rmtree(dataset_path, ignore_errors=True)
 
     @staticmethod
     def _update(run_id: str, **fields) -> None:
@@ -181,8 +202,9 @@ class TrainManager:
 
     def reconcile_on_boot(self) -> None:
         """Mark runs that were 'running' when the API died, and sweep any staged
-        dataset copies left behind by runs that are no longer alive."""
+        dataset copies (and tile trees) left behind by runs that are no longer alive."""
         alive_ids: set[str] = set()
+        dead_ids: list[str] = []
         with session_scope() as session:
             for run in session.exec(select(TrainRun).where(TrainRun.status == "running")):
                 alive = False
@@ -198,7 +220,11 @@ class TrainManager:
                     run.status = "error"
                     run.error = "process missing after API restart"
                     session.add(run)
+                    dead_ids.append(run.id)
             session.commit()
+        # 재부팅으로 워커가 통째로 사라진 런 — 타일이 남아 있으면 여기서 마저 지운다
+        for run_id in dead_ids:
+            self._cleanup_tiles(run_id)
         # a training subprocess from a previous API lifetime may still be running
         # and reading its staged copy — keep those; delete every other staged dir.
         if settings.ssd_cache_dir is not None and settings.ssd_cache_dir.exists():
