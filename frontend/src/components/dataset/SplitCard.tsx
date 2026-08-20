@@ -58,9 +58,6 @@ export default function SplitCard({ projectId, datasetId, dataset }: Props) {
           </ThemeIcon>
           <div>
             <Text fw={600}>Split</Text>
-            <Text size="xs" c="dimmed">
-              Divide reviewed images into train / val / test
-            </Text>
           </div>
         </Group>
 

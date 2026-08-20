@@ -32,13 +32,11 @@ interface Props {
   /** 서버가 영상 워커를 하나만 돌리므로 한 번에 하나다 — 누가 도는지는 호출자가 안다. */
   busy: boolean
   onStart: (file: File, params: VideoExtractParams) => void
-  /** 프레임이 어디로 들어가는지 한 줄 설명 (프로젝트 vs 데이터셋). */
-  hint?: string
 }
 
 /** 영상에서 프레임을 뽑는 폼. **잡을 직접 던지지 않는다** — 파라미터만 모아 넘긴다.
  *  그래서 학습실 업로드와 데이터셋 가져오기가 같은 폼을 쓴다. */
-export default function VideoExtractCard({ busy, onStart, hint }: Props) {
+export default function VideoExtractCard({ busy, onStart }: Props) {
   const videoBusy = busy
   const [file, setFile] = useState<File | null>(null)
   const [targetFps, setTargetFps] = useState<number>(2)
@@ -71,9 +69,6 @@ export default function VideoExtractCard({ busy, onStart, hint }: Props) {
           </ThemeIcon>
           <div>
             <Text fw={600}>Video</Text>
-            <Text size="xs" c="dimmed">
-              {hint ?? 'Extract frames from a video'}
-            </Text>
           </div>
         </Group>
 
@@ -115,7 +110,6 @@ export default function VideoExtractCard({ busy, onStart, hint }: Props) {
         <Group grow align="flex-start">
           <NumberInput
             label="Frames per second"
-            description="Independent of the source fps"
             value={targetFps}
             onChange={(v) => setTargetFps(Number(v) || 1)}
             min={0.1}
@@ -124,7 +118,6 @@ export default function VideoExtractCard({ busy, onStart, hint }: Props) {
           />
           <NumberInput
             label="Max frames"
-            description="Cap on total saved frames"
             value={maxFrames}
             onChange={(v) => setMaxFrames(Number(v) || 1)}
             min={1}
@@ -134,7 +127,6 @@ export default function VideoExtractCard({ busy, onStart, hint }: Props) {
 
         <Switch
           label="Skip near-duplicate frames (dedup)"
-          description="Skips adjacent, nearly identical frames"
           checked={dedup}
           onChange={(e) => setDedup(e.currentTarget.checked)}
           disabled={videoBusy}
@@ -155,7 +147,6 @@ export default function VideoExtractCard({ busy, onStart, hint }: Props) {
               <Group grow align="flex-start">
                 <NumberInput
                   label="Start (sec)"
-                  description="0 = from the beginning"
                   value={startSec}
                   onChange={(v) => setStartSec(Number(v) || 0)}
                   min={0}
@@ -163,7 +154,6 @@ export default function VideoExtractCard({ busy, onStart, hint }: Props) {
                 />
                 <NumberInput
                   label="End (sec)"
-                  description="Empty = until the end"
                   value={endSec}
                   onChange={(v) => setEndSec(v === '' ? '' : Number(v))}
                   min={0}
@@ -173,7 +163,6 @@ export default function VideoExtractCard({ busy, onStart, hint }: Props) {
               {dedup && (
                 <Input.Wrapper
                   label={`Dedup threshold: ${dedupThreshold.toFixed(2)}`}
-                  description="Higher = frames must be more similar to be skipped"
                 >
                   <Slider
                     mt={6}

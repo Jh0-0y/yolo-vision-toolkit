@@ -1,4 +1,4 @@
-import { Checkbox, Group, NumberInput, Stack, Switch, Text } from '@mantine/core'
+import { Checkbox, Group, NumberInput, Stack, Switch } from '@mantine/core'
 
 export interface TilingState {
   tile: boolean
@@ -33,7 +33,6 @@ export default function TilingOptions({ value, onChange, disabled, withLabels }:
     <Stack gap="sm">
       <Switch
         label="Tile into training patches"
-        description="Split each 1920px frame into overlapping tiles so small objects train larger"
         checked={value.tile}
         onChange={(e) => set({ tile: e.currentTarget.checked })}
         disabled={disabled}
@@ -43,7 +42,6 @@ export default function TilingOptions({ value, onChange, disabled, withLabels }:
           <Group grow align="flex-start">
             <NumberInput
               label="Tile size (px)"
-              description="Square tile edge"
               value={value.tileSize}
               onChange={(v) => set({ tileSize: Number(v) || 640 })}
               min={64}
@@ -52,7 +50,6 @@ export default function TilingOptions({ value, onChange, disabled, withLabels }:
             />
             <NumberInput
               label="Stride (px)"
-              description={`Overlap = ${overlap}px${overlap <= 0 ? ' — needs overlap!' : ''}`}
               value={value.stride}
               onChange={(v) => set({ stride: Number(v) || 480 })}
               min={32}
@@ -62,15 +59,10 @@ export default function TilingOptions({ value, onChange, disabled, withLabels }:
               error={overlap <= 0 ? 'Stride must be < tile size — boundary objects split in two' : undefined}
             />
           </Group>
-          <Text size="xs" c="dimmed">
-            1920×1080 with 640/480 → 4×2 = 8 tiles per frame. Overlap must exceed the
-            largest object so it lands whole in some tile; the last tile clamps to the frame edge.
-          </Text>
           {withLabels && (
             <>
               <NumberInput
                 label="Min visibility (0–1)"
-                description="Boxes visible at least this fraction are clipped & kept; below are dropped"
                 value={value.minVisibility}
                 onChange={(v) => set({ minVisibility: v === '' || v == null ? 0.6 : Number(v) })}
                 min={0}

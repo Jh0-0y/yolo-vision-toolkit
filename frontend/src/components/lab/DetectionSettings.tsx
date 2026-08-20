@@ -37,7 +37,6 @@ export default function DetectionSettings({
 
       <NumberInput
         label="Sampling interval (ms)"
-        description="Lower = smoother, slower"
         placeholder="default 100"
         value={sampling}
         onChange={(v) => onSampling(v === '' || v == null ? '' : Number(v))}

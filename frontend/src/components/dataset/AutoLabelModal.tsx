@@ -138,7 +138,6 @@ export default function AutoLabelModal({
         />
         <NumberInput
           label="Confidence threshold (conf)"
-          description="Boxes below this confidence are discarded — not saved to the label file"
           value={conf}
           onChange={setConf}
           min={0.05}
@@ -162,7 +161,6 @@ export default function AutoLabelModal({
             <Group grow>
               <NumberInput
                 label="WBF IoU"
-                description="IoU for merging boxes across models"
                 value={iouWbf}
                 onChange={setIouWbf}
                 min={0.3}
@@ -177,10 +175,6 @@ export default function AutoLabelModal({
               <Stack gap="xs">
                 <Text size="sm" fw={500}>
                   Max boxes per class
-                </Text>
-                <Text size="xs" c="dimmed">
-                  Keep only the N highest-confidence boxes of each class per image (e.g. ball = 1).
-                  Leave at {DEFAULT_MAX} for no limit.
                 </Text>
                 {classNames.map((name) => (
                   <NumberInput

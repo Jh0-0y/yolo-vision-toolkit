@@ -74,12 +74,6 @@ const TOGGLE_LABEL: Record<string, string> = {
 
 // 지금 상태를 말한다 — 어떻게 만들어졌는지가 아니라. 하드링크로 만든 사본도
 // 아카이브에서 원본을 지우면 링크 수가 1 로 떨어져 홀로 남는다(파일은 온전하다).
-const WIDE_KIND_HINT: Record<string, string> = {
-  render: 'overlays burned in',
-  link: 'shares the archive original — no extra disk',
-  copy: 'standalone copy of the original',
-}
-
 function percent(ev: LabCropProgressEvent | null): number | null {
   if (!ev?.total || ev.done == null) return null
   return Math.min(100, Math.round((ev.done / ev.total) * 100))
@@ -289,9 +283,6 @@ export default function LabCropRunDetailPage() {
           <Group justify="space-between" mb="xs">
             <Text size="sm" fw={600}>
               Wide
-            </Text>
-            <Text size="xs" c="dimmed">
-              {WIDE_KIND_HINT[r.wide_kind] ?? ''}
             </Text>
           </Group>
           {r.has_wide ? (

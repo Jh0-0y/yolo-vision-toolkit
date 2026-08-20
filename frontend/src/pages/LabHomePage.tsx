@@ -44,10 +44,6 @@ export default function LabHomePage() {
           </ThemeIcon>
           <div>
             <Title order={2}>Lab</Title>
-            <Text c="dimmed" size="sm">
-              Each lab is one line of research with its own pipeline. New ones arrive with the code,
-              not from this screen.
-            </Text>
           </div>
         </Group>
 

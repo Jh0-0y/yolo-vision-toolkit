@@ -56,9 +56,6 @@ export default function TrainingHistoryPage() {
       <Group justify="space-between" align="flex-start">
         <div>
           <Title order={3}>Training History</Title>
-          <Text c="dimmed" size="sm">
-            Click a run to see live progress and results.
-          </Text>
         </div>
         <Button leftSection={<IconPlus size={16} />} onClick={() => navigate('new')}>
           New training run

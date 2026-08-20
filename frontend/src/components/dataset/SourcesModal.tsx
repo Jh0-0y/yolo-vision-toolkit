@@ -88,10 +88,6 @@ export default function SourcesModal({ projectId, datasetId, opened, onClose }: 
   return (
     <Modal opened={opened} onClose={onClose} title="Sources" size="lg">
       <Stack gap="sm">
-        <Text size="xs" c="dimmed">
-          Where this data came from. Videos are discarded after extraction, so this is the only
-          record of what went in.
-        </Text>
         {sources.isLoading ? (
           <Group justify="center" py="lg">
             <Loader />

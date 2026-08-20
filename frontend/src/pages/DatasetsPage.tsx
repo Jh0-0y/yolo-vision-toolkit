@@ -77,10 +77,6 @@ export default function DatasetsPage() {
       <Group justify="space-between" align="flex-end">
         <div>
           <Title order={3}>Datasets</Title>
-          <Text c="dimmed" size="sm">
-            One dataset is one experiment. Images, labels and classes live inside it — nothing is
-            shared between datasets.
-          </Text>
         </div>
         <Button leftSection={<IconPlus size={16} />} onClick={() => setCreating(true)}>
           New dataset

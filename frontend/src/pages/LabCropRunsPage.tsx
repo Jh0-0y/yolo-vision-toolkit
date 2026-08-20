@@ -104,10 +104,6 @@ export default function LabCropRunsPage() {
       <Group justify="space-between" align="flex-end">
         <div>
           <Title order={3}>Crop Runs</Title>
-          <Text c="dimmed" size="sm">
-            Every run keeps its settings, coordinates and both videos. Nothing expires — you delete
-            them.
-          </Text>
         </div>
         <Button
           leftSection={<IconPlus size={16} />}
@@ -174,7 +170,7 @@ export default function LabCropRunsPage() {
                 <Table.Td>
                   <Text size="sm">{formatBytes(r.size_bytes)}</Text>
                   {r.wide_kind === 'link' && (
-                    <Text size="xs" c="dimmed" title="The wide video is a hard link to the original — one copy on disk">
+                    <Text size="xs" c="dimmed">
                       linked
                     </Text>
                   )}

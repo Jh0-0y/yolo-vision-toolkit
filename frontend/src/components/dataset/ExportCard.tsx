@@ -26,13 +26,13 @@ const KINDS: { kind: ExportKind; label: string; hint: (d: DatasetOut) => string 
   {
     kind: 'train',
     label: 'Training data',
-    hint: (d) => `train ${d.train} + val ${d.val} — ready to train on`,
+    hint: (d) => `train ${d.train} + val ${d.val}`,
   },
-  { kind: 'test', label: 'Test data', hint: (d) => `test ${d.test} — for evaluation` },
+  { kind: 'test', label: 'Test data', hint: (d) => `test ${d.test}` },
   {
     kind: 'all',
     label: 'Everything',
-    hint: (d) => `all ${d.reviewed} reviewed images, split ignored`,
+    hint: (d) => `${d.reviewed} reviewed images`,
   },
 ]
 
@@ -75,9 +75,6 @@ export default function ExportCard({ projectId, datasetId, dataset }: Props) {
           </ThemeIcon>
           <div>
             <Text fw={600}>Export</Text>
-            <Text size="xs" c="dimmed">
-              Build a YOLO zip. Nothing is kept — build it again whenever you need it.
-            </Text>
           </div>
         </Group>
 

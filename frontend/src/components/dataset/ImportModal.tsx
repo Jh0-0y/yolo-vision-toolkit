@@ -73,7 +73,6 @@ export default function ImportModal({ projectId, datasetId, opened, onClose }: P
         <Tabs.Panel value="video">
           <VideoExtractCard
             busy={busy}
-            hint="Frames land in this dataset — the video itself is discarded"
             onStart={(file, params) => {
               startDatasetImport(projectId, datasetId, file, params)
               onClose()
@@ -90,9 +89,6 @@ export default function ImportModal({ projectId, datasetId, opened, onClose }: P
                 </ThemeIcon>
                 <div>
                   <Text fw={600}>Existing dataset</Text>
-                  <Text size="xs" c="dimmed">
-                    A YOLO zip (images + labels + data.yaml). Its classes merge into this dataset.
-                  </Text>
                 </div>
               </Group>
 
@@ -100,11 +96,6 @@ export default function ImportModal({ projectId, datasetId, opened, onClose }: P
                 checked={alreadyReviewed}
                 onChange={(e) => setAlreadyReviewed(e.currentTarget.checked)}
                 label="This data has already been reviewed"
-                description={
-                  alreadyReviewed
-                    ? 'Images arrive as reviewed, and the zip’s train/val/test folders become the split. Left unassigned if there are no such folders.'
-                    : 'Folder structure is ignored — everything arrives unreviewed, to review and split yourself.'
-                }
               />
 
               <Dropzone

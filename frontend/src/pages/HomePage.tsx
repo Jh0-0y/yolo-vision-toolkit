@@ -11,7 +11,6 @@ import {
   Group,
   SimpleGrid,
   Stack,
-  Text,
   ThemeIcon,
   Title,
   UnstyledButton,
@@ -24,10 +23,9 @@ interface DoorProps {
   icon: typeof IconFlask
   color: string
   title: string
-  subtitle: string
 }
 
-function Door({ to, icon: Icon, color, title, subtitle }: DoorProps) {
+function Door({ to, icon: Icon, color, title }: DoorProps) {
   return (
     <UnstyledButton component={Link} to={to}>
       <Card withBorder radius="md" padding="xl" h="100%">
@@ -38,9 +36,6 @@ function Door({ to, icon: Icon, color, title, subtitle }: DoorProps) {
             </ThemeIcon>
             <div style={{ minWidth: 0 }}>
               <Title order={3}>{title}</Title>
-              <Text c="dimmed" size="sm">
-                {subtitle}
-              </Text>
             </div>
           </Group>
           <IconChevronRight size={20} stroke={1.6} style={{ flexShrink: 0, marginTop: 8 }} />
@@ -60,9 +55,6 @@ export default function HomePage() {
           </ThemeIcon>
           <div>
             <Title order={2}>YOLO Vision Toolkit</Title>
-            <Text c="dimmed" size="sm">
-              Pick a space — research crops in the Lab, build datasets and models in the Studio.
-            </Text>
           </div>
         </Group>
 
@@ -72,14 +64,12 @@ export default function HomePage() {
             icon={IconFlask}
             color="grape"
             title="Lab"
-            subtitle="Crop research — videos, runs and their outputs"
           />
           <Door
             to="/studio"
             icon={IconSchool}
             color="blue"
             title="Studio"
-            subtitle="Datasets, labeling and training — one project per domain"
           />
         </SimpleGrid>
       </Stack>

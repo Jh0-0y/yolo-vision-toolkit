@@ -153,9 +153,6 @@ export default function StudioHomePage() {
             </ThemeIcon>
             <div>
               <Title order={2}>Studio</Title>
-              <Text c="dimmed" size="sm">
-                Datasets, labeling and training — one project per domain.
-              </Text>
             </div>
           </Group>
           <Button leftSection={<IconFolderPlus size={16} />} onClick={() => setOpened(true)}>

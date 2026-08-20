@@ -208,10 +208,6 @@ export default function CompareMode({ projectId, models }: Props) {
             <Text size="sm" fw={600}>
               Test set (YOLO dataset zip)
             </Text>
-            <Text size="xs" c="dimmed">
-              A .zip with <code>images/</code>, <code>labels/</code> and <code>data.yaml</code> — same as an
-              Exports download. Ground-truth labels are required to score the models.
-            </Text>
           </div>
           <Button onClick={run} disabled={!canRun} loading={running}>
             Run comparison
@@ -233,9 +229,6 @@ export default function CompareMode({ projectId, models }: Props) {
                 <IconX size={40} />
               </Dropzone.Reject>
               <Text size="sm">Drop a YOLO dataset .zip or click to upload</Text>
-              <Text size="xs" c="dimmed">
-                Each model is scored separately so you can compare them.
-              </Text>
             </Stack>
           </Dropzone>
         ) : (

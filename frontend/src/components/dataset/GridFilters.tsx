@@ -137,11 +137,6 @@ export default function GridFilters({ value, onChange, classes }: Props) {
               <Text size="sm" truncate>
                 {option.label}
               </Text>
-              {option.value === String(NO_CLASS) && (
-                <Text size="xs" c="dimmed">
-                  Empty label — a negative sample
-                </Text>
-              )}
             </div>
           </Group>
         )}

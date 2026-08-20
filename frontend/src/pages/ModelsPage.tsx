@@ -108,10 +108,6 @@ export default function ModelsPage() {
     <Stack gap="lg">
       <div>
         <Title order={3}>Models</Title>
-        <Text c="dimmed" size="sm">
-          Model registry for auto labeling and training, and accuracy comparison against your
-          labeled data.
-        </Text>
       </div>
 
       <Tabs defaultValue="registry">
@@ -248,9 +244,6 @@ export default function ModelsPage() {
             value={officialName}
             onChange={setOfficialName}
           />
-          <Text size="xs" c="dimmed">
-            Sizes grow from n to x — larger is more accurate but slower.
-          </Text>
           <Button
             onClick={() => download.mutate(officialName ?? defaultOfficial)}
             loading={download.isPending}

@@ -51,14 +51,14 @@ import DetectionSettings, {
 import TuningPanel from '../components/lab/TuningPanel'
 
 // 출력 세팅 — 그리기 도구 개별 토글. 하나도 안 켜면 가로 영상은 원본 그대로다.
-const TOGGLE_ROWS: { key: keyof CropToggles; label: string; hint: string }[] = [
-  { key: 'obj_boxes', label: 'Detection boxes', hint: 'Detected ball and player boxes' },
-  { key: 'player_trails', label: 'Player trails', hint: 'Each player’s path over the last 2s' },
-  { key: 'ball_trail', label: 'Ball trail', hint: 'The chosen ball’s path over the last 2s' },
-  { key: 'target_highlight', label: 'Target highlight', hint: 'The ball and holder the crop picked' },
-  { key: 'crop_box', label: 'Crop box', hint: 'Where the cut lands' },
-  { key: 'dead_zone', label: 'Dead zone', hint: 'The band where the window stays put' },
-  { key: 'center_line', label: 'Center line', hint: 'Aim line — color shows the target type' },
+const TOGGLE_ROWS: { key: keyof CropToggles; label: string }[] = [
+  { key: 'obj_boxes', label: 'Detection boxes' },
+  { key: 'player_trails', label: 'Player trails' },
+  { key: 'ball_trail', label: 'Ball trail' },
+  { key: 'target_highlight', label: 'Target highlight' },
+  { key: 'crop_box', label: 'Crop box' },
+  { key: 'dead_zone', label: 'Dead zone' },
+  { key: 'center_line', label: 'Center line' },
 ]
 
 function formatBytes(n: number): string {
@@ -209,7 +209,6 @@ export default function LabCropPage() {
   const clamped = applied && (applied.w !== cropW || applied.h !== cropH)
 
   const hasModel = entries.some((e) => e.modelId)
-  const overlay = TOGGLE_ROWS.some((r) => toggles[r.key])
   const res = resources.data
 
   return (
@@ -217,10 +216,6 @@ export default function LabCropPage() {
       <Group justify="space-between" align="flex-start">
         <div>
           <Title order={3}>Crop</Title>
-          <Text c="dimmed" size="sm">
-            Pick a video, set the models and knobs, and start. Every run produces crop.json, a wide
-            video and the vertical cut.
-          </Text>
         </div>
         {res && (
           <Badge variant="light" color={res.training_active ? 'orange' : 'gray'}>
@@ -378,23 +373,11 @@ export default function LabCropPage() {
           <Text size="sm" fw={600}>
             Output
           </Text>
-          <Text size="xs" c="dimmed">
-            {overlay
-              ? 'The wide video is rendered with these overlays burned in.'
-              : 'Nothing to draw — the wide video is the original, hard-linked (no extra disk).'}
-          </Text>
           {TOGGLE_ROWS.map((row) => (
             <Checkbox
               key={row.key}
               size="sm"
-              label={
-                <Group gap={6}>
-                  <Text size="sm">{row.label}</Text>
-                  <Text size="xs" c="dimmed">
-                    {row.hint}
-                  </Text>
-                </Group>
-              }
+              label={row.label}
               checked={toggles[row.key]}
               // 이벤트 값은 **여기서** 읽는다. 업데이터 함수 안에서 읽으면 React 가
               // 그 함수를 나중에 부르는 사이 currentTarget 이 null 이 되어 앱이 죽는다.

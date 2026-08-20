@@ -157,11 +157,6 @@ export default function DetectorList({
                 )}
                 <Select
                   label="Image size"
-                  description={
-                    entry.mode === 'full'
-                      ? '원본을 이 크기로 맞춰 추론'
-                      : '타일 하나를 이 크기로 — 타일보다 크면 확대된다'
-                  }
                   data={IMGSZ_OPTIONS}
                   value={String(entry.imgsz)}
                   onChange={(v) => v && patch(entry.key, { imgsz: Number(v) })}
@@ -182,9 +177,6 @@ export default function DetectorList({
                   />
                   <NumberInput
                     label="Stride (px)"
-                    description={
-                      overlap > 0 ? `겹침 ${overlap}px — 가장 큰 객체보다 커야 한다` : undefined
-                    }
                     value={entry.stride}
                     onChange={(v) => patch(entry.key, { stride: Number(v) || 480 })}
                     min={32}
@@ -208,7 +200,6 @@ export default function DetectorList({
                   {showBorderMargin && (
                     <NumberInput
                       label="Border margin (px)"
-                      description="경계에 닿은 검출은 버린다 — 옆 타일이 온전히 본다"
                       value={entry.borderMargin ?? 4}
                       onChange={(v) =>
                         patch(entry.key, { borderMargin: v === '' || v == null ? 4 : Number(v) })

@@ -121,9 +121,6 @@ export default function TrainPage() {
     <Stack gap="lg">
       <div>
         <Title order={3}>Train</Title>
-        <Text c="dimmed" size="sm">
-          Pick a dataset and base model — starting a run takes you to Training History.
-        </Text>
       </div>
 
       {trainingActive && (
@@ -222,10 +219,6 @@ export default function TrainPage() {
                 <div>
                   <Text fw={600} size="sm">
                     Augmentation
-                  </Text>
-                  <Text size="xs" c="dimmed" mb="xs">
-                    Values are ultralytics defaults. Higher = stronger; 0 = off. Clear a field to
-                    use the ultralytics default.
                   </Text>
                   <SimpleGrid cols={{ base: 2, sm: 3, md: 4 }} spacing="sm">
                     <NumberInput
