@@ -34,7 +34,10 @@ from infra import jobs
 _OTHER = -1
 
 
-def _predict_tiled(model, img_path, entry: dict, cls_map: dict[int, int], device: str, floor: float) -> list[dict]:
+def _predict_tiled(
+    model, img_path, entry: dict, cls_map: dict[int, int], device: str, floor: float,
+    names: dict[int, str],
+) -> list[dict]:
     """타일로 잘라 추론하고 원본 좌표의 박스 목록으로 되돌린다.
 
     좌표 규칙과 경계 처리는 `lib/detect/tiled.py` 에 있다 — 여기서는 자르고 모델에
@@ -42,6 +45,12 @@ def _predict_tiled(model, img_path, entry: dict, cls_map: dict[int, int], device
 
     `floor` 는 풀 프레임 경로가 쓰는 것과 **같은 conf 하한**이다 — 두 경로가 같은
     동작점에서 후보를 남겨야 점수를 나란히 놓을 수 있다.
+
+    `names` 는 데이터셋의 클래스 이름(`_OTHER` → "(not in dataset)" 포함)이다.
+    `collect()` 가 돌려주는 `Detection.cls` 는 이미 데이터셋 id 로 매핑되어 있어
+    모델이 원래 뭐라고 불렀는지는 여기서 알 수 없다 — 그래서 표시 이름은 모델의
+    원래 이름이 아니라 데이터셋 이름으로 채운다(풀 프레임 경로의 표시 이름과는
+    출처가 다르지만, 오버레이가 빈 이름을 보여주는 것보다는 낫다).
     """
     from PIL import Image
 
@@ -66,13 +75,15 @@ def _predict_tiled(model, img_path, entry: dict, cls_map: dict[int, int], device
         crops, imgsz=entry["imgsz"], conf=floor, device=device, verbose=False
     )
     for (tx, ty), r in zip(offsets, results):
+        if r.boxes is None:
+            continue
         for b in r.boxes:
             x1, y1, x2, y2 = (float(v) for v in b.xyxy[0].tolist())
             tile_boxes.append((tx, ty, (x1, y1, x2, y2), int(b.cls.item()), float(b.conf.item())))
 
     dets = collect(tile_boxes, img_w, img_h, params, entry["entry_id"], cls_map)
     return [
-        {"cls": d.cls, "name": "", "score": d.score, "xyxyn": list(d.xyxy)}
+        {"cls": d.cls, "name": names.get(d.cls, str(d.cls)), "score": d.score, "xyxyn": list(d.xyxy)}
         for d in dets
     ]
 
@@ -140,7 +151,6 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
 
     job = jobs.at(Path(jobs_dir), job_id)
     progress = job.progress_path
-    out_dir = Path(cfg["out_dir"])
 
     dataset_dir = Path(cfg["dataset_dir"])
     conf_thr = float(cfg.get("conf", 0.4))
@@ -155,6 +165,11 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
     pairs = _gather_pairs(dataset_dir, set(IMAGE_EXTS))
 
     try:
+        # cfg["out_dir"] 도 cfg["entries"] 처럼 잡의 것이 아니라 이 런의 입력이라
+        # try 안에서 읽는다 — 밖에서 읽으면 키가 빠졌을 때 예외가 emit 도 없이
+        # 새어 나가 progress.jsonl 이 영영 "running" 으로 보인다.
+        out_dir = Path(cfg["out_dir"])
+
         if not pairs:
             raise RuntimeError(
                 "No labeled images found in the dataset (expected images/ and labels/ with data.yaml)."
@@ -219,7 +234,7 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
             for e in entries:
                 eid = e["entry_id"]
                 if e["mode"] == "tiled":
-                    boxes = _predict_tiled(loaded[eid], img_path, e, cls_maps[eid], device, DETECT_FLOOR)
+                    boxes = _predict_tiled(loaded[eid], img_path, e, cls_maps[eid], device, DETECT_FLOOR, names)
                     preds_full = [
                         {"cls": b["cls"], "name": b["name"], "xyxyn": b["xyxyn"], "score": b["score"]}
                         for b in boxes

@@ -29,11 +29,29 @@ class _Arr:
         return self._data
 
 
+class _Box:
+    """One detection, stubbing the singular per-box API the TILED path reads
+    directly off `r.boxes` iteration (`b.xyxy[0].tolist()`, `b.cls.item()`,
+    `b.conf.item()`) — mirrors one entry of ultralytics' `Boxes.__iter__()`.
+    Additive: the full-frame path never iterates `_Boxes`, it reads the
+    batched `.xyxyn`/`.cls`/`.conf` arrays instead."""
+
+    def __init__(self, cls, xyxy, conf):
+        self.xyxy = np.asarray([xyxy])
+        self.cls = np.asarray(cls)
+        self.conf = np.asarray(conf)
+
+
 class _Boxes:
     def __init__(self, dets):
+        self._dets = dets  # [(cls, xyxy, conf), ...] — kept for __iter__
         self.xyxyn = _Arr([d[1] for d in dets])
         self.cls = _Arr([d[0] for d in dets])
         self.conf = _Arr([d[2] for d in dets])
+
+    def __iter__(self):
+        for cls, xyxy, conf in self._dets:
+            yield _Box(cls, xyxy, conf)
 
 
 class _Result:
@@ -43,10 +61,27 @@ class _Result:
 
 
 # model stem -> class names; and its detections on any image
-MODEL_NAMES = {"m1": {0: "ball"}, "m2": {0: "cat"}}
+MODEL_NAMES = {
+    "m1": {0: "ball"},
+    "m2": {0: "cat"},
+    "t_oov": {0: "cat"},  # tiled, out-of-vocabulary (not a dataset class)
+    "t_iv": {0: "ball"},  # tiled, in-vocabulary
+}
 MODEL_PREDS = {
     "m1": [(0, (0.10, 0.10, 0.30, 0.30), 0.90)],  # "ball" over the GT box → TP
     "m2": [(0, (0.10, 0.10, 0.30, 0.30), 0.90)],  # "cat" (not in dataset) → FP
+}
+# tiled path: one det-list per tile (tile-pixel xyxy, matches `tiles_for`'s
+# order for a 200x100 image at tile_size=stride=128 → [(0,0), (72,0)]).
+TILE_PREDS = {
+    "t_oov": [
+        [(0, (20.0, 20.0, 50.0, 50.0), 0.9)],  # tile (0,0): a "cat" box, clear of any inner border
+        [],  # tile (72,0): nothing — also exercises the `r.boxes is None` guard
+    ],
+    "t_iv": [
+        [(0, (20.0, 10.0, 60.0, 30.0), 0.9)],  # tile (0,0): "ball" placed exactly over the GT box
+        [],
+    ],
 }
 
 
@@ -59,6 +94,9 @@ class FakeYOLO:
         return self
 
     def predict(self, image, **kwargs):
+        if isinstance(image, list):
+            # tiled path: `image` is the list of tile crops, one `_Result` per crop
+            return [_Result(dets) for dets in TILE_PREDS[self._id]]
         return [_Result(MODEL_PREDS[self._id])]
 
 
@@ -95,6 +133,23 @@ def _entry(entry_id, model_id, name, pt):
         "imgsz": 640,
         "tile_size": 640,
         "stride": 480,
+        "merge_iou": 0.5,
+        "border_margin_px": 4,
+    }
+
+
+def _tiled_entry(entry_id, model_id, name, pt):
+    """A `tiled`-mode entry sized for the 200x100 fixture image: 128px
+    tile/stride makes `tiles_for` yield exactly two tiles, (0,0) and (72,0)."""
+    return {
+        "entry_id": entry_id,
+        "model_id": model_id,
+        "name": name,
+        "pt": pt,
+        "mode": "tiled",
+        "imgsz": 640,
+        "tile_size": 128,
+        "stride": 128,
         "merge_iou": 0.5,
         "border_margin_px": 4,
     }
@@ -176,3 +231,45 @@ def test_compare_warns_when_dataset_has_no_class_names(tmp_path, fake_ultralytic
     # with no dataset classes, the "ball" prediction can't map → FP, GT → FN
     overall = result["per_entry"][0]["overall"]
     assert overall["fp"] == 1 and overall["fn"] == 1
+
+
+def test_compare_tiled_entry_counts_oov_as_fp_and_scores_in_vocab_as_tp(
+    tmp_path, fake_ultralytics, monkeypatch
+):
+    """The whole tiled feature rests on: `collect()` already maps a tiled
+    detection's class to the dataset's id (or -1), and the worker must NOT
+    re-map it by name — an out-of-vocabulary tiled box has to be counted as a
+    false positive, not silently dropped, and an in-vocabulary one has to
+    score normally (proving the two paths land on the same kind of result)."""
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    ds = _seed_dataset(tmp_path)  # names=("ball",); GT xyxy_n [0.10,0.10,0.30,0.30] on 200x100
+    out_dir = tmp_path / "out3"
+
+    entries = [
+        _tiled_entry("t_oov", "t_oov", "OOV Tiled", "t_oov.pt"),
+        _tiled_entry("t_iv", "t_iv", "In-vocab Tiled", "t_iv.pt"),
+    ]
+    result = _run("job3", ds, out_dir, entries)
+    by_id = {e["entry_id"]: e for e in result["per_entry"]}
+
+    # out-of-vocabulary: cls_map sends "cat" (unknown to the dataset) to -1;
+    # collect() already applied that mapping, so this must still show up as
+    # a counted false positive — never dropped.
+    oov = by_id["t_oov"]
+    assert oov["mode"] == "tiled"
+    assert oov["overall"]["tp"] == 0
+    assert oov["overall"]["fp"] == 1
+    assert oov["overall"]["fn"] == 1
+    assert oov["detections"] == 1
+    assert oov["map50"] == 0.0
+
+    # in-vocabulary: cls_map sends "ball" to the dataset's own id 0; the box
+    # sits exactly over the GT box after tile->image coordinate restoration,
+    # so it must match as a true positive — proving the tiled path is not
+    # re-running the name-based lookup on an already-mapped class id.
+    iv = by_id["t_iv"]
+    assert iv["mode"] == "tiled"
+    assert iv["overall"]["tp"] == 1
+    assert iv["overall"]["fp"] == 0
+    assert iv["overall"]["fn"] == 0
+    assert iv["map50"] == 1.0
