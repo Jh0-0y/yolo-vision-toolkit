@@ -28,10 +28,25 @@ import {
   listDatasets,
   previewTiling,
   type ModelOut,
+  type SplitPreview,
   type TilingParams,
   type TilingPreview,
   type TrainRunOut,
 } from '../api/client'
+
+// 미리보기는 스캔 결과(positive/hard/incidental)만 서버에서 받는다 — 비율·keep_all_negatives 는
+// 스캔에 영향을 주지 않으므로 재요청 없이 여기서 백엔드와 같은 규칙으로 다시 계산한다.
+// (하드 네거티브를 전부 채우고 나서, 인시덴탈로 목표까지 채운다)
+function computeActual(s: SplitPreview, tiling: TilingParams) {
+  const target = Math.round(s.positive * tiling.negative_ratio)
+  const keptIncidental = tiling.keep_all_negatives
+    ? s.incidental
+    : Math.min(s.incidental, Math.max(0, target - s.hard))
+  const negativeKept = s.hard + keptIncidental
+  const total = s.positive + negativeKept
+  const overshoot = !tiling.keep_all_negatives && s.hard > target
+  return { negativeKept, total, overshoot }
+}
 
 export default function TrainPage() {
   const { projectId = '' } = useParams()
@@ -316,16 +331,19 @@ export default function TrainPage() {
                     >
                       Estimate
                     </Button>
-                    {preview?.splits.map((s) => (
-                      <Text key={s.split} size="xs" c="dimmed">
-                        <b>{s.split}</b> {s.positive} pos · {s.negative_kept} neg ({s.hard} hard +{' '}
-                        {s.negative_kept - s.hard} incidental) = {s.total}
-                        {s.overshoot ? ' ⚠ over target' : ''}
-                      </Text>
-                    ))}
+                    {preview?.splits.map((s) => {
+                      const { negativeKept, total, overshoot } = computeActual(s, tiling)
+                      return (
+                        <Text key={s.split} size="xs" c="dimmed">
+                          <b>{s.split}</b> {s.positive} pos · {negativeKept} neg ({s.hard} hard +{' '}
+                          {negativeKept - s.hard} incidental) = {total}
+                          {overshoot ? ' ⚠ over target' : ''}
+                        </Text>
+                      )
+                    })}
                   </Group>
 
-                  {preview?.splits.some((s) => s.overshoot) && (
+                  {preview?.splits.some((s) => computeActual(s, tiling).overshoot) && (
                     <Alert color="yellow" variant="light" p="xs">
                       <Text size="xs">
                         Hard negatives (tiles from frames with no labels) alone exceed the target
