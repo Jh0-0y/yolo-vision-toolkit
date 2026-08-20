@@ -29,6 +29,11 @@ export default function DetailsCard({ run, durationSec }: { run: TrainRunOut; du
     ['Started', new Date(run.created_at).toLocaleString()],
     ['Finished', run.finished_at ? new Date(run.finished_at).toLocaleString() : '–'],
     ['Duration', formatDuration(durationSec)],
+    ...(run.tiling
+      ? ([
+          ['Tiling', `tiled ${run.tiling.tile_size}/${run.tiling.stride}`],
+        ] as [string, React.ReactNode][])
+      : []),
     ...PRIMARY_PARAMS.filter((k) => k in run.params).map(
       (k) => [k, String(run.params[k])] as [string, React.ReactNode],
     ),

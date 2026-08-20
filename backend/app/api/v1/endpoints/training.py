@@ -58,6 +58,17 @@ def _fdt(dt) -> str:
         return dt.strftime("%Y%m%d_%H%M%S")
 
 
+def _run_tiling(run: TrainRun) -> dict | None:
+    """config.json 에 적힌 타일링 노브 — 없으면(하드링크 런) None."""
+    config_path = settings.run_dir(run.project_id, run.id) / "config.json"
+    if not config_path.exists():
+        return None
+    try:
+        return json.loads(config_path.read_text()).get("tiling")
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def _to_out(run: TrainRun, session: Session) -> RunOut:
     base = session.get(ModelEntry, run.base_model_id)
     return RunOut(
@@ -68,6 +79,7 @@ def _to_out(run: TrainRun, session: Session) -> RunOut:
         base_model_id=run.base_model_id,
         base_model_name=base.name if base else None,
         params=json.loads(run.params_json),
+        tiling=_run_tiling(run),
         metrics=json.loads(run.metrics_json) if run.metrics_json else None,
         error=run.error,
         created_at=iso_utc(run.created_at),

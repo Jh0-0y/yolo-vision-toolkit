@@ -132,7 +132,9 @@ export default function TrainRunDetailPage() {
       setLiveStatus(ev)
       const p = eventToPoint(ev)
       if (p) setSsePoints((prev) => (prev.some((x) => x.epoch === p.epoch) ? prev : [...prev, p]))
-      if (ev.phase !== 'epoch') {
+      // 'tiling' 은 20 장마다 한 번씩, 많으면 수백 번 온다 — 매번 네 개를 무효화하면
+      // 그 프레임을 자르는 몇 분 동안 API 를 그만큼 다시 두들긴다. epoch 처럼 뺀다.
+      if (ev.phase !== 'epoch' && ev.phase !== 'tiling') {
         queryClient.invalidateQueries({ queryKey: ['train-run', runId] })
         queryClient.invalidateQueries({ queryKey: ['train-runs', projectId] })
         queryClient.invalidateQueries({ queryKey: ['train-results', runId] })
@@ -204,7 +206,15 @@ export default function TrainRunDetailPage() {
   // last epoch finished but the run is still alive = final validation + saving weights
   const finalizing = running && livePhase === 'epoch' && epochTotal > 0 && epochNow >= epochTotal
   const stageLabel =
-    livePhase === 'start' ? 'Starting…' : livePhase === 'preparing' ? 'Preparing…' : 'Initializing…'
+    livePhase === 'start'
+      ? 'Starting…'
+      : livePhase === 'tiling'
+        ? 'Cutting tiles…'
+        : livePhase === 'staging'
+          ? 'Staging…'
+          : livePhase === 'preparing'
+            ? 'Preparing…'
+            : 'Initializing…'
 
   const durationSec =
     points[points.length - 1]?.time ??
@@ -304,7 +314,9 @@ export default function TrainRunDetailPage() {
                     {stageLabel}
                   </Text>
                   <Text size="xs" c="dimmed">
-                    Loading model & scanning the dataset — the first epoch will start shortly.
+                    {livePhase === 'tiling' && liveStatus?.total
+                      ? `Cutting tiles for train/val — ${liveStatus.done ?? 0} / ${liveStatus.total}`
+                      : 'Loading model & scanning the dataset — the first epoch will start shortly.'}
                   </Text>
                 </div>
               </Group>

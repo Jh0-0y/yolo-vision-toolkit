@@ -72,6 +72,7 @@ class RunOut(BaseModel):
     base_model_id: str
     base_model_name: str | None = None
     params: dict
+    tiling: dict | None = None
     metrics: dict | None
     error: str | None
     created_at: str

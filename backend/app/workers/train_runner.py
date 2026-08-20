@@ -67,7 +67,7 @@ def main(run_dir_arg: str) -> int:
 
             src = Path(cfg["dataset_dir"])
             pid, dsid = src.parent.parent.name, src.name
-            materialize_for_training(
+            composition = materialize_for_training(
                 dataset_dir=src,
                 out_dir=Path(dataset_path),
                 reviewed=datasets.read_reviewed(pid, dsid) & datasets.image_stems(pid, dsid),
@@ -82,6 +82,9 @@ def main(run_dir_arg: str) -> int:
                 ),
                 emit=lambda ev: jobs.emit(progress_path, ev),
             )
+            # 타일이 사라진 뒤에도 무엇으로 학습했는지가 남도록 분할별 구성을
+            # progress.jsonl 에 기록해 둔다 (config.json 은 노브만 남긴다).
+            jobs.emit(progress_path, {"phase": "materialized", "composition": composition})
 
         from ultralytics import YOLO
 

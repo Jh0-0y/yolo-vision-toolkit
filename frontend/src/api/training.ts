@@ -74,6 +74,8 @@ export interface TrainRunOut {
   base_model_id: string
   base_model_name: string | null
   params: Record<string, number | string>
+  /** config.json 의 타일링 노브 — 하드링크 런이면 null */
+  tiling: TilingParams | null
   metrics: Record<string, number> | null
   error: string | null
   created_at: string
@@ -81,11 +83,25 @@ export interface TrainRunOut {
 }
 
 export interface TrainEpochEvent {
-  phase: 'preparing' | 'start' | 'epoch_start' | 'epoch' | 'done' | 'error' | 'cancelled'
+  phase:
+    | 'preparing'
+    | 'staging'
+    | 'tiling'
+    | 'materialized'
+    | 'start'
+    | 'epoch_start'
+    | 'epoch'
+    | 'done'
+    | 'error'
+    | 'cancelled'
   epoch?: number
   epochs?: number
   metrics?: Record<string, number>
   msg?: string
+  /** phase 'tiling' 전용 — 지금까지 자른 타일 수 */
+  done?: number
+  /** phase 'tiling' 전용 — 전체 타일 수 */
+  total?: number
 }
 
 export function subscribeTrainEvents(
