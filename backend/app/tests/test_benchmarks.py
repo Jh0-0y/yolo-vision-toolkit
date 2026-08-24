@@ -76,3 +76,37 @@ def test_reconcile_leaves_finished_runs_alone(data_dir):
     benchmarks.reconcile_on_boot()
 
     assert benchmarks.status_of(bid)[0] == "done"
+
+
+def test_delete_keeps_the_job_dir_while_the_worker_is_still_running(data_dir, monkeypatch):
+    """도는 잡을 지울 때는 잡 디렉터리를 남긴다 — 취소 신호가 그 안의 파일 하나라,
+    함께 지우면 워커가 다음 확인 지점에 닿기 전에 신호가 사라진다."""
+    from app.api.v1.endpoints.predict import compare
+    from app.services.test_jobs import test_job_manager
+
+    bid = benchmarks.create("p1", {})
+    jobs.at(settings.jobs_dir, bid).prepare()
+    # 진짜 워커를 띄우지 않고 "아직 돈다"만 흉내 낸다
+    monkeypatch.setattr(test_job_manager, "is_active", lambda job_id: True)
+
+    compare.delete_benchmark(bid, "p1")
+
+    assert not benchmarks.run_dir("p1", bid).exists()
+    job = jobs.at(settings.jobs_dir, bid)
+    assert job.path.is_dir()
+    assert job.cancelled()  # 워커가 다음 확인 지점에서 볼 수 있게 남아 있다
+    assert benchmarks.list_runs("p1") == []
+
+
+def test_delete_takes_the_job_dir_too_when_nothing_is_running(data_dir, monkeypatch):
+    from app.api.v1.endpoints.predict import compare
+    from app.services.test_jobs import test_job_manager
+
+    bid = benchmarks.create("p1", {})
+    jobs.at(settings.jobs_dir, bid).ensure().emit({"phase": "done"})
+    monkeypatch.setattr(test_job_manager, "is_active", lambda job_id: False)
+
+    compare.delete_benchmark(bid, "p1")
+
+    assert not benchmarks.run_dir("p1", bid).exists()
+    assert not (settings.jobs_dir / bid).exists()

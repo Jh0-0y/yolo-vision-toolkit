@@ -156,8 +156,20 @@ def delete_benchmark(bench_id: str, project_id: str):
     if not benchmarks.valid_id(bench_id):
         raise HTTPException(422, "Invalid benchmark id")
     _require_project_id(project_id)
-    test_job_manager.cancel(bench_id)  # 아직 돌고 있으면 멈추라고 알린다
-    benchmarks.delete(project_id, bench_id)
+    # 아직 돌고 있으면 멈추라고 알리고 **잡 디렉터리는 남긴다.** 취소 신호가 그
+    # 안의 `CANCEL` 파일 하나뿐이라, 런과 함께 지우면 워커가 다음 확인 지점에
+    # 닿기 전에 신호가 사라져 500장을 끝까지 돌린다. 워커는 이미지 한 장마다,
+    # 그리고 **결과를 쓰기 전에** 확인하므로 신호를 보면 `benchmarks/{id}/` 를
+    # 되살리지 않고 멈춘다.
+    #
+    # 대가: 이렇게 남은 잡 디렉터리는 아무도 회수하지 않는다 — `reconcile_on_boot`
+    # 은 `*/run.json` 을 글롭하는데 그것이 이미 없다. progress.jsonl 몇 KB 를
+    # 남기는 쪽이, 하드링크 데이터셋 트리를 통째로 쥔 채 목록에 뜨지도 않아
+    # 지울 수도 없는 디렉터리를 남기는 쪽보다 낫다.
+    active = test_job_manager.is_active(bench_id)
+    if active:
+        test_job_manager.cancel(bench_id)
+    benchmarks.delete(project_id, bench_id, keep_job_dir=active)
 
 
 @router.get("/benchmarks/{bench_id}/events")

@@ -139,10 +139,17 @@ def list_runs(project_id: str) -> list[dict]:
     return out
 
 
-def delete(project_id: str, bench_id: str) -> None:
-    """런 하나를 통째로 지운다 — 산출물도 진행률도 이 안에만 있다."""
+def delete(project_id: str, bench_id: str, *, keep_job_dir: bool = False) -> None:
+    """런 하나를 통째로 지운다 — 산출물도 진행률도 이 안에만 있다.
+
+    `keep_job_dir` 는 **아직 도는 잡을 지울 때** 쓴다. 취소 신호는 잡 디렉터리
+    안의 `CANCEL` 파일 하나뿐이라, 여기서 함께 지우면 워커가 다음 확인 지점에
+    닿기도 전에 신호가 사라진다. 언제 남겨야 하는지는 잡이 살아 있는지 아는
+    쪽(라우트)이 판단한다 — 이 모듈은 잡 매니저를 모른다.
+    """
     shutil.rmtree(run_dir(project_id, bench_id), ignore_errors=True)
-    shutil.rmtree(settings.jobs_dir / bench_id, ignore_errors=True)
+    if not keep_job_dir:
+        shutil.rmtree(settings.jobs_dir / bench_id, ignore_errors=True)
 
 
 def reconcile_on_boot() -> None:
