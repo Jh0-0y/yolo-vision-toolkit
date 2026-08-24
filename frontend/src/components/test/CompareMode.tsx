@@ -1,7 +1,7 @@
 // 벤치마크 목록 — 런 하나가 디렉터리 하나이고 이력이 남는다.
 // 결과는 상세 페이지에서 본다(학습이 이력→상세로 나뉜 것과 같은 결).
 
-import { useState } from 'react'
+import { useLayoutEffect, useState } from 'react'
 import {
   ActionIcon,
   Badge,
@@ -41,6 +41,10 @@ const STATUS_COLOR: Record<string, string> = {
 interface Props {
   projectId: string
   models: ModelOut[]
+  /** 새 벤치마크 모달의 열림 상태. 여는 버튼이 ModelsPage 헤더(Registry 의 Add model 자리)에
+   *  올라가 있어, 상태도 부모가 들고 있다. */
+  newBenchmarkOpened: boolean
+  onNewBenchmarkOpened: (opened: boolean) => void
 }
 
 /** 화면의 `DetectorEntry` → API 의 `BenchmarkEntry`. 엔트리별 conf 는 없다 —
@@ -56,11 +60,15 @@ const toApiEntry = (e: DetectorEntry): BenchmarkEntry => ({
 })
 
 /** 벤치마크 이력 + 새로 만들기. 박스 오버레이·지표 표는 상세 페이지(Task 7)로 옮겼다. */
-export default function CompareMode({ projectId, models }: Props) {
+export default function CompareMode({
+  projectId,
+  models,
+  newBenchmarkOpened,
+  onNewBenchmarkOpened,
+}: Props) {
   const navigate = useNavigate()
   const qc = useQueryClient()
 
-  const [modalOpen, setModalOpen] = useState(false)
   const [datasetToken, setDatasetToken] = useState<string | null>(null)
   const [conf, setConf] = useState(0.4)
   const [iou, setIou] = useState(0.5)
@@ -69,7 +77,7 @@ export default function CompareMode({ projectId, models }: Props) {
   const datasets = useQuery({
     queryKey: ['datasets', projectId],
     queryFn: () => listDatasets(projectId),
-    enabled: modalOpen,
+    enabled: newBenchmarkOpened,
   })
 
   const benchmarks = useQuery({
@@ -99,32 +107,31 @@ export default function CompareMode({ projectId, models }: Props) {
         iou,
       }),
     onSuccess: ({ job_id }) => {
-      setModalOpen(false)
+      onNewBenchmarkOpened(false)
       invalidate()
       navigate(`/projects/${projectId}/benchmarks/${job_id}`)
     },
     onError: (e) => notifications.show({ message: String(e), color: 'red' }),
   })
 
-  const openModal = () => {
+  // 모달이 **열리는 순간** 입력을 기본값으로 되돌린다. 여는 버튼이 둘(헤더 · 빈 상태)이고
+  // 하나는 부모에 있어, 준비는 여는 쪽이 아니라 열림 상태에 붙어 있어야 빠지지 않는다.
+  // 그리기 전에 끝나야 지난 런의 값이 한 프레임 비치지 않으므로 layout effect 다.
+  useLayoutEffect(() => {
+    if (!newBenchmarkOpened) return
     setDatasetToken(null)
     setConf(0.4)
     setIou(0.5)
     setEntries([newEntry('full')])
-    setModalOpen(true)
-  }
+  }, [newBenchmarkOpened])
+
+  const openModal = () => onNewBenchmarkOpened(true)
 
   const canStart = !!datasetToken && entries.length > 0 && !entries.some((e) => !e.modelId)
   const rows = benchmarks.data ?? []
 
   return (
     <Stack gap="lg">
-      <Group justify="flex-end">
-        <Button leftSection={<IconPlus size={16} />} onClick={openModal}>
-          New benchmark
-        </Button>
-      </Group>
-
       <Card withBorder radius="md" padding="sm">
         <Table highlightOnHover verticalSpacing="sm">
           <Table.Thead>
@@ -201,7 +208,12 @@ export default function CompareMode({ projectId, models }: Props) {
         )}
       </Card>
 
-      <Modal opened={modalOpen} onClose={() => setModalOpen(false)} title="New benchmark" size="lg">
+      <Modal
+        opened={newBenchmarkOpened}
+        onClose={() => onNewBenchmarkOpened(false)}
+        title="New benchmark"
+        size="lg"
+      >
         <Stack gap="md">
           <Select
             label="Dataset"

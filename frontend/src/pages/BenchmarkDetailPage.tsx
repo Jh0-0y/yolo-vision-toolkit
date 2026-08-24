@@ -2,7 +2,7 @@
 // 표시 로직은 옛 Compare 탭에서 그대로 옮겨 왔고, 키만 모델에서 **엔트리**로 바꿨다:
 // 같은 모델이 방식만 달리해 두 번 들어올 수 있어 `model_id` 로는 구분되지 않는다.
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   ActionIcon,
   Alert,
@@ -122,7 +122,10 @@ export default function BenchmarkDetailPage() {
 
   // 파라미터만 바뀌는 이동에서는 React Router 가 컴포넌트를 재사용한다 —
   // 앞 런의 진행률·확대 이미지·일회성 재조회 플래그가 다음 런으로 새어 나가지 않게 지운다.
-  useEffect(() => {
+  // layout effect 인 이유 — 그린 뒤에 지우면 앞 런의 진행 막대·확대 모달이 한 프레임 비친다.
+  // 아래 안전망(passive effect)보다 먼저 도는 것도 그대로다: layout effect 는 commit 단계에서
+  // passive effect 전체보다 앞서 돌아, 플래그는 언제나 읽히기 전에 지워진다.
+  useLayoutEffect(() => {
     refetchedOnDone.current = false
     setProgress(null)
     setEnlarged(null)

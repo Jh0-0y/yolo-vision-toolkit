@@ -23,6 +23,7 @@ import {
   IconDotsVertical,
   IconDownload,
   IconPencil,
+  IconPlus,
   IconTrash,
 } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
@@ -38,15 +39,25 @@ const SOURCE_LABEL: Record<string, { label: string; color: string }> = {
   trained: { label: 'Trained', color: 'teal' },
 }
 
+const TAB_IDS = ['registry', 'compare'] as const
+const DEFAULT_TAB = 'registry'
+
+/** `?tab=` 은 손으로 고칠 수 있다 — 없는 탭 이름이 오면 Tabs 가 아무 패널도 안 그려
+ *  본문이 통째로 빈다. 실제로 있는 탭만 받고 나머지는 기본 탭으로 돌린다. */
+const initialTab = (requested: string | null) =>
+  TAB_IDS.some((id) => id === requested) ? requested! : DEFAULT_TAB
+
 export default function ModelsPage() {
   const { projectId = '' } = useParams()
   // 벤치마크 상세에서 돌아올 때 어느 탭이었는지는 `?tab=` 이 들고 온다
   const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
-  // 탭을 controlled 로 두는 이유는 하나다 — 모델을 들이는 버튼은 Registry 의 액션이라
-  // Compare 를 보는 동안에는 헤더에서 빠져야 한다.
-  const [tab, setTab] = useState<string | null>(searchParams.get('tab') ?? 'registry')
+  // 탭을 controlled 로 두는 이유는 하나다 — 헤더의 액션 버튼이 탭마다 다르다:
+  // Registry 면 Add model, Benchmark 면 New benchmark 가 같은 자리에 선다.
+  const [tab, setTab] = useState<string | null>(() => initialTab(searchParams.get('tab')))
   const [downloadOpen, setDownloadOpen] = useState(false)
+  // 벤치마크 만들기 모달 — 여는 버튼이 헤더에 있으니 열림 상태도 여기서 든다
+  const [newBenchmarkOpened, setNewBenchmarkOpened] = useState(false)
   const [officialName, setOfficialName] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<ModelOut | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -128,6 +139,11 @@ export default function ModelsPage() {
           <Title order={3}>Models</Title>
         </div>
         {tab === 'registry' && addMenu()}
+        {tab === 'compare' && (
+          <Button leftSection={<IconPlus size={16} />} onClick={() => setNewBenchmarkOpened(true)}>
+            New benchmark
+          </Button>
+        )}
       </Group>
 
       <Tabs value={tab} onChange={setTab}>
@@ -235,7 +251,12 @@ export default function ModelsPage() {
         </Tabs.Panel>
 
         <Tabs.Panel value="compare" pt="md">
-          <CompareMode projectId={projectId} models={models.data ?? []} />
+          <CompareMode
+            projectId={projectId}
+            models={models.data ?? []}
+            newBenchmarkOpened={newBenchmarkOpened}
+            onNewBenchmarkOpened={setNewBenchmarkOpened}
+          />
         </Tabs.Panel>
       </Tabs>
 
