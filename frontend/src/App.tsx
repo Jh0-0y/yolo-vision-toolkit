@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import JobIndicator from './components/JobIndicator'
 import LabLayout from './layouts/LabLayout'
 import ProjectLayout from './layouts/ProjectLayout'
+import BenchmarkDetailPage from './pages/BenchmarkDetailPage'
 import DatasetDetailPage from './pages/DatasetDetailPage'
 import DatasetsPage from './pages/DatasetsPage'
 import HomePage from './pages/HomePage'
@@ -43,6 +44,8 @@ export default function App() {
         <Route path="training/new" element={<TrainPage />} />
         <Route path="training/:runId" element={<TrainRunDetailPage />} />
         <Route path="models" element={<ModelsPage />} />
+        {/* 벤치마크 결과는 목록(모델 화면의 탭)에서 행을 눌러 들어온다 */}
+        <Route path="benchmarks/:benchId" element={<BenchmarkDetailPage />} />
         {/* 옛 화면들 — 데이터셋 안으로 들어갔거나 이름이 바뀌었다 */}
         <Route path="dataset" element={<Navigate to="../datasets" replace />} />
         <Route path="dataset/label/:stem" element={<Navigate to="../datasets" replace />} />
