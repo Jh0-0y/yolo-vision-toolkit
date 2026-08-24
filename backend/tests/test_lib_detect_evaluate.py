@@ -216,3 +216,71 @@ def test_size_bucket_uses_real_pixels_not_normalized_area():
     box = [0.0, 0.0, 0.04, 0.04]
     assert size_of(box, 500, 500) == "small"     # 20×20 = 400
     assert size_of(box, 1920, 1080) == "medium"  # 76.8×43.2 ≈ 3318
+
+
+def test_match_any_class_pairs_across_classes():
+    """공을 선수로 본 것을 잡아내야 혼동행렬이 뜻을 갖는다."""
+    from lib.detect.evaluate import match_any_class
+
+    gt = [_g(0, 0.0, 0.0, 0.2, 0.2)]          # 실제로는 클래스 0
+    pred = [_p(1, 0.9, 0.0, 0.0, 0.2, 0.2)]   # 클래스 1 로 예측
+
+    matched, missed, spurious = match_any_class(gt, pred)
+
+    assert matched == [(0, 1, 0.9)]
+    assert missed == [] and spurious == []
+
+
+def test_match_any_class_separates_misses_from_spurious():
+    from lib.detect.evaluate import match_any_class
+
+    gt = [_g(0, 0.0, 0.0, 0.1, 0.1), _g(1, 0.5, 0.5, 0.6, 0.6)]
+    pred = [_p(0, 0.9, 0.0, 0.0, 0.1, 0.1), _p(1, 0.7, 0.9, 0.9, 1.0, 1.0)]
+
+    matched, missed, spurious = match_any_class(gt, pred)
+
+    assert matched == [(0, 0, 0.9)]
+    assert missed == [1]              # 두 번째 정답은 아무도 못 잡음
+    assert spurious == [(1, 0.7)]     # 두 번째 예측은 헛것
+
+
+def test_confusion_puts_misses_and_spurious_in_the_background_lane():
+    from lib.detect.evaluate import confusion_at
+
+    matched = [(0, 0, 0.9), (0, 1, 0.8)]   # 하나는 맞고 하나는 0 을 1 로 봄
+    missed = [0]                            # 놓친 0 하나
+    spurious = [(1, 0.7)]                   # 헛것 1 하나
+
+    out = confusion_at(0.5, matched, missed, spurious, [0, 1], {0: "ball", 1: "player"})
+
+    assert out["labels"] == ["ball", "player", "background"]
+    # 행=실제, 열=예측
+    assert out["rows"][0] == [1, 1, 1]      # 실제 ball: ball 1, player 1, 놓침 1
+    assert out["rows"][1] == [0, 0, 0]      # 실제 player: 없음
+    assert out["rows"][2] == [0, 1, None]   # 배경을 player 로 본 헛것 1
+
+
+def test_confusion_demotes_low_score_pairs_to_misses():
+    """conf 를 올리면 잘려 나간 짝의 정답은 '놓침'이 된다 — 사라지면 안 된다."""
+    from lib.detect.evaluate import confusion_at
+
+    matched = [(0, 0, 0.9), (0, 0, 0.3)]
+
+    high = confusion_at(0.5, matched, [], [], [0], {0: "ball"})
+    low = confusion_at(0.2, matched, [], [], [0], {0: "ball"})
+
+    assert low["rows"][0] == [2, 0]     # 둘 다 맞음
+    assert high["rows"][0] == [1, 1]    # 하나는 맞고, 잘린 하나는 놓침
+
+
+def test_confusion_row_totals_never_change_with_conf():
+    """conf 가 무엇이든 '실제' 개수는 그대로다 — 정답이 사라질 리 없다."""
+    from lib.detect.evaluate import confusion_at
+
+    matched = [(0, 0, 0.9), (0, 1, 0.4), (1, 1, 0.6)]
+    missed = [1]
+
+    for c in (0.1, 0.5, 0.95):
+        rows = confusion_at(c, matched, missed, [], [0, 1], {0: "a", 1: "b"})["rows"]
+        assert sum(rows[0]) == 2   # 실제 a 는 항상 2개
+        assert sum(rows[1]) == 2   # 실제 b 는 항상 2개

@@ -305,3 +305,76 @@ def build_cls_map(
         int(cid): ds_by_norm.get(normalize(name), other)
         for cid, name in model_names.items()
     }
+
+
+def match_any_class(
+    gt: list[dict], pred: list[dict], iou_thr: float = 0.5
+) -> tuple[list[tuple[int, int, float]], list[int], list[tuple[int, float]]]:
+    """혼동행렬용 매칭 — **클래스가 달라도 짝짓는다.**
+
+    "공을 선수로 봤다"를 보이는 것이 혼동행렬의 존재 이유인데, 같은 클래스끼리만 붙이는
+    채점용 매칭으로는 그 사실이 만들어지지 않는다.
+
+    점수를 함께 돌려주므로 호출자는 이 매칭을 **한 번만** 하고, 동작점마다
+    `점수 ≥ conf` 로 거르면 된다.
+    """
+    gt_used = [False] * len(gt)
+    matched: list[tuple[int, int, float]] = []
+    spurious: list[tuple[int, float]] = []
+    for p in sorted(pred, key=lambda x: -x["score"]):
+        pb = tuple(p["xyxyn"])
+        best_iou, best_j = iou_thr, -1
+        for j, g in enumerate(gt):
+            if gt_used[j]:
+                continue
+            v = iou(pb, tuple(g["xyxy_n"]))
+            if v >= best_iou:
+                best_iou, best_j = v, j
+        if best_j >= 0:
+            gt_used[best_j] = True
+            matched.append((gt[best_j]["cls"], p["cls"], p["score"]))
+        else:
+            spurious.append((p["cls"], p["score"]))
+    missed = [g["cls"] for j, g in enumerate(gt) if not gt_used[j]]
+    return matched, missed, spurious
+
+
+def confusion_at(
+    conf: float,
+    matched: list[tuple[int, int, float]],
+    missed: list[int],
+    spurious: list[tuple[int, float]],
+    class_ids: list[int],
+    names: dict[int, str],
+) -> dict:
+    """한 동작점의 혼동행렬. 행이 실제, 열이 예측이고 양쪽 끝에 `background` 가 붙는다.
+
+    `conf` 아래로 잘린 짝은 **놓침으로 강등된다** — 예측이 사라졌을 뿐 정답은 그대로
+    거기 있기 때문이다. 그래서 행 합(실제 개수)은 conf 와 무관하게 일정하다.
+
+    `background × background` 는 뜻이 없어 비운다(`None`).
+    """
+    idx = {c: i for i, c in enumerate(class_ids)}
+    n = len(class_ids)
+    bg = n  # background 의 자리
+    rows = [[0] * (n + 1) for _ in range(n + 1)]
+
+    for gt_cls, pred_cls, score in matched:
+        r = idx.get(gt_cls)
+        if r is None:
+            continue  # 데이터셋에 없는 정답 클래스는 있을 수 없다
+        if score >= conf:
+            c = idx.get(pred_cls, bg)
+            rows[r][c] += 1
+        else:
+            rows[r][bg] += 1  # 잘린 짝 → 놓침
+    for gt_cls in missed:
+        r = idx.get(gt_cls)
+        if r is not None:
+            rows[r][bg] += 1
+    for pred_cls, score in spurious:
+        if score >= conf:
+            rows[bg][idx.get(pred_cls, bg)] += 1
+
+    rows[bg][bg] = None
+    return {"labels": [names.get(c, str(c)) for c in class_ids] + ["background"], "rows": rows}
