@@ -134,7 +134,7 @@ export default function ModelsPage() {
             Registry
           </Tabs.Tab>
           <Tabs.Tab value="compare" leftSection={<IconChartBar size={16} />}>
-            Compare
+            Benchmark
           </Tabs.Tab>
         </Tabs.List>
 

@@ -1,469 +1,264 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+// 벤치마크 목록 — 런 하나가 디렉터리 하나이고 이력이 남는다.
+// 결과는 상세 페이지에서 본다(학습이 이력→상세로 나뉜 것과 같은 결).
+
+import { useState } from 'react'
 import {
-  Alert,
+  ActionIcon,
   Badge,
   Button,
   Card,
   Group,
+  Loader,
   Modal,
-  MultiSelect,
-  NumberInput,
-  Progress,
-  SimpleGrid,
+  Select,
   Slider,
   Stack,
   Table,
   Text,
+  Tooltip,
 } from '@mantine/core'
-import { Dropzone } from '@mantine/dropzone'
-import { BarChart } from '@mantine/charts'
-import { IconAlertTriangle, IconFileZip, IconX } from '@tabler/icons-react'
+import { notifications } from '@mantine/notifications'
+import { IconChartBar, IconPlus, IconTrash } from '@tabler/icons-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
+import type { ModelOut } from '../../api/client'
+import { listDatasets } from '../../api/datasets'
 import {
-  getCompareResult,
-  startCompare,
-  subscribeCompareEvents,
-  type CompareBox,
-  type CompareImage,
-  type CompareProgress,
-  type CompareResult,
-  type ModelOut,
-} from '../../api/client'
+  deleteBenchmark,
+  listBenchmarks,
+  startBenchmark,
+  type BenchmarkEntry,
+} from '../../api/test/compare'
+import DetectorList, { newEntry, type DetectorEntry } from '../detect/DetectorList'
 
-const ZIP_MIME = ['application/zip', 'application/x-zip-compressed', 'application/octet-stream']
-const GT_COLOR = '#51cf66' // ground truth = green (dashed)
-const MODEL_COLORS = ['#4dabf7', '#f783ac', '#ffa94d', '#845ef7', '#38d9a9', '#ff8787']
+const STATUS_COLOR: Record<string, string> = {
+  running: 'blue',
+  done: 'green',
+  error: 'red',
+  cancelled: 'yellow',
+}
 
 interface Props {
   projectId: string
   models: ModelOut[]
 }
 
-interface Layer {
-  boxes: CompareBox[]
-  color: string
-  dashed: boolean
-}
+/** 화면의 `DetectorEntry` → API 의 `BenchmarkEntry`. 엔트리별 conf 는 없다 —
+ *  모든 엔트리가 모달의 전역 conf 하나로 채점된다. */
+const toApiEntry = (e: DetectorEntry): BenchmarkEntry => ({
+  model_id: e.modelId!,
+  mode: e.mode,
+  imgsz: e.imgsz,
+  tile_size: e.tileSize,
+  stride: e.stride,
+  merge_iou: e.mergeIou,
+  border_margin_px: e.borderMargin ?? 4,
+})
 
-function BoxOverlay({ src, layers }: { src: string; layers: Layer[] }) {
-  return (
-    <div style={{ position: 'relative', width: '100%', lineHeight: 0 }}>
-      <img src={src} alt="" style={{ width: '100%', display: 'block', borderRadius: 6 }} />
-      {layers.flatMap((layer, li) =>
-        layer.boxes.map((b, i) => {
-          const [x1, y1, x2, y2] = b.xyxyn
-          return (
-            <div
-              key={`${li}-${i}`}
-              style={{
-                position: 'absolute',
-                left: `${x1 * 100}%`,
-                top: `${y1 * 100}%`,
-                width: `${(x2 - x1) * 100}%`,
-                height: `${(y2 - y1) * 100}%`,
-                border: `2px ${layer.dashed ? 'dashed' : 'solid'} ${layer.color}`,
-                borderRadius: 2,
-              }}
-            />
-          )
-        }),
-      )}
-    </div>
-  )
-}
-
-const fmt = (v: number | undefined) => (v == null ? '—' : v.toFixed(3))
-
-/** Score 1..N models against an uploaded YOLO test set (images + labels +
- *  data.yaml): per-model mAP + P/R/F1, per-class metrics, and box overlays. */
+/** 벤치마크 이력 + 새로 만들기. 박스 오버레이·지표 표는 상세 페이지(Task 7)로 옮겼다. */
 export default function CompareMode({ projectId, models }: Props) {
-  const [modelIds, setModelIds] = useState<string[]>([])
+  const navigate = useNavigate()
+  const qc = useQueryClient()
+
+  const [modalOpen, setModalOpen] = useState(false)
+  const [datasetToken, setDatasetToken] = useState<string | null>(null)
   const [conf, setConf] = useState(0.4)
   const [iou, setIou] = useState(0.5)
-  const [imgsz, setImgsz] = useState<number | string>(640)
-  const [file, setFile] = useState<File | null>(null)
-  const [running, setRunning] = useState(false)
-  const [progress, setProgress] = useState<CompareProgress | null>(null)
-  const [result, setResult] = useState<CompareResult | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [enlarged, setEnlarged] = useState<CompareImage | null>(null)
-  const unsub = useRef<(() => void) | null>(null)
+  const [entries, setEntries] = useState<DetectorEntry[]>([newEntry('full')])
 
-  useEffect(() => {
-    if (models.length && !modelIds.length) setModelIds([models[0].id])
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [models])
-  useEffect(() => () => unsub.current?.(), [])
+  const datasets = useQuery({
+    queryKey: ['datasets', projectId],
+    queryFn: () => listDatasets(projectId),
+    enabled: modalOpen,
+  })
 
-  const colorOf = (modelId: string) =>
-    MODEL_COLORS[modelIds.indexOf(modelId) % MODEL_COLORS.length]
+  const benchmarks = useQuery({
+    queryKey: ['benchmarks', projectId],
+    queryFn: () => listBenchmarks(projectId),
+    // 도는 런이 있으면 상태가 바뀌니 짧게 당겨 폴링한다
+    refetchInterval: 3_000,
+  })
 
-  async function run() {
-    if (!file || !modelIds.length) return
-    unsub.current?.()
-    setError(null)
-    setResult(null)
-    setProgress({ phase: 'start' })
-    setRunning(true)
-    try {
-      const { job_id } = await startCompare({
-        projectId,
-        modelIds,
-        file,
-        params: { conf, iou_wbf: iou, imgsz: Number(imgsz), device: null },
-      })
-      unsub.current = subscribeCompareEvents(job_id, async (ev) => {
-        setProgress(ev)
-        if (ev.phase === 'done') {
-          try {
-            setResult(await getCompareResult(job_id))
-          } catch (e) {
-            setError((e as Error).message)
-          }
-          setRunning(false)
-        } else if (ev.phase === 'error') {
-          setError(ev.msg || 'Comparison failed')
-          setRunning(false)
-        } else if (ev.phase === 'cancelled') {
-          setRunning(false)
-        }
-      })
-    } catch (e) {
-      setError((e as Error).message)
-      setRunning(false)
-    }
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['benchmarks', projectId] })
+
+  const remove = useMutation({
+    mutationFn: (id: string) => deleteBenchmark(projectId, id),
+    onSuccess: () => {
+      notifications.show({ message: 'Benchmark deleted', color: 'green' })
+      invalidate()
+    },
+    onError: (e) => notifications.show({ message: String(e), color: 'red' }),
+  })
+
+  const start = useMutation({
+    mutationFn: () =>
+      startBenchmark({
+        dataset: datasetToken!,
+        entries: entries.map(toApiEntry),
+        conf,
+        iou,
+      }),
+    onSuccess: ({ job_id }) => {
+      setModalOpen(false)
+      invalidate()
+      navigate(`/projects/${projectId}/benchmarks/${job_id}`)
+    },
+    onError: (e) => notifications.show({ message: String(e), color: 'red' }),
+  })
+
+  const openModal = () => {
+    setDatasetToken(null)
+    setConf(0.4)
+    setIou(0.5)
+    setEntries([newEntry('full')])
+    setModalOpen(true)
   }
 
-  const pct =
-    progress?.total && progress.done != null ? Math.round((progress.done / progress.total) * 100) : 0
-
-  // "Best" = highest mAP@0.5:0.95 (the headline COCO metric)
-  const bestId = useMemo(() => {
-    if (!result?.per_model.length) return null
-    return result.per_model.reduce((a, b) => (b.map > a.map ? b : a)).model_id
-  }, [result])
-
-  const prfData = useMemo(() => {
-    if (!result) return []
-    return (['precision', 'recall', 'f1'] as const).map((k) => ({
-      metric: k[0].toUpperCase() + k.slice(1),
-      ...Object.fromEntries(result.per_model.map((m) => [m.name, m.overall[k]])),
-    }))
-  }, [result])
-
-  const mapData = useMemo(() => {
-    if (!result) return []
-    return (['map50', 'map'] as const).map((k) => ({
-      metric: k === 'map50' ? 'mAP@0.5' : 'mAP@0.5:0.95',
-      ...Object.fromEntries(result.per_model.map((m) => [m.name, m[k]])),
-    }))
-  }, [result])
-
-  const canRun = modelIds.length > 0 && !!file && !running
+  const canStart = !!datasetToken && entries.length > 0 && !entries.some((e) => !e.modelId)
+  const rows = benchmarks.data ?? []
 
   return (
-    <Stack gap="md">
-      {/* settings */}
-      <Card withBorder radius="md" padding="md">
-        <Stack gap="sm">
-          <Text size="sm" fw={600}>
-            Settings
-          </Text>
-          <MultiSelect
-            label="Models to compare (1 or more)"
-            placeholder={models.length ? 'Pick models' : 'No models — train or upload one first'}
-            data={models.map((m) => ({ value: m.id, label: m.name }))}
-            value={modelIds}
-            onChange={setModelIds}
-            disabled={running || !models.length}
+    <Stack gap="lg">
+      <Group justify="flex-end">
+        <Button leftSection={<IconPlus size={16} />} onClick={openModal}>
+          New benchmark
+        </Button>
+      </Group>
+
+      <Card withBorder radius="md" padding="sm">
+        <Table highlightOnHover verticalSpacing="sm">
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Dataset</Table.Th>
+              <Table.Th>Models</Table.Th>
+              <Table.Th>Status</Table.Th>
+              <Table.Th>Created</Table.Th>
+              <Table.Th w={48} />
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {rows.map((b) => (
+              <Table.Tr
+                key={b.id}
+                style={{ cursor: 'pointer' }}
+                onClick={() => navigate(`/projects/${projectId}/benchmarks/${b.id}`)}
+              >
+                <Table.Td>
+                  <Text size="sm" fw={600}>
+                    {b.dataset_name}
+                  </Text>
+                </Table.Td>
+                <Table.Td>
+                  <Text size="sm">{b.entries} models</Text>
+                </Table.Td>
+                <Table.Td>
+                  <Group gap={6} wrap="nowrap">
+                    {b.status === 'running' && <Loader size={14} />}
+                    <Badge variant="light" color={STATUS_COLOR[b.status] ?? 'gray'}>
+                      {b.status}
+                    </Badge>
+                  </Group>
+                  {b.error && (
+                    <Text size="xs" c="red" lineClamp={1}>
+                      {b.error}
+                    </Text>
+                  )}
+                </Table.Td>
+                <Table.Td>
+                  <Text size="xs" c="dimmed">
+                    {new Date(b.created_at).toLocaleString()}
+                  </Text>
+                </Table.Td>
+                <Table.Td onClick={(e) => e.stopPropagation()}>
+                  <Tooltip label="Delete">
+                    <ActionIcon
+                      variant="subtle"
+                      color="red"
+                      loading={remove.isPending && remove.variables === b.id}
+                      onClick={() => {
+                        if (confirm(`Delete benchmark on "${b.dataset_name}"?`))
+                          remove.mutate(b.id)
+                      }}
+                    >
+                      <IconTrash size={16} />
+                    </ActionIcon>
+                  </Tooltip>
+                </Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+        {rows.length === 0 && (
+          <Stack align="center" gap="xs" py="xl">
+            <IconChartBar size={36} stroke={1.2} />
+            <Text c="dimmed" size="sm">
+              No benchmarks yet. Score models against a dataset&apos;s test split.
+            </Text>
+            <Button variant="light" leftSection={<IconPlus size={16} />} onClick={openModal}>
+              New benchmark
+            </Button>
+          </Stack>
+        )}
+      </Card>
+
+      <Modal opened={modalOpen} onClose={() => setModalOpen(false)} title="New benchmark" size="lg">
+        <Stack gap="md">
+          <Select
+            label="Dataset"
+            placeholder={datasets.data?.length ? 'Pick a dataset' : 'No datasets yet'}
+            data={(datasets.data ?? []).map((d) => ({
+              value: `dataset:${projectId}:${d.id}`,
+              label: d.name,
+            }))}
+            value={datasetToken}
+            onChange={setDatasetToken}
+            disabled={start.isPending}
           />
+
+          <DetectorList
+            models={models}
+            entries={entries}
+            onEntries={setEntries}
+            disabled={start.isPending}
+            showConf={false}
+            showBorderMargin
+            defaultMode="full"
+          />
+
           <Group grow align="flex-start">
             <div>
               <Text size="sm" fw={600}>
                 Confidence <Text span c="dimmed">{conf.toFixed(2)}</Text>
               </Text>
-              <Slider min={0.05} max={0.95} step={0.05} value={conf} onChange={setConf} disabled={running} />
+              <Slider
+                min={0.05}
+                max={0.95}
+                step={0.05}
+                value={conf}
+                onChange={setConf}
+                disabled={start.isPending}
+              />
             </div>
             <div>
               <Text size="sm" fw={600}>
                 Match IoU <Text span c="dimmed">{iou.toFixed(2)}</Text>
               </Text>
-              <Slider min={0.3} max={0.9} step={0.05} value={iou} onChange={setIou} disabled={running} />
+              <Slider
+                min={0.3}
+                max={0.9}
+                step={0.05}
+                value={iou}
+                onChange={setIou}
+                disabled={start.isPending}
+              />
             </div>
-            <NumberInput
-              label="Image size"
-              value={imgsz}
-              onChange={setImgsz}
-              min={64}
-              step={32}
-              disabled={running}
-            />
           </Group>
-        </Stack>
-      </Card>
 
-      {/* test-set upload */}
-      <Card withBorder radius="md" padding="md">
-        <Group justify="space-between" mb="xs">
-          <div>
-            <Text size="sm" fw={600}>
-              Test set (YOLO dataset zip)
-            </Text>
-          </div>
-          <Button onClick={run} disabled={!canRun} loading={running}>
-            Run comparison
+          <Button onClick={() => start.mutate()} disabled={!canStart} loading={start.isPending}>
+            Start
           </Button>
-        </Group>
-
-        {!file ? (
-          <Dropzone
-            onDrop={(files) => files[0] && setFile(files[0])}
-            accept={ZIP_MIME}
-            multiple={false}
-            disabled={running || !modelIds.length}
-          >
-            <Stack align="center" gap="xs" py="xl">
-              <Dropzone.Idle>
-                <IconFileZip size={40} stroke={1.2} />
-              </Dropzone.Idle>
-              <Dropzone.Reject>
-                <IconX size={40} />
-              </Dropzone.Reject>
-              <Text size="sm">Drop a YOLO dataset .zip or click to upload</Text>
-            </Stack>
-          </Dropzone>
-        ) : (
-          <Group justify="space-between">
-            <Group gap={8}>
-              <IconFileZip size={20} />
-              <Text size="sm" truncate="end" maw={360}>
-                {file.name}
-              </Text>
-            </Group>
-            <Button size="xs" variant="subtle" onClick={() => setFile(null)} disabled={running}>
-              Choose another
-            </Button>
-          </Group>
-        )}
-      </Card>
-
-      {error && (
-        <Alert color="red" icon={<IconAlertTriangle size={18} />} withCloseButton onClose={() => setError(null)}>
-          {error}
-        </Alert>
-      )}
-
-      {running && (
-        <Stack gap={4}>
-          <Text size="sm">
-            Scoring… {progress?.done ?? 0}/{progress?.total ?? '?'} images
-          </Text>
-          <Progress value={pct} animated />
         </Stack>
-      )}
-
-      {result && !running && (
-        <Stack gap="md">
-          {result.warning && (
-            <Alert color="orange" icon={<IconAlertTriangle size={18} />}>
-              {result.warning}
-            </Alert>
-          )}
-
-          {/* per-model metrics */}
-          <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="sm">
-            {result.per_model.map((m) => (
-              <Card key={m.model_id} withBorder radius="md" padding="sm">
-                <Group justify="space-between" mb={6}>
-                  <Group gap={6}>
-                    <span
-                      style={{ width: 10, height: 10, borderRadius: 2, background: colorOf(m.model_id) }}
-                    />
-                    <Text size="sm" fw={600} truncate="end" maw={140}>
-                      {m.name}
-                    </Text>
-                  </Group>
-                  {m.model_id === bestId && (
-                    <Badge size="xs" color="teal" variant="light">
-                      Best mAP
-                    </Badge>
-                  )}
-                </Group>
-                <Group grow mb={6}>
-                  <Metric label="mAP@.5" value={m.map50.toFixed(3)} strong />
-                  <Metric label="mAP@.5:.95" value={m.map.toFixed(3)} strong />
-                </Group>
-                <Group grow>
-                  <Metric label="P" value={m.overall.precision.toFixed(3)} />
-                  <Metric label="R" value={m.overall.recall.toFixed(3)} />
-                  <Metric label="F1" value={m.overall.f1.toFixed(3)} />
-                </Group>
-                <Text size="xs" c="dimmed" mt={6}>
-                  {m.detections} detections · TP {m.overall.tp} · FP {m.overall.fp} · FN {m.overall.fn}
-                </Text>
-              </Card>
-            ))}
-          </SimpleGrid>
-
-          <SimpleGrid cols={{ base: 1, md: 2 }} spacing="sm">
-            <Card withBorder radius="md" padding="md">
-              <Text size="sm" fw={600} mb="xs">
-                mAP by model
-              </Text>
-              <BarChart
-                h={240}
-                data={mapData}
-                dataKey="metric"
-                series={result.per_model.map((m) => ({ name: m.name, color: colorOf(m.model_id) }))}
-                yAxisProps={{ domain: [0, 1] }}
-                withLegend
-              />
-            </Card>
-            <Card withBorder radius="md" padding="md">
-              <Text size="sm" fw={600} mb="xs">
-                Precision / Recall / F1 by model
-              </Text>
-              <BarChart
-                h={240}
-                data={prfData}
-                dataKey="metric"
-                series={result.per_model.map((m) => ({ name: m.name, color: colorOf(m.model_id) }))}
-                yAxisProps={{ domain: [0, 1] }}
-                withLegend
-              />
-            </Card>
-          </SimpleGrid>
-
-          {/* per-class metrics, one table per model */}
-          <Stack gap="xs">
-            <Text size="sm" fw={600}>
-              Per-class metrics
-            </Text>
-            <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="sm">
-              {result.per_model.map((m) => (
-                <Card key={m.model_id} withBorder radius="md" padding="sm">
-                  <Group gap={6} mb={6}>
-                    <span
-                      style={{ width: 10, height: 10, borderRadius: 2, background: colorOf(m.model_id) }}
-                    />
-                    <Text size="sm" fw={600}>
-                      {m.name}
-                    </Text>
-                  </Group>
-                  <Table.ScrollContainer minWidth={420}>
-                    <Table striped highlightOnHover fz="xs" verticalSpacing={4}>
-                      <Table.Thead>
-                        <Table.Tr>
-                          <Table.Th>Class</Table.Th>
-                          <Table.Th ta="right">GT</Table.Th>
-                          <Table.Th ta="right">P</Table.Th>
-                          <Table.Th ta="right">R</Table.Th>
-                          <Table.Th ta="right">F1</Table.Th>
-                          <Table.Th ta="right">AP@.5</Table.Th>
-                          <Table.Th ta="right">AP@.5:.95</Table.Th>
-                        </Table.Tr>
-                      </Table.Thead>
-                      <Table.Tbody>
-                        {m.per_class.map((c) => (
-                          <Table.Tr key={c.cls}>
-                            <Table.Td>{c.name}</Table.Td>
-                            <Table.Td ta="right">{c.gt}</Table.Td>
-                            <Table.Td ta="right">{fmt(c.precision)}</Table.Td>
-                            <Table.Td ta="right">{fmt(c.recall)}</Table.Td>
-                            <Table.Td ta="right">{fmt(c.f1)}</Table.Td>
-                            <Table.Td ta="right">{fmt(c.ap50)}</Table.Td>
-                            <Table.Td ta="right">{fmt(c.ap)}</Table.Td>
-                          </Table.Tr>
-                        ))}
-                        {m.per_class.length === 0 && (
-                          <Table.Tr>
-                            <Table.Td colSpan={7}>
-                              <Text size="xs" c="dimmed" ta="center">
-                                No overlapping classes between this model and the test set.
-                              </Text>
-                            </Table.Td>
-                          </Table.Tr>
-                        )}
-                      </Table.Tbody>
-                    </Table>
-                  </Table.ScrollContainer>
-                </Card>
-              ))}
-            </SimpleGrid>
-          </Stack>
-
-          {/* visual comparison */}
-          <Stack gap="xs">
-            <Group gap="md">
-              <Text size="sm" fw={600}>
-                Per-image boxes
-              </Text>
-              <Group gap={6}>
-                <span style={{ width: 14, height: 0, borderTop: `2px dashed ${GT_COLOR}` }} />
-                <Text size="xs" c="dimmed">
-                  Ground truth
-                </Text>
-                {result.per_model.map((m) => (
-                  <Group gap={4} key={m.model_id}>
-                    <span style={{ width: 14, height: 2, background: colorOf(m.model_id) }} />
-                    <Text size="xs" c="dimmed">
-                      {m.name}
-                    </Text>
-                  </Group>
-                ))}
-              </Group>
-            </Group>
-            <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="sm">
-              {result.images.map((img) => (
-                <Stack key={img.stem} gap={4} style={{ cursor: 'zoom-in' }} onClick={() => setEnlarged(img)}>
-                  <BoxOverlay
-                    src={img.url}
-                    layers={[
-                      { boxes: img.gt_boxes, color: GT_COLOR, dashed: true },
-                      ...img.per_model.map((pm) => ({
-                        boxes: pm.pred_boxes,
-                        color: colorOf(pm.model_id),
-                        dashed: false,
-                      })),
-                    ]}
-                  />
-                  <Text size="xs" c="dimmed" truncate="end">
-                    {img.name}
-                  </Text>
-                </Stack>
-              ))}
-            </SimpleGrid>
-          </Stack>
-        </Stack>
-      )}
-
-      <Modal opened={!!enlarged} onClose={() => setEnlarged(null)} size="xl" title={enlarged?.name}>
-        {enlarged && (
-          <BoxOverlay
-            src={enlarged.url}
-            layers={[
-              { boxes: enlarged.gt_boxes, color: GT_COLOR, dashed: true },
-              ...enlarged.per_model.map((pm) => ({
-                boxes: pm.pred_boxes,
-                color: colorOf(pm.model_id),
-                dashed: false,
-              })),
-            ]}
-          />
-        )}
       </Modal>
-    </Stack>
-  )
-}
-
-function Metric({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
-  return (
-    <Stack gap={0} align="center">
-      <Text size="xs" c="dimmed">
-        {label}
-      </Text>
-      <Text size={strong ? 'md' : 'sm'} fw={strong ? 700 : 600}>
-        {value}
-      </Text>
     </Stack>
   )
 }
