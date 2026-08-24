@@ -28,6 +28,7 @@ import json
 from pathlib import Path
 
 from infra import jobs
+from lib.labels.io import atomic_write_text
 
 # sentinel class id for predictions whose class isn't defined in the dataset;
 # it never matches any GT box, so it is correctly counted as a false positive.
@@ -292,7 +293,7 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
             })
 
         out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / "images_manifest.json").write_text(json.dumps(manifest))
+        atomic_write_text(out_dir / "images_manifest.json", json.dumps(manifest))
         result = {
             "per_entry": per_entry,
             "images": images,
@@ -301,7 +302,7 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
             "iou": iou_match,
             "warning": warning,
         }
-        (out_dir / "result.json").write_text(json.dumps(result))
+        atomic_write_text(out_dir / "result.json", json.dumps(result))
         jobs.emit(progress, {"phase": "done", "done": len(pairs), "total": len(pairs)})
         return {"status": "done", "images": len(images)}
     except Exception as e:

@@ -19,7 +19,7 @@ from sqlmodel import Session
 from app.api.v1.endpoints.predict.common import job_event_stream, model_pt
 from app.db import get_session
 from app.models import ModelEntry
-from app.schemas.predict import BenchmarkEntryIn, BenchmarkOut, BenchmarkStart, TestJobStart
+from app.schemas.predict import BenchmarkOut, BenchmarkStart, TestJobStart
 from app.services import benchmarks, datasets
 from app.services.test_jobs import test_job_manager
 from lib.detect.tiled import TiledParams
@@ -61,7 +61,22 @@ async def start_benchmark(body: BenchmarkStart, session: Session = Depends(get_s
                 merge_iou=e.merge_iou, border_margin_px=e.border_margin_px,
             ).validate()
             if errors:
-                raise HTTPException(422, f"Invalid tiling params: {errors}")
+                raise HTTPException(422, f"Invalid tiling params: {'; '.join(errors)}")
+
+    # 모델 조회는 디렉터리를 만들기 **전에** 끝낸다 — model_pt() 가 여기서 422 를
+    # 던지면(모델 없음·파일 없음·다른 프로젝트 소유) 남길 것이 아직 아무것도 없다.
+    entries = []
+    for i, e in enumerate(body.entries):
+        entry = session.get(ModelEntry, e.model_id)
+        entries.append({
+            "entry_id": f"e{i}",
+            "model_id": e.model_id,
+            "name": entry.name if entry else e.model_id,
+            "pt": model_pt(session, e.model_id, project_id),
+            "mode": e.mode, "imgsz": e.imgsz, "tile_size": e.tile_size,
+            "stride": e.stride, "merge_iou": e.merge_iou,
+            "border_margin_px": e.border_margin_px,
+        })
 
     ds_name = (datasets.read_meta(project_id, dataset_id) or {}).get("name", dataset_id)
     # 기록은 **시작할 때** 쓴다 — 실패한 시도도 목록에 남아야 무엇을 해봤는지가 남는다
@@ -95,19 +110,6 @@ async def start_benchmark(body: BenchmarkStart, session: Session = Depends(get_s
             422, "Nothing in the test split — split the dataset first"
         ) from None
 
-    entries = []
-    for i, e in enumerate(body.entries):
-        entry = session.get(ModelEntry, e.model_id)
-        entries.append({
-            "entry_id": f"e{i}",
-            "model_id": e.model_id,
-            "name": entry.name if entry else e.model_id,
-            "pt": model_pt(session, e.model_id, project_id),
-            "mode": e.mode, "imgsz": e.imgsz, "tile_size": e.tile_size,
-            "stride": e.stride, "merge_iou": e.merge_iou,
-            "border_margin_px": e.border_margin_px,
-        })
-
     cfg = {
         "project_id": project_id,
         "entries": entries,
@@ -136,6 +138,8 @@ def delete_benchmark(bench_id: str, project_id: str):
 
 @router.get("/benchmarks/{bench_id}/events")
 async def benchmark_events(bench_id: str):
+    if not benchmarks.valid_id(bench_id):
+        raise HTTPException(422, "Invalid benchmark id")
     return await job_event_stream(bench_id)
 
 
