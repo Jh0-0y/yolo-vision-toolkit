@@ -27,7 +27,7 @@ import {
 } from '@tabler/icons-react'
 import { notifications } from '@mantine/notifications'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { api, modelDownloadUrl, patchModel, type ModelOut, type OfficialModel } from '../api/client'
 import AddModelMenu from '../components/models/AddModelMenu'
 import CompareMode from '../components/test/CompareMode'
@@ -40,10 +40,12 @@ const SOURCE_LABEL: Record<string, { label: string; color: string }> = {
 
 export default function ModelsPage() {
   const { projectId = '' } = useParams()
+  // 벤치마크 상세에서 돌아올 때 어느 탭이었는지는 `?tab=` 이 들고 온다
+  const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
   // 탭을 controlled 로 두는 이유는 하나다 — 모델을 들이는 버튼은 Registry 의 액션이라
   // Compare 를 보는 동안에는 헤더에서 빠져야 한다.
-  const [tab, setTab] = useState<string | null>('registry')
+  const [tab, setTab] = useState<string | null>(searchParams.get('tab') ?? 'registry')
   const [downloadOpen, setDownloadOpen] = useState(false)
   const [officialName, setOfficialName] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<ModelOut | null>(null)

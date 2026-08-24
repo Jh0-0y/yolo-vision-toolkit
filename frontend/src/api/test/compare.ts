@@ -79,6 +79,10 @@ export interface CompareEntryResult {
   model_id: string
   name: string
   mode: 'full' | 'tiled'
+  /** 화면의 엔트리 제목에 크기를 붙이려고 함께 온다 — `full` 은 `imgsz`,
+   *  `tiled` 는 `tile_size` 가 그 엔트리를 규정하는 숫자다. */
+  imgsz: number
+  tile_size: number
   overall: CompareOverall
   per_class: ClassMetric[]
   detections: number

@@ -194,6 +194,8 @@ def test_compare_scores_each_model_and_counts_unknown_class_as_fp(
     assert by_id["m1"]["model_id"] == "m1"
     assert by_id["m1"]["name"] == "Model A"
     assert by_id["m1"]["mode"] == "full"
+    # 화면의 엔트리 제목(`Model A · full 640`)이 여기서 나온다
+    assert by_id["m1"]["imgsz"] == 640
     assert by_id["m1"]["map50"] == 1.0
     assert by_id["m1"]["map"] == 1.0
 
@@ -257,6 +259,8 @@ def test_compare_tiled_entry_counts_oov_as_fp_and_scores_in_vocab_as_tp(
     # a counted false positive — never dropped.
     oov = by_id["t_oov"]
     assert oov["mode"] == "tiled"
+    # 타일 엔트리의 제목은 tile_size 로 붙는다 (`OOV Tiled · tiled 128`)
+    assert oov["tile_size"] == 128
     assert oov["overall"]["tp"] == 0
     assert oov["overall"]["fp"] == 1
     assert oov["overall"]["fn"] == 1

@@ -79,6 +79,11 @@ function BoxOverlay({ src, layers }: { src: string; layers: Layer[] }) {
 
 const fmt = (v: number | undefined) => (v == null ? '—' : v.toFixed(3))
 
+/** 엔트리를 규정하는 것은 모델 이름 + 방식 + 그 방식의 크기다 —
+ *  같은 모델을 `tiled 640` 과 `tiled 512` 로 두 번 넣어도 카드가 구분돼야 한다. */
+const entryTitle = (e: CompareEntryResult) =>
+  `${e.name} · ${e.mode === 'tiled' ? `tiled ${e.tile_size}` : `full ${e.imgsz}`}`
+
 /** 데이터셋 test 분할로 채점한 벤치마크 한 건의 결과. 결과가 아직 없으면(404)
  *  진행률을 구독해 기다리고, 오래전에 끝난 런은 구독 없이 바로 결과를 읽는다. */
 export default function BenchmarkDetailPage() {
@@ -114,6 +119,14 @@ export default function BenchmarkDetailPage() {
   const { refetch: refetchResult } = result
 
   const running = bench?.status === 'running'
+
+  // 파라미터만 바뀌는 이동에서는 React Router 가 컴포넌트를 재사용한다 —
+  // 앞 런의 진행률·확대 이미지·일회성 재조회 플래그가 다음 런으로 새어 나가지 않게 지운다.
+  useEffect(() => {
+    refetchedOnDone.current = false
+    setProgress(null)
+    setEnlarged(null)
+  }, [benchId])
 
   // 진행률 구독 — 도는 동안에만. 끝나면 상태가 바뀌며 정리 함수가 스트림을 닫는다.
   useEffect(() => {
@@ -151,7 +164,7 @@ export default function BenchmarkDetailPage() {
     const seen = new Map<string, number>()
     ;(data?.per_entry ?? []).forEach((e, i) => {
       colors[e.entry_id] = ENTRY_COLORS[i % ENTRY_COLORS.length]
-      const base = `${e.name} · ${e.mode}`
+      const base = entryTitle(e)
       const n = (seen.get(base) ?? 0) + 1
       seen.set(base, n)
       labels[e.entry_id] = n > 1 ? `${base} #${n}` : base
@@ -194,7 +207,10 @@ export default function BenchmarkDetailPage() {
   const conf = bench?.conf ?? data?.conf
   const iou = bench?.iou ?? data?.iou
   const entryCount = data?.per_entry.length ?? bench?.entries
-  const waiting = !data && (running || (!bench && benchmarks.isLoading) || result.isFetching)
+  // 진행 막대는 **진짜 도는 동안만**. 오래전에 끝난 런을 여는 것이 이 화면의 기본
+  // 경로인데, 결과 JSON 을 받는 동안 0% 막대를 띄우면 방금 시작한 것처럼 보인다.
+  const waiting = !data && running
+  const loading = !data && !running && (benchmarks.isLoading || result.isFetching)
 
   return (
     <Stack gap="md">
@@ -202,7 +218,7 @@ export default function BenchmarkDetailPage() {
       <Group justify="space-between" wrap="wrap">
         <Group gap="xs">
           <Tooltip label="Back to Benchmarks">
-            <ActionIcon variant="default" onClick={() => navigate(`/projects/${projectId}/models`)}>
+            <ActionIcon variant="default" onClick={() => navigate(`/projects/${projectId}/models?tab=compare`)}>
               <IconArrowLeft size={16} />
             </ActionIcon>
           </Tooltip>
@@ -222,9 +238,16 @@ export default function BenchmarkDetailPage() {
         </Text>
       </Group>
 
-      {!benchmarks.isLoading && !bench && (
+      {/* 목록을 **받아 온 뒤에도** 없을 때만 "지워졌다"고 말한다 — 조회 실패는
+          `data: undefined` 라 이 조건에 섞이면 살아 있는 런을 삭제된 것으로 만든다 */}
+      {benchmarks.isSuccess && !bench && (
         <Alert color="gray" icon={<IconAlertTriangle size={18} />}>
           This benchmark is no longer in the history.
+        </Alert>
+      )}
+      {benchmarks.isError && (
+        <Alert color="red" icon={<IconAlertTriangle size={18} />}>
+          Could not load the benchmark list: {(benchmarks.error as Error).message}
         </Alert>
       )}
 
@@ -238,7 +261,7 @@ export default function BenchmarkDetailPage() {
           This benchmark was cancelled before it finished.
         </Alert>
       )}
-      {!data && !waiting && notReady && bench?.status !== 'running' && (
+      {!data && !waiting && !loading && notReady && bench?.status !== 'running' && (
         <Alert color="gray" icon={<IconAlertTriangle size={18} />}>
           No result was stored for this benchmark.
         </Alert>
@@ -247,6 +270,15 @@ export default function BenchmarkDetailPage() {
         <Alert color="red" icon={<IconAlertTriangle size={18} />}>
           {resultError}
         </Alert>
+      )}
+
+      {loading && (
+        <Group gap="sm" justify="center" py="xl">
+          <Loader size="md" />
+          <Text size="sm" c="dimmed">
+            Loading results…
+          </Text>
+        </Group>
       )}
 
       {waiting && (

@@ -285,6 +285,10 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                 "model_id": e["model_id"],
                 "name": e["name"],
                 "mode": e["mode"],
+                # 크기까지 실어야 화면이 엔트리를 구분한다 — 같은 모델을 tile 640 과
+                # tile 512 로 두 번 넣으면 mode 만으로는 두 카드가 똑같아 보인다.
+                "imgsz": e["imgsz"],
+                "tile_size": e["tile_size"],
                 "overall": agg["overall"],
                 "per_class": agg["per_class"],
                 "detections": det_counts[eid],
