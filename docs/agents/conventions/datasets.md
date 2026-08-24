@@ -179,10 +179,12 @@ zip 은 UTF-8 바이트를 넣고도 플래그를 세우지 않는다. 규격대
   (`projects/{pid}/benchmarks/{bench_id}/dataset/`). 내보내기와 달리 그 트리는 런과 함께
   남는다 — 오버레이가 그 이미지를 가리키기 때문이다 → [데이터 배치](../data-layout.md)
 
-## 학습 입력은 토큰 하나다
+## 학습·벤치마크 입력은 토큰 하나다
 
 `dataset:{project_id}:{dataset_id}`. 다른 형태는 없다 — 옛 `export:` · `upload:` 는 사라졌다.
-벤치마크도 같은 토큰을 받는다(`predict/compare.py:_parse_dataset_token`).
 학습을 시작하면 그 데이터셋의 train/val 을 `runs/{run_id}/dataset/` 에 펼친다. 타일링을 껐으면
 하드링크라 런을 지울 때 함께 사라지고, 켰으면 `train_runner` 가 타일로 다시 쪼개 학습이
 끝나면(성공·실패 무관) 곧바로 지운다 — `config.json` 에서 그대로 재현되므로 남겨 둘 이유가 없다.
+
+**벤치마크도 같은 토큰을 받는다**(`predict/compare.py:_parse_dataset_token`). 펼치는 것은
+test 분할이고, 그 트리는 학습과 달리 런과 함께 남는다(위 "내보내기와 학습은 같은 함수를 쓴다").

@@ -64,7 +64,7 @@ pt = settings.model_dir(project_id, model_id) / "model.pt"   # ○
 
 | DB (SQLite) | 파일 |
 |---|---|
-| `Project` · `LabProject` · `ModelEntry` · `Job` · `TrainRun` — 이 다섯뿐 | 라벨 · 클래스 · 검수 플래그 · 내보내기 · 연구실 영상 · 크롭 런 · 잡 진행상황 |
+| `Project` · `LabProject` · `ModelEntry` · `Job` · `TrainRun` — 이 다섯뿐 | 라벨 · 클래스 · 검수 플래그 · 내보내기 · 연구실 영상 · 크롭 런 · **벤치마크 런** · 잡 진행상황 |
 
 - 새 상태를 만들 때 **먼저 파일로 둘 수 있는지 본다.** 지금까지 DB는 "목록에 뜨고 상태가 바뀌는 것"만 담았다.
 - DB 접근은 **API 프로세스에서만** 한다. 워커는 값을 받아 값을 돌려준다 → [계층 경계](conventions/layer-boundaries.md)

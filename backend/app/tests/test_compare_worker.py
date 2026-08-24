@@ -178,8 +178,8 @@ def test_compare_scores_each_model_and_counts_unknown_class_as_fp(
     tmp_path, fake_ultralytics, monkeypatch
 ):
     monkeypatch.setattr(settings, "data_dir", tmp_path)
-    # the image route confines served files to test_dir/compare/{job}; the worker
-    # writes absolute image paths into the manifest regardless, so just seed a ds.
+    # the image route confines served files to the benchmark run directory; the
+    # worker writes absolute image paths into the manifest regardless, so just seed a ds.
     ds = _seed_dataset(tmp_path)
     out_dir = tmp_path / "out1"
 

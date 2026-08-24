@@ -1,7 +1,9 @@
-"""Model-comparison worker: score one or more detector entries against an
-UPLOADED YOLO test set (images + labels + data.yaml), separately per entry
-(a model id paired with its own inference mode — full frame or tiled), so
-they can be compared. Runs in a child process (torch/ultralytics). Progress →
+"""Benchmark worker: score one or more detector entries against a dataset's
+`test` split — the API materializes it (images + labels + data.yaml) into the
+benchmark run's own `dataset/` directory before dispatching this job, and
+passes that path as cfg["dataset_dir"]. Each entry is scored separately (a
+model id paired with its own inference mode — full frame or tiled), so they
+can be compared. Runs in a child process (torch/ultralytics). Progress →
 jobs_dir/{job_id}/progress.jsonl; result and images_manifest.json →
 cfg["out_dir"] (the benchmark run's own directory, not the job directory).
 
