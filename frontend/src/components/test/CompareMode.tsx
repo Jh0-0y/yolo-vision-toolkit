@@ -4,6 +4,7 @@
 import { useLayoutEffect, useState } from 'react'
 import {
   ActionIcon,
+  Alert,
   Badge,
   Button,
   Card,
@@ -18,7 +19,7 @@ import {
   Tooltip,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconChartBar, IconPlus, IconTrash } from '@tabler/icons-react'
+import { IconAlertTriangle, IconChartBar, IconPlus, IconTrash } from '@tabler/icons-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import type { ModelOut } from '../../api/client'
@@ -215,12 +216,25 @@ export default function CompareMode({
         size="lg"
       >
         <Stack gap="md">
+          {/* 고를 수 있는 것이 하나도 없으면 Select 가 통째로 잠긴 것처럼 보인다 — 이유를 말해 준다 */}
+          {(datasets.data ?? []).length > 0 &&
+            (datasets.data ?? []).every((d) => d.test === 0) && (
+              <Alert color="yellow" icon={<IconAlertTriangle size={16} />}>
+                No dataset has a test split yet. Open a dataset, split it into train/val/test
+                with a test ratio above 0, and it will show up here.
+              </Alert>
+            )}
+
           <Select
             label="Dataset"
+            description="Scored against this dataset's test split."
             placeholder={datasets.data?.length ? 'Pick a dataset' : 'No datasets yet'}
+            // test 가 비어 있으면 시작해도 422 다 — 누르게 두지 말고 여기서 막고,
+            // 왜 못 고르는지 수치로 보여 준다.
             data={(datasets.data ?? []).map((d) => ({
               value: `dataset:${projectId}:${d.id}`,
-              label: d.name,
+              label: d.test > 0 ? `${d.name} — ${d.test} in test` : `${d.name} — no test split`,
+              disabled: d.test === 0,
             }))}
             value={datasetToken}
             onChange={setDatasetToken}

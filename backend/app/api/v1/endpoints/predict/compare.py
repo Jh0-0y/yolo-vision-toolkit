@@ -92,6 +92,24 @@ async def start_benchmark(body: BenchmarkStart, session: Session = Depends(get_s
             "border_margin_px": e.border_margin_px,
         })
 
+    # test 분할이 비었는지 **자리를 만들기 전에** 본다. 그래야 흔한 실패에 고아 런이
+    # 생기지 않고, 무엇보다 "안 나눴다"와 "나눴는데 test 가 0"을 갈라 말할 수 있다 —
+    # 앞의 것은 나누라는 안내가 맞지만, 뒤의 것은 이미 나눈 사용자에게 틀린 말이다.
+    reviewed = datasets.read_reviewed(project_id, dataset_id) & datasets.image_stems(
+        project_id, dataset_id
+    )
+    splits = datasets.read_splits(project_id, dataset_id)
+    if not any(splits.get(stem) == "test" for stem in reviewed):
+        if not reviewed:
+            raise HTTPException(422, "No reviewed images in this dataset — review some first")
+        if not any(s in ("train", "val", "test") for s in splits.values()):
+            raise HTTPException(422, "This dataset is not split yet — split it into train/val/test first")
+        raise HTTPException(
+            422,
+            "The test split is empty — this dataset is split, but no image landed in test. "
+            "Split again with a test ratio above 0, or add images that are not yet assigned.",
+        )
+
     ds_name = (datasets.read_meta(project_id, dataset_id) or {}).get("name", dataset_id)
     # 기록은 **시작할 때** 쓴다 — 실패한 시도도 목록에 남아야 무엇을 해봤는지가 남는다
     bench_id = benchmarks.create(
@@ -118,14 +136,12 @@ async def start_benchmark(body: BenchmarkStart, session: Session = Depends(get_s
                 dataset_dir=datasets.dataset_dir(project_id, dataset_id),
                 out_dir=dataset_dir,
                 kind="test",
-                reviewed=datasets.read_reviewed(project_id, dataset_id)
-                & datasets.image_stems(project_id, dataset_id),
-                splits=datasets.read_splits(project_id, dataset_id),
+                reviewed=reviewed,
+                splits=splits,
             )
-        except dataset_export.ExportError:
-            raise HTTPException(
-                422, "Nothing in the test split — split the dataset first"
-            ) from None
+        except dataset_export.ExportError as e:
+            # 위에서 이미 걸렀으므로 여기 오는 것은 그 사이에 데이터가 바뀐 경우다.
+            raise HTTPException(422, f"Could not lay out the test split: {e}") from None
 
         cfg = {
             "project_id": project_id,
