@@ -80,6 +80,54 @@ def match_for_ap(gt: list[dict], pred: list[dict], iou_thr: float) -> list[tuple
     return rows
 
 
+def match_for_ap_indexed(
+    gt: list[dict], pred: list[dict], iou_thr: float
+) -> list[tuple[int, float, int]]:
+    """`match_for_ap` 과 같은 규칙이되, **어느 정답에 붙었는지**까지 돌려준다.
+
+    크기별 AP 의 COCO 규칙("다른 구간 정답에 붙은 예측은 무시")을 지키려면 참/거짓만으로는
+    부족하다 — 그 예측이 *어느* 정답을 claim 했는지 알아야 구간 밖인지 판단할 수 있다.
+    매칭을 한 번만 하고 크기별 AP·동작점 스냅샷·전체 AP 를 모두 여기서 파생시킨다.
+    """
+    gt_used = [False] * len(gt)
+    rows: list[tuple[int, float, int]] = []
+    for p in sorted(pred, key=lambda x: -x["score"]):
+        pb = tuple(p["xyxyn"])
+        best_iou, best_j = iou_thr, -1
+        for j, g in enumerate(gt):
+            if gt_used[j] or g["cls"] != p["cls"]:
+                continue
+            v = iou(pb, tuple(g["xyxy_n"]))
+            if v >= best_iou:
+                best_iou, best_j = v, j
+        if best_j >= 0:
+            gt_used[best_j] = True
+        rows.append((p["cls"], p["score"], best_j))
+    return rows
+
+
+SIZE_BUCKETS: tuple[str, ...] = ("small", "medium", "large")
+
+# COCO 의 넓이 경계 — 픽셀 제곱이다.
+_SMALL_MAX = 32 * 32
+_MEDIUM_MAX = 96 * 96
+
+
+def size_of(xyxy_n: list[float], img_w: int, img_h: int) -> str:
+    """박스가 어느 크기 구간인가. **원본 프레임 픽셀**로 잰다.
+
+    정규화 좌표로 재면 이미지 크기에 따라 같은 객체가 다른 구간이 되어, 타일 모델과
+    풀 프레임 모델을 같은 잣대로 비교할 수 없다.
+    """
+    x1, y1, x2, y2 = xyxy_n
+    area = max(0.0, (x2 - x1) * img_w) * max(0.0, (y2 - y1) * img_h)
+    if area < _SMALL_MAX:
+        return "small"
+    if area < _MEDIUM_MAX:
+        return "medium"
+    return "large"
+
+
 def average_precision(flags: list[tuple[float, bool]], n_gt: int) -> float:
     """AP for one class at one IoU threshold via 101-point interpolation (COCO).
 

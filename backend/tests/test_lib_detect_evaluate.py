@@ -152,3 +152,67 @@ def test_best_f1_survives_downsampling():
     assert out["best_f1"]["value"] == max(f1 for _, f1 in out["f1_conf"])
     assert len(out["f1_conf"]) <= 50
     assert len(out["pr"]) <= 50
+
+
+def _g(cls, x1, y1, x2, y2):
+    return {"cls": cls, "xyxy_n": [x1, y1, x2, y2]}
+
+
+def _p(cls, score, x1, y1, x2, y2):
+    return {"cls": cls, "score": score, "xyxyn": [x1, y1, x2, y2]}
+
+
+def test_indexed_match_reports_which_ground_truth_was_claimed():
+    from lib.detect.evaluate import match_for_ap_indexed
+
+    gt = [_g(0, 0.0, 0.0, 0.1, 0.1), _g(0, 0.5, 0.5, 0.6, 0.6)]
+    pred = [_p(0, 0.9, 0.5, 0.5, 0.6, 0.6), _p(0, 0.8, 0.0, 0.0, 0.1, 0.1)]
+
+    rows = match_for_ap_indexed(gt, pred, 0.5)
+
+    assert rows == [(0, 0.9, 1), (0, 0.8, 0)]  # 점수 높은 것이 먼저 claim
+
+
+def test_indexed_match_marks_unmatched_predictions_with_minus_one():
+    from lib.detect.evaluate import match_for_ap_indexed
+
+    gt = [_g(0, 0.0, 0.0, 0.1, 0.1)]
+    pred = [_p(0, 0.9, 0.8, 0.8, 0.9, 0.9)]  # 전혀 다른 자리
+
+    assert match_for_ap_indexed(gt, pred, 0.5) == [(0, 0.9, -1)]
+
+
+def test_indexed_match_agrees_with_the_existing_matcher():
+    """기존 match_for_ap 과 답이 갈리면 안 된다 — 같은 규칙의 다른 표현일 뿐이다."""
+    from lib.detect.evaluate import match_for_ap, match_for_ap_indexed
+
+    gt = [_g(0, 0.0, 0.0, 0.2, 0.2), _g(1, 0.5, 0.5, 0.7, 0.7)]
+    pred = [
+        _p(0, 0.9, 0.0, 0.0, 0.2, 0.2),
+        _p(1, 0.7, 0.5, 0.5, 0.7, 0.7),
+        _p(0, 0.6, 0.9, 0.9, 1.0, 1.0),
+    ]
+
+    old = match_for_ap(gt, pred, 0.5)
+    new = match_for_ap_indexed(gt, pred, 0.5)
+
+    assert [(c, s) for c, s, _ in new] == [(c, s) for c, s, _ in old]
+    assert [i >= 0 for _, _, i in new] == [t for _, _, t in old]
+
+
+def test_size_buckets_follow_coco_area_thresholds():
+    from lib.detect.evaluate import size_of
+
+    # 1000×1000 이미지에서 넓이가 픽셀로 얼마인지 계산해 구간을 고른다
+    assert size_of([0.0, 0.0, 0.03, 0.03], 1000, 1000) == "small"    # 30×30 = 900 < 1024
+    assert size_of([0.0, 0.0, 0.05, 0.05], 1000, 1000) == "medium"   # 50×50 = 2500
+    assert size_of([0.0, 0.0, 0.2, 0.2], 1000, 1000) == "large"      # 200×200 = 40000
+
+
+def test_size_bucket_uses_real_pixels_not_normalized_area():
+    """정규화 넓이가 같아도 이미지가 크면 실제 객체는 크다 — 픽셀로 재야 한다."""
+    from lib.detect.evaluate import size_of
+
+    box = [0.0, 0.0, 0.04, 0.04]
+    assert size_of(box, 500, 500) == "small"     # 20×20 = 400
+    assert size_of(box, 1920, 1080) == "medium"  # 76.8×43.2 ≈ 3318
