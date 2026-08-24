@@ -2,17 +2,6 @@
 import { BASE, api } from './http'
 
 
-export interface JobCreate {
-  model_ids: string[]
-  conf: number
-  iou_wbf: number
-  imgsz: number
-  batch_size: number
-  names: string[] | null
-  /** class name -> max boxes per image (unspecified classes are uncapped) */
-  max_boxes_per_class?: Record<string, number>
-}
-
 export interface JobOut {
   id: string
   project_id: string

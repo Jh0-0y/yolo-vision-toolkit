@@ -2,7 +2,7 @@
 //
 // 학습실 프로젝트(`projects.ts`)와 달리 목록이 아니다 — 연구는 하나고, 종목이
 // 늘어나면 파이프라인부터 다른 연구실이 코드로 들어온다. 그래서 경로에 id 가 없다.
-import { BASE, api, xhrUpload } from './http'
+import { api, xhrUpload } from './http'
 import type { UploadHandlers } from './http'
 
 
@@ -42,10 +42,5 @@ export function uploadLabVideo(file: File, handlers: UploadHandlers = {}) {
   return xhrUpload<LabVideoOut>(`/lab/videos`, form, handlers)
 }
 
-export const renameLabVideo = (videoId: string, name: string) =>
-  api.patch<LabVideoOut>(`/lab/videos/${videoId}`, { name })
-
 export const deleteLabVideo = (videoId: string) =>
   api.delete<void>(`/lab/videos/${videoId}`)
-
-export const labVideoUrl = (videoId: string) => `${BASE}/lab/videos/${videoId}/file`

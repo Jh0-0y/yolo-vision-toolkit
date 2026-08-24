@@ -3,15 +3,6 @@
 // 학습은 **데이터셋을 직접 먹는다.** 따로 올릴 것이 없으므로 여기에 업로드는 없다.
 import { BASE, api } from './http'
 
-export interface TrainParams {
-  epochs: number
-  imgsz: number
-  batch: number
-  patience?: number
-  lr0?: number | null
-  optimizer?: string | null
-}
-
 /** 학습 전처리 타일링. 끄면 지금까지와 완전히 같다. */
 export interface TilingParams {
   enabled: boolean
@@ -55,16 +46,6 @@ export interface TilingPreview {
 
 export const previewTiling = (dataset: string, tiling: TilingParams) =>
   api.post<TilingPreview>('/training/tiling/preview', { dataset, tiling })
-
-export interface RunCreate {
-  name?: string | null
-  project_id?: string | null
-  dataset: string // 토큰: "dataset:{project_id}:{dataset_id}"
-  base_model_id: string
-  device?: string | null
-  params: TrainParams
-  tiling?: TilingParams
-}
 
 export interface TrainRunOut {
   id: string

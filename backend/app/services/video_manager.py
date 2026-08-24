@@ -16,11 +16,6 @@ from infra import jobs
 from lib.media.extract import ExtractParams, extract_frames
 
 
-def task_dir(video_id: str) -> Path:
-    """Progress/sentinel dir; reuses jobs_dir so the shared SSE reader finds it."""
-    return settings.jobs_dir / video_id
-
-
 class VideoManager:
     def __init__(self) -> None:
         self._executor: ThreadPoolExecutor | None = None

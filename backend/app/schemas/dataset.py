@@ -84,14 +84,3 @@ class ExportOut(BaseModel):
     linked: int = 0  # 하드링크로 들어간 이미지 수 — 복사가 아니라는 증거
     copied: int = 0
     size_bytes: int = 0
-
-
-class AutoLabelIn(BaseModel):
-    """오토라벨링 — 모델 1~N개 앙상블. 대상은 이 데이터셋의 미검수 이미지다."""
-
-    model_ids: list[str]
-    conf: float = 0.25
-    iou: float = 0.7
-    imgsz: int = 1280
-    only_unlabeled: bool = False
-    params: dict[str, Any] = {}

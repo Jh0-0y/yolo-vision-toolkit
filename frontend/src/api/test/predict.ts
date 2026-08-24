@@ -3,15 +3,6 @@
 import { api } from '../http'
 
 
-export interface PredictBox {
-  cls: number
-  name: string
-  score: number
-  xyxyn: [number, number, number, number]
-  model_ids: string[]
-  agree: number
-}
-
 export interface ResourceInfo {
   accelerator: 'cuda' | 'mps' | 'cpu'
   device_label: string
@@ -24,13 +15,6 @@ export interface ResourceInfo {
   training_active: boolean
   resident_models: number
   warning?: string | null
-}
-
-export interface PredictParams {
-  conf?: number // omit to use the backend default
-  iou_wbf: number
-  imgsz: number
-  device?: string | null
 }
 
 export const getResources = () => api.get<ResourceInfo>('/system/resources')

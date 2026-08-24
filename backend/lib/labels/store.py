@@ -29,10 +29,6 @@ def _reviewed_path(pdir: Path) -> Path:
     return pdir / "reviewed.json"
 
 
-def is_labeled(pdir: Path, stem: str) -> bool:
-    return label_path(pdir, stem).exists()
-
-
 def read_boxes(pdir: Path, stem: str) -> list[dict]:
     """Boxes for one image as a list of editor-shaped dicts (may be empty).
 
@@ -98,13 +94,3 @@ def write_reviewed(pdir: Path, stems: set[str]) -> None:
         _reviewed_path(pdir),
         json.dumps({stem: True for stem in sorted(stems)}, ensure_ascii=False, indent=2),
     )
-
-
-def set_reviewed(pdir: Path, stem: str, flag: bool) -> set[str]:
-    stems = read_reviewed(pdir)
-    if flag:
-        stems.add(stem)
-    else:
-        stems.discard(stem)
-    write_reviewed(pdir, stems)
-    return stems

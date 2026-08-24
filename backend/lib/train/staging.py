@@ -16,11 +16,6 @@ import subprocess
 from pathlib import Path
 
 
-def staged_path(cache_dir: Path, run_id: str) -> Path:
-    """Where a run's staged dataset copy lives — one folder per run."""
-    return cache_dir / run_id
-
-
 def _dir_size_bytes(path: Path) -> int:
     total = 0
     for p in path.rglob("*"):

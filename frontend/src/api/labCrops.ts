@@ -167,13 +167,3 @@ export function subscribeLabCropEvents(
   }
   return () => source.close()
 }
-
-/** 타깃 타입의 색 — 정의는 백엔드 `lib/crop/palette.py` 하나뿐이다. */
-export interface CropPalette {
-  target_colors: Record<string, string>
-  target_line_color: string
-  dead_zone_color: string
-  min_confidence_alpha: number
-}
-
-export const getCropPalette = () => api.get<CropPalette>('/system/crop-palette')
