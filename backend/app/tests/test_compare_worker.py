@@ -209,6 +209,44 @@ def test_compare_scores_each_model_and_counts_unknown_class_as_fp(
     ball = next(c for c in by_id["m1"]["per_class"] if c["name"] == "ball")
     assert ball["ap50"] == 1.0 and ball["ap"] == 1.0
 
+    # 새 지표 — 곡선 · 동작점 · 혼동행렬 · 크기별 AP · 속도
+    e = by_id["m1"]
+    assert e["curves"]["pr"], "PR 곡선이 실려야 한다"
+    assert e["curves"]["best_f1"]["value"] >= 0
+    assert len(e["operating_points"]) == 19
+    # 동작점은 conf 오름차순이고, 대표 동작점의 표와 같은 모양이어야 한다
+    assert [o["conf"] for o in e["operating_points"]] == sorted(
+        o["conf"] for o in e["operating_points"]
+    )
+    assert set(e["operating_points"][0]["overall"]) == set(e["overall"])
+    assert e["operating_points"][0]["confusion"]["labels"][-1] == "background"
+    assert e["speed"] is None or e["speed"]["ms_median"] >= 0
+    assert "by_size" in e
+    # ap50 은 map50 과 같은 값이고, ap75 는 정답이 있으니 수치가 나온다
+    assert e["ap50"] == e["map50"]
+    assert e["ap75"] == 1.0
+    # 200x100 프레임에서 [0.10,0.10,0.30,0.30] 은 40x20=800px² → small 하나뿐
+    assert set(e["by_size"]) == {"small"}
+    assert e["by_size"]["small"] == {"ap50": 1.0, "ap": 1.0, "gt": 1}
+    # conf 0.05 에서는 0.9 짜리 예측이 살아 있어 대각선이 1, 0.95 에서는 놓침으로 강등된다
+    assert e["operating_points"][0]["confusion"]["rows"][0][0] == 1
+    assert e["operating_points"][-1]["conf"] == 0.95
+    assert e["operating_points"][-1]["confusion"]["rows"][0][-1] == 1
+    # 이미지가 한 장뿐이라 워밍업 한 장을 버리면 표본이 없다 — 터지지 않고 None 이어야 한다
+    assert e["speed"] is None
+    # 가짜 YOLO 는 실제 가중치 파일도 .model 도 없어 둘 다 못 읽는다 → None
+    assert e["model"] is None
+
+    # 데이터셋에 없는 클래스로 예측한 m2 는 그 열을 따로 가져야 오검출이 숨지 않는다
+    m2_confusion = by_id["m2"]["operating_points"][0]["confusion"]
+    assert m2_confusion["labels"] == ["ball", "(not in dataset)", "background"]
+    assert m2_confusion["rows"][0][1] == 1  # 실제 ball 을 어휘 밖 클래스로 봤다
+    assert m2_confusion["rows"][-1][-1] is None  # background×background 는 비어 있다
+    # m2 는 정답 클래스에 맞은 예측이 없어 곡선이 비고 ap75 는 0
+    assert by_id["m2"]["curves"]["pr"] == []
+    assert by_id["m2"]["curves"]["best_f1"] is None
+    assert by_id["m2"]["ap75"] == 0.0
+
     # per-image structure carries GT + each entry's predicted boxes
     img = result["images"][0]
     assert img["stem"] == "img1"

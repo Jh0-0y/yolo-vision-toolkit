@@ -111,7 +111,7 @@ pt = settings.model_dir(project_id, model_id) / "model.pt"   # ○
 | 파일 | 담는 것 |
 |---|---|
 | `run.json` | 설정 스냅샷(데이터셋 토큰 · 엔트리 · conf · 매칭 IoU). 잡을 **던지기 전에** 쓴다 — 실패한 시도도 목록에 남는다 |
-| `result.json` | 채점 결과 — 엔트리별 P/R/F1 · mAP 와 이미지별 박스 |
+| `result.json` | 채점 결과 — 엔트리별 P/R/F1 · mAP · 크기별 AP · PR/F1 곡선 · conf 단계별 동작점(혼동행렬 포함) · 추론 속도, 그리고 이미지별 박스 |
 | `images_manifest.json` | 색인 → 이미지 경로. 오버레이 이미지는 이 색인으로만 낸다(경로는 런 디렉터리 안으로 가둔다) |
 | `dataset/` | 데이터셋의 test 분할을 `dataset_export.materialize(kind="test")` 로 펼친 트리 |
 
