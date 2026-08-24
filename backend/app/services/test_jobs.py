@@ -6,43 +6,18 @@
 없음, DB 기록 없음). 진행률은 `jobs_dir/{job_id}/progress.jsonl` 로 흐른다.
 
 크롭 런의 **산출물**은 여기가 아니라 연구실 아래 런 디렉터리에 남는다 — 자리와
-수명은 `services/lab_crop_runs.py` 를 본다(TTL 없음, 지우는 것은 사용자뿐).
-여기 sweep 은 compare 처럼 `test_dir` 에만 남는 순수 임시물용이다.
+수명은 `services/lab_crop_runs.py` 를 본다(TTL 없음, 지우는 것은 사용자뿐). 벤치마크
+런도 같은 성질이다 — 자리와 수명은 `services/benchmarks.py` 를 본다.
 """
 
 from __future__ import annotations
 
 import multiprocessing
-import shutil
 import threading
-import time
 from concurrent.futures import Future, ProcessPoolExecutor
-from pathlib import Path
 
 from app.core.config import settings
 from infra import jobs
-
-# compare 업로드와 live 프리뷰 캐시는 순수 임시물 — 이 나이를 넘으면 지운다.
-ANNOTATE_TTL_SEC = 3600
-
-
-def _sweep_dir(root: Path, ttl_sec: int) -> None:
-    """Delete work dirs older than the TTL so nothing accumulates."""
-    if not root.exists():
-        return
-    now = time.time()
-    for d in root.iterdir():
-        try:
-            if d.is_dir() and now - d.stat().st_mtime > ttl_sec:
-                shutil.rmtree(d, ignore_errors=True)
-        except OSError:
-            continue
-
-
-def sweep_old_compare() -> None:
-    """Delete compare upload/dataset dirs older than the TTL (playground = no
-    permanent storage; uploaded test sets can be large)."""
-    _sweep_dir(settings.test_dir / "compare", ANNOTATE_TTL_SEC)
 
 
 class TestJobManager:

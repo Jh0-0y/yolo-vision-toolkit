@@ -4,7 +4,7 @@
 **경로와 OpenAPI 태그는 나누기 전과 같다.**
 
     inference   이미지 한 장 추론 · 상주 모델         POST ""  · /residents
-    compare     테스트셋으로 모델 채점                 /compare
+    compare     데이터셋 test 분할로 모델 채점         /benchmarks
 
 크롭은 여기 없다. 연구실(`endpoints/lab_crops.py`)이 시작부터 산출물까지 한 곳에서
 맡는다 — 옛 annotate·live 계열은 그리로 옮겨 가며 사라졌다.
