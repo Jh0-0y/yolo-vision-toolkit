@@ -108,6 +108,49 @@ def average_precision(flags: list[tuple[float, bool]], n_gt: int) -> float:
     return total / 101
 
 
+def _thin(points: list, max_points: int) -> list:
+    """점을 고르게 솎되 **양 끝은 반드시 남긴다** — 끝을 잃으면 곡선 모양이 달라진다."""
+    if max_points <= 2 or len(points) <= max_points:
+        return points
+    step = (len(points) - 1) / (max_points - 1)
+    idx = sorted({int(round(i * step)) for i in range(max_points)} | {0, len(points) - 1})
+    return [points[i] for i in idx]
+
+
+def curves_from_flags(
+    flags: list[tuple[float, bool]], n_gt: int, max_points: int = 200
+) -> dict:
+    """PR 곡선과 F1–conf 곡선. `average_precision` 과 **같은 재료**를 쓴다.
+
+    점수 내림차순으로 훑으며 누적 TP/FP 를 적으면 각 지점이 곧 "그 점수를 conf 로
+    잡았을 때"의 정밀도·재현율이다. 그래서 곡선은 추론을 다시 돌리지 않고 나온다.
+
+    정답이 없으면(`n_gt <= 0`) 곡선을 만들지 않는다 — 0 짜리 곡선은 "성능이 0"으로
+    읽히지만 실제로는 "잴 것이 없다"이다.
+    """
+    if n_gt <= 0 or not flags:
+        return {"pr": [], "f1_conf": [], "best_f1": None}
+
+    pr: list[list[float]] = []
+    f1c: list[list[float]] = []
+    best = {"value": -1.0, "conf": 0.0}
+    tp = fp = 0
+    for score, is_tp in sorted(flags, key=lambda x: -x[0]):
+        if is_tp:
+            tp += 1
+        else:
+            fp += 1
+        rec = tp / n_gt
+        prec = tp / (tp + fp)
+        f1 = 2 * prec * rec / (prec + rec) if prec + rec else 0.0
+        pr.append([round(rec, 4), round(prec, 4)])
+        f1c.append([round(score, 4), round(f1, 4)])
+        if f1 > best["value"]:
+            best = {"value": round(f1, 4), "conf": round(score, 4)}
+
+    return {"pr": _thin(pr, max_points), "f1_conf": _thin(f1c, max_points), "best_f1": best}
+
+
 def map_from_accumulated(
     acc: dict[float, dict[int, list[tuple[float, bool]]]], gt_by_cls: dict[int, int]
 ) -> dict:

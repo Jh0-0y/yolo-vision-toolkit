@@ -84,3 +84,57 @@ def test_build_cls_map_normalizes_names():
     ds_by_norm = {normalize("Ball"): 2}
 
     assert build_cls_map({0: "ball"}, ds_by_norm) == {0: 2}
+
+
+def test_pr_curve_walks_recall_up_as_confidence_drops():
+    """점수 내림차순으로 훑으면 재현율은 단조 증가한다 — 정답을 더 주워 담기 때문이다."""
+    from lib.detect.evaluate import curves_from_flags
+
+    # 정답 4개 중 3개를 맞히고 오검출 2개
+    flags = [(0.9, True), (0.8, False), (0.7, True), (0.6, True), (0.5, False)]
+
+    out = curves_from_flags(flags, n_gt=4)
+
+    recalls = [r for r, _ in out["pr"]]
+    assert recalls == sorted(recalls)
+    assert recalls[-1] == 0.75  # 3/4
+    assert out["pr"][0] == [0.25, 1.0]  # 첫 예측이 정답 → P 1.0, R 1/4
+
+
+def test_f1_curve_peaks_at_the_best_operating_point():
+    from lib.detect.evaluate import curves_from_flags
+
+    # 0.7 위에서 정답만 3개, 그 아래로 오검출만 → 최고 F1 은 0.7 언저리
+    flags = [(0.9, True), (0.8, True), (0.7, True), (0.4, False), (0.3, False)]
+
+    out = curves_from_flags(flags, n_gt=3)
+
+    assert out["best_f1"]["value"] == 1.0
+    assert out["best_f1"]["conf"] == 0.7
+    # 곡선의 최댓값과 best_f1 이 어긋나면 둘 중 하나가 틀린 것이다
+    assert max(f1 for _, f1 in out["f1_conf"]) == out["best_f1"]["value"]
+
+
+def test_curves_are_downsampled_but_keep_the_ends():
+    """점이 많아도 파일이 붓지 않게 줄이되, 양 끝은 남겨 곡선 모양을 지킨다."""
+    from lib.detect.evaluate import curves_from_flags
+
+    # (i+1)%3 로 두어 **첫 예측이 정답**이 되게 한다 — 그래야 첫 점의 재현율이 0 이 아니고
+    # "양 끝을 남긴다"를 실제로 검사할 수 있다. 정답 수는 1000 중 3의 배수를 뺀 667.
+    flags = [(1.0 - i / 1000, (i + 1) % 3 != 0) for i in range(1000)]
+
+    out = curves_from_flags(flags, n_gt=667, max_points=50)
+
+    assert len(out["pr"]) <= 50
+    assert len(out["f1_conf"]) <= 50
+    assert out["pr"][0][0] > 0  # 첫 점이 남았다
+    assert out["pr"][-1][0] == max(r for r, _ in out["pr"])  # 마지막이 최대 재현율
+
+
+def test_no_ground_truth_yields_empty_curves():
+    """정답이 없는 클래스는 곡선이 없다 — 0 짜리 곡선을 그리면 거짓말이 된다."""
+    from lib.detect.evaluate import curves_from_flags
+
+    out = curves_from_flags([(0.9, False)], n_gt=0)
+
+    assert out == {"pr": [], "f1_conf": [], "best_f1": None}
