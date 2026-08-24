@@ -9,6 +9,7 @@ P/R/F1 과 박스 오버레이를 함께 돌려주므로 "어느 모델이 무�
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -25,6 +26,7 @@ from app.services.test_jobs import test_job_manager
 from lib.detect.tiled import TiledParams
 from lib.labels import dataset_export
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/predict", tags=["predict"])
 
 
@@ -139,9 +141,15 @@ async def start_benchmark(body: BenchmarkStart, session: Session = Depends(get_s
     except HTTPException:
         benchmarks.delete(project_id, bench_id)
         raise
-    except Exception as exc:  # 디스크 가득 참 · 권한 · 풀 제출 실패 등
+    except BaseException as exc:  # 디스크 가득 참 · 권한 · 풀 제출 실패, 그리고 요청 취소
+        # `Exception` 이 아니라 `BaseException` 이다 — 클라이언트가 POST 를 끊으면
+        # `CancelledError` 가 올라오는데, 그것도 자리를 남긴 채 빠져나가면 안 된다.
         benchmarks.delete(project_id, bench_id)
-        raise HTTPException(500, f"Failed to start the benchmark: {exc}") from exc
+        if isinstance(exc, Exception):
+            # 예외 문구에는 서버의 절대 경로가 섞여 나온다 — 로그에만 남기고 밖으로는 내지 않는다.
+            logger.exception("Failed to start benchmark %s", bench_id)
+            raise HTTPException(500, "Failed to start the benchmark") from exc
+        raise
     return TestJobStart(job_id=bench_id)
 
 
