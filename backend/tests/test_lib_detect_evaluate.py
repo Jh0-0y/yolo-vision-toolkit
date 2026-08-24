@@ -303,3 +303,56 @@ def test_unknown_class_false_alarms_are_never_hidden():
     # 셀 것이 없으면 그대로 비어 있다
     empty = confusion_at(0.5, [], [], [], [0], {0: "ball"})
     assert empty["rows"][1][1] is None
+
+
+def test_counts_at_filters_by_confidence():
+    from lib.detect.evaluate import counts_at
+
+    flags = {0: [(0.9, True), (0.7, True), (0.4, False), (0.2, True)]}
+    gt = {0: 3}
+
+    high = counts_at(flags, gt, 0.5)
+    low = counts_at(flags, gt, 0.1)
+
+    assert high[0] == {"tp": 2, "fp": 0, "fn": 1}
+    assert low[0] == {"tp": 3, "fp": 1, "fn": 0}
+
+
+def test_counts_are_monotonic_in_confidence():
+    """conf 를 올리면 TP·FP 는 줄고 FN 은 는다. 안 그러면 세는 규칙이 틀린 것이다."""
+    from lib.detect.evaluate import CONF_STEPS, counts_at
+
+    # 0..39 중 3의 배수가 14개이므로 정답으로 표시되는 것은 26개다
+    flags = {0: [(1.0 - i / 40, i % 3 != 0) for i in range(40)]}
+    gt = {0: 26}
+
+    seq = [counts_at(flags, gt, c)[0] for c in CONF_STEPS]
+
+    assert [s["tp"] for s in seq] == sorted((s["tp"] for s in seq), reverse=True)
+    assert [s["fp"] for s in seq] == sorted((s["fp"] for s in seq), reverse=True)
+    assert [s["fn"] for s in seq] == sorted(s["fn"] for s in seq)
+
+
+def test_counts_include_classes_with_no_predictions():
+    """예측이 하나도 없어도 정답이 있으면 전부 놓침으로 잡혀야 한다."""
+    from lib.detect.evaluate import counts_at
+
+    assert counts_at({}, {0: 5}, 0.5)[0] == {"tp": 0, "fp": 0, "fn": 5}
+
+
+def test_conf_steps_span_the_useful_range():
+    from lib.detect.evaluate import CONF_STEPS
+
+    assert len(CONF_STEPS) == 19
+    assert CONF_STEPS[0] == 0.05 and CONF_STEPS[-1] == 0.95
+
+
+def test_counts_feed_the_existing_aggregate_unchanged():
+    """스냅샷의 표는 지금 결과의 표와 같은 모양이어야 화면이 하나로 그린다."""
+    from lib.detect.evaluate import aggregate, counts_at
+
+    out = aggregate(counts_at({0: [(0.9, True)]}, {0: 2}, 0.5), {0: "ball"})
+
+    assert out["overall"] == {"tp": 1, "fp": 0, "fn": 1,
+                              "precision": 1.0, "recall": 0.5, "f1": 0.6667}
+    assert out["per_class"][0]["name"] == "ball"

@@ -386,3 +386,33 @@ def confusion_at(
     if not rows[bg][bg]:
         rows[bg][bg] = None
     return {"labels": [names.get(c, str(c)) for c in class_ids] + ["background"], "rows": rows}
+
+
+# 화면의 conf 슬라이더가 밟는 단계. 촘촘히 할수록 파일이 붓고, 성기면 최적점을 놓친다.
+CONF_STEPS: tuple[float, ...] = tuple(round(0.05 * i, 2) for i in range(1, 20))
+
+
+def counts_at(
+    flags_by_cls: dict[int, list[tuple[float, bool]]],
+    gt_by_cls: dict[int, int],
+    conf: float,
+) -> dict[int, dict[str, int]]:
+    """한 동작점의 클래스별 TP/FP/FN. 결과는 그대로 `aggregate()` 에 넣는다.
+
+    `flags_by_cls` 는 IoU 0.5 에서 누적한 `(score, is_tp)` 랭킹이다 — mAP 를 만들 때
+    이미 쌓아 둔 그것이라, 동작점마다 매칭을 다시 할 필요가 없다.
+
+    FN 은 세지 않고 뺀다: 정답 수는 conf 와 무관하게 고정이므로 `정답 − TP` 가 곧 놓침이다.
+    """
+    out: dict[int, dict[str, int]] = {}
+    for cls in set(flags_by_cls) | set(gt_by_cls):
+        tp = fp = 0
+        for score, is_tp in flags_by_cls.get(cls, []):
+            if score < conf:
+                continue
+            if is_tp:
+                tp += 1
+            else:
+                fp += 1
+        out[cls] = {"tp": tp, "fp": fp, "fn": max(0, gt_by_cls.get(cls, 0) - tp)}
+    return out
