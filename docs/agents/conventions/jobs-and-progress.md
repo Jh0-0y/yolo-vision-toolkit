@@ -82,14 +82,15 @@ result = run_labeling(
 진행 중 상태는 **파일만** 알고, 끝난 사실은 **DB 에** 적힌다. 둘을 잇는 건 감시 스레드 하나뿐이라
 API 가 재시작되면 끊긴다 — 그래서 학습은 부팅 시 `train_manager.reconcile_on_boot()` 로 정정한다.
 
-**잡을 새로 만들면 이 복구를 같이 만들어야 한다.** 지금 복구가 있는 건 학습(`train_manager`)과
-크롭 런(`lab_crop_runs.reconcile_on_boot`) 둘이다.
+**잡을 새로 만들면 이 복구를 같이 만들어야 한다.** 지금 복구가 있는 건 학습(`train_manager`) ·
+크롭 런(`lab_crop_runs.reconcile_on_boot`) · 벤치마크(`benchmarks.reconcile_on_boot`) 셋이다.
 
 ## 상태를 아예 저장하지 않는 길
 
-DB 에 적지 않으면 어긋날 것도 없다. 크롭 런이 이 길을 간다 — 목록 API 가 `job.status()` 로
-상태를 **그 자리에서 만든다**(`services/lab_crop_runs.py`). 산출물 디렉터리가 곧 목록이고 진행
-현황도 같은 목록이라, 이어붙일 두 번째 진실이 없다.
+DB 에 적지 않으면 어긋날 것도 없다. 크롭 런과 벤치마크가 이 길을 간다 — 목록 API 가
+`job.status()` 로 상태를 **그 자리에서 만든다**(`services/lab_crop_runs.py` ·
+`services/benchmarks.py`). 산출물 디렉터리가 곧 목록이고 진행 현황도 같은 목록이라,
+이어붙일 두 번째 진실이 없다.
 
 **목록에 떠야 하고 상태가 바뀌는 것**을 새로 만든다면 DB 테이블보다 이쪽을 먼저 검토한다.
 단, 워커 풀은 API 프로세스가 소유하므로 재시작하면 돌던 잡이 죽는다 — 부팅 때 종료 이벤트를

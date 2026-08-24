@@ -26,6 +26,7 @@ DATA_DIR/                     # 기본 <repo>/data — git 이 추적하지 않�
 ├── projects/{project_id}/    # 학습실 — 프로젝트는 껍데기다
 │   ├── project.json
 │   ├── models/ · runs/       # 프로젝트 스코프 모델·학습 결과
+│   ├── benchmarks/{bench_id}/    # 벤치마크 런 — run.json · result.json · dataset/
 │   └── datasets/{dataset_id}/    # 데이터셋 하나가 자기 것을 전부 갖는다
 │       ├── dataset.json      # 이름 · 생성일
 │       ├── raw/              # 이미지
@@ -40,7 +41,7 @@ DATA_DIR/                     # 기본 <repo>/data — git 이 추적하지 않�
 │   ├── videos/{video_id}.mp4 # 원본 + {video_id}.json 사이드카 (프레임 추출 없음)
 │   └── crops/{crop_id}/      # 크롭 런 — run.json · crop.json · wide.mp4 · crop.mp4
 ├── jobs/{job_id}/            # progress.jsonl · CANCEL
-└── test/                     # 모델비교 캐시 — 순수 임시물, 자동 정리된다
+└── test/                     # 단발 추론 업로드 임시물 — 쓰고 그 자리에서 지운다
 ```
 
 **데이터셋끼리는 아무것도 공유하지 않는다.** 같은 영상을 두 데이터셋에 쓰려면 두 번
@@ -72,7 +73,7 @@ pt = settings.model_dir(project_id, model_id) / "model.pt"   # ○
 ## 손대지 않는 것
 
 - **`data/` 아래 실제 데이터를 검증용으로 지우거나 덮어쓰지 않는다.** git 이 추적하지 않아 되돌릴 수 없다.
-- 임시 산출물이 필요하면 `settings.test_dir` 아래에 만든다(자동 정리 대상).
+- 임시 산출물이 필요하면 `settings.test_dir` 아래에 만든다. **자동 청소는 없다** — 쓴 쪽이 지운다.
 
 ## 연구실 영상
 
@@ -101,3 +102,25 @@ pt = settings.model_dir(project_id, model_id) / "model.pt"   # ○
 **상태는 저장하지 않는다.** `running` / `done` / `error` 는 `progress.jsonl` 의 마지막 이벤트에서 파생한다 → [잡과 진행률](conventions/jobs-and-progress.md)
 
 자리·상태 파생·하드링크는 전부 `services/lab_crop_runs.py` 하나가 안다. 경로를 직접 조립하지 않는다.
+
+## 벤치마크 런
+
+`projects/{project_id}/benchmarks/{bench_id}/` 하나가 벤치마크 런 하나다. `bench_id` 는 **잡 id 로도
+그대로** 쓰므로 진행률은 `jobs/{bench_id}/progress.jsonl` 에 있다 — 크롭 런과 같은 규약이다.
+
+| 파일 | 담는 것 |
+|---|---|
+| `run.json` | 설정 스냅샷(데이터셋 토큰 · 엔트리 · conf · 매칭 IoU). 잡을 **던지기 전에** 쓴다 — 실패한 시도도 목록에 남는다 |
+| `result.json` | 채점 결과 — 엔트리별 P/R/F1 · mAP 와 이미지별 박스 |
+| `images_manifest.json` | 색인 → 이미지 경로. 오버레이 이미지는 이 색인으로만 낸다(경로는 런 디렉터리 안으로 가둔다) |
+| `dataset/` | 데이터셋의 test 분할을 `dataset_export.materialize(kind="test")` 로 펼친 트리 |
+
+`dataset/` 을 런과 함께 남기는 이유는 **매니페스트가 그 트리를 가리키기 때문**이다. 지우면 과거
+벤치마크를 열었을 때 오버레이 이미지가 사라진다. 이미지는 하드링크라 남겨도 바이트가 늘지 않고,
+원본 데이터셋을 나중에 고쳐도 이 런이 채점한 그림은 흔들리지 않는다.
+
+**DB 행이 없고 상태도 저장하지 않는다.** 디렉터리가 곧 목록이고, `running` / `done` / `error` 는
+`progress.jsonl` 의 마지막 이벤트에서 파생한다 → [잡과 진행률](conventions/jobs-and-progress.md)
+
+**TTL 은 없다** — 지우는 것은 사용자뿐이고, 지우면 런 디렉터리와 `jobs/{bench_id}/` 가 함께 사라진다.
+자리·상태 파생은 `services/benchmarks.py` 하나가 안다.
