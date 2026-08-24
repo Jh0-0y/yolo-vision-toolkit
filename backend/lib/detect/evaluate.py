@@ -352,7 +352,10 @@ def confusion_at(
     `conf` 아래로 잘린 짝은 **놓침으로 강등된다** — 예측이 사라졌을 뿐 정답은 그대로
     거기 있기 때문이다. 그래서 행 합(실제 개수)은 conf 와 무관하게 일정하다.
 
-    `background × background` 는 뜻이 없어 비운다(`None`).
+    `background × background` 는 뜻이 없어 비운다(`None`). 다만 **값이 있으면
+    비우지 않는다** — 호출자가 예측에 나올 수 있는 클래스를 전부 `class_ids` 에
+    넣으면 이 값은 늘 0 이지만, 계약을 어긴 경우 그 자리에 쌓인 헛것의 오검출을
+    지워서는 안 된다.
     """
     idx = {c: i for i, c in enumerate(class_ids)}
     n = len(class_ids)
@@ -376,5 +379,10 @@ def confusion_at(
         if score >= conf:
             rows[bg][idx.get(pred_cls, bg)] += 1
 
-    rows[bg][bg] = None
+    # background × background 은 셀 수 있는 것이 아니라 비운다.
+    # 다만 **값이 있으면 비우지 않는다** — 그 자리에 쌓였다는 것은 `class_ids` 에 없는
+    # 클래스의 헛것이 있었다는 뜻이고, 그것을 지우면 오검출을 숨기는 셈이 된다.
+    # (호출자가 예측 가능한 클래스를 전부 `class_ids` 에 넣으면 이 값은 늘 0 이다.)
+    if not rows[bg][bg]:
+        rows[bg][bg] = None
     return {"labels": [names.get(c, str(c)) for c in class_ids] + ["background"], "rows": rows}

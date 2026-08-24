@@ -284,3 +284,22 @@ def test_confusion_row_totals_never_change_with_conf():
         rows = confusion_at(c, matched, missed, [], [0, 1], {0: "a", 1: "b"})["rows"]
         assert sum(rows[0]) == 2   # 실제 a 는 항상 2개
         assert sum(rows[1]) == 2   # 실제 b 는 항상 2개
+
+
+def test_unknown_class_false_alarms_are_never_hidden():
+    """데이터셋에 없는 클래스(-1)의 헛것도 오검출이다 — 지우면 모델이 실제보다 깨끗해 보인다."""
+    from lib.detect.evaluate import confusion_at
+
+    # 계약을 지킨 경우: -1 이 class_ids 에 있으면 제 칸에 잡힌다
+    ok = confusion_at(0.5, [], [], [(-1, 0.9)], [0, -1], {0: "ball", -1: "(not in dataset)"})
+    assert ok["labels"] == ["ball", "(not in dataset)", "background"]
+    assert ok["rows"][2][1] == 1          # 배경 행 · (not in dataset) 열
+    assert ok["rows"][2][2] is None       # background × background 는 여전히 비어 있다
+
+    # 계약을 어긴 경우라도 **잃지는 않는다**
+    leaked = confusion_at(0.5, [], [], [(-1, 0.9)], [0], {0: "ball"})
+    assert leaked["rows"][1][1] == 1
+
+    # 셀 것이 없으면 그대로 비어 있다
+    empty = confusion_at(0.5, [], [], [], [0], {0: "ball"})
+    assert empty["rows"][1][1] is None
