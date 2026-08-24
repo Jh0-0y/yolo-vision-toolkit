@@ -12,7 +12,7 @@ class AutoLabelDetector(BaseModel):
 
     model_id: str
     mode: str = "full"  # full | tiled
-    imgsz: int = 640  # full
+    imgsz: int = 1920  # full — 원본 프레임이 1920 이라 줄이지 않는 것이 기본이다
     tile_size: int = 640  # tiled
     stride: int = 480
     merge_iou: float = 0.5  # 타일 경계 병합 — 모델 간 병합(iou_wbf)과 별개

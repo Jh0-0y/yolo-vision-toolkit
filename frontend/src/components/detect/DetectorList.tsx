@@ -43,7 +43,7 @@ export function newEntry(mode: 'full' | 'tiled' = 'full'): DetectorEntry {
     modelId: null,
     mode,
     conf: '',
-    imgsz: 1280,
+    imgsz: 1920,
     tileSize: 640,
     stride: 480,
     mergeIou: 0.5,
