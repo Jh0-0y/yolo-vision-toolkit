@@ -20,6 +20,7 @@ from app.schemas.class_ import ClassIn
 from app.services import datasets
 from lib.labels.classes import (
     add_class,
+    count_boxes_by_class,
     count_boxes_with_class,
     delete_class,
     read_classes,
@@ -43,7 +44,14 @@ def _require_dataset(session: Session, project_id: str, dataset_id: str) -> Path
 
 @router.get("")
 def list_classes(project_id: str, dataset_id: str, session: Session = Depends(get_session)):
-    return read_classes(_require_dataset(session, project_id, dataset_id))
+    """클래스마다 **박스 수를 함께** 낸다 — 지우기 전에 무엇이 사라지는지 보여야 한다.
+
+    삭제는 박스를 버리고 뒤 번호를 당기는 비가역 작업이라, 화면이 수를 미리 알려
+    주지 못하면 사용자는 결과를 모르는 채 누르게 된다.
+    """
+    ddir = _require_dataset(session, project_id, dataset_id)
+    counts = count_boxes_by_class(ddir)
+    return [{**c, "boxes": counts.get(c["id"], 0)} for c in read_classes(ddir)]
 
 
 @router.post("", status_code=201)

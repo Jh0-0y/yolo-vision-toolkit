@@ -194,10 +194,16 @@ export const putDatasetLabels = (
     { boxes },
   )
 
+/** 클래스는 **데이터셋마다** 따로다 — 자리도 그 데이터셋의 `classes.json` 이다. */
+export interface DatasetClass {
+  id: number
+  name: string
+  /** 이 데이터셋의 라벨에서 이 클래스를 쓰는 박스 수. 지우기 전에 보여 준다. */
+  boxes: number
+}
+
 export const listDatasetClasses = (projectId: string, datasetId: string) =>
-  api.get<{ id: number; name: string }[]>(
-    `/projects/${projectId}/datasets/${datasetId}/classes`,
-  )
+  api.get<DatasetClass[]>(`/projects/${projectId}/datasets/${datasetId}/classes`)
 
 export const addDatasetClass = (projectId: string, datasetId: string, name: string) =>
   api.post<{ id: number; name: string }>(

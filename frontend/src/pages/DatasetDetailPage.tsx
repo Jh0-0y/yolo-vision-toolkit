@@ -11,11 +11,12 @@
 // 각자 자기 자리에 붙는다.
 import { useState } from 'react'
 import { Anchor, Badge, Button, Group, Stack, Tabs, Text, Title } from '@mantine/core'
-import { IconChevronLeft, IconChecks, IconHistory, IconInbox } from '@tabler/icons-react'
+import { IconChevronLeft, IconChecks, IconHistory, IconInbox, IconTag } from '@tabler/icons-react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { getDataset } from '../api/client'
 import StatTile from '../components/StatTile'
+import ClassesModal from '../components/dataset/ClassesModal'
 import ImagePanel from '../components/dataset/ImagePanel'
 import SourcesModal from '../components/dataset/SourcesModal'
 
@@ -27,6 +28,7 @@ export default function DatasetDetailPage() {
   const [params, setParams] = useSearchParams()
   const tab = TABS.includes(params.get('tab') ?? '') ? (params.get('tab') as string) : 'unreviewed'
   const [sourcesOpen, setSourcesOpen] = useState(false)
+  const [classesOpen, setClassesOpen] = useState(false)
 
   const dataset = useQuery({
     queryKey: ['dataset', projectId, datasetId],
@@ -55,14 +57,23 @@ export default function DatasetDetailPage() {
             {ds.images} images in this dataset
           </Text>
         </div>
-        {/* 출처는 두 탭 어디서든 닿아야 하므로 탭 밖, 제목 옆에 둔다 */}
-        <Button
-          variant="default"
-          leftSection={<IconHistory size={16} />}
-          onClick={() => setSourcesOpen(true)}
-        >
-          Sources
-        </Button>
+        {/* 출처와 클래스는 두 탭 어디서든 닿아야 하므로 탭 밖, 제목 옆에 둔다 */}
+        <Group gap="sm">
+          <Button
+            variant="default"
+            leftSection={<IconTag size={16} />}
+            onClick={() => setClassesOpen(true)}
+          >
+            Classes
+          </Button>
+          <Button
+            variant="default"
+            leftSection={<IconHistory size={16} />}
+            onClick={() => setSourcesOpen(true)}
+          >
+            Sources
+          </Button>
+        </Group>
       </Group>
 
       <SourcesModal
@@ -70,6 +81,13 @@ export default function DatasetDetailPage() {
         datasetId={datasetId}
         opened={sourcesOpen}
         onClose={() => setSourcesOpen(false)}
+      />
+
+      <ClassesModal
+        projectId={projectId}
+        datasetId={datasetId}
+        opened={classesOpen}
+        onClose={() => setClassesOpen(false)}
       />
 
       {/* 미검수 · 검수완료 가 먼저, 분할은 그 안의 갈래 */}

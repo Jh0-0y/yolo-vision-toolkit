@@ -114,6 +114,31 @@ def count_boxes_with_class(pdir: Path, class_id: int) -> int:
     return total
 
 
+def count_boxes_by_class(pdir: Path) -> dict[int, int]:
+    """클래스 id → 박스 수. 라벨 파일을 **한 번만** 훑는다.
+
+    `count_boxes_with_class` 는 클래스 하나를 위해 전부 훑으므로, 목록 화면처럼
+    모든 클래스의 수가 필요할 때 그것을 반복해 부르면 클래스 수만큼 훑게 된다.
+
+    쓰이지 않은 클래스는 키가 없다 — 0 으로 채우는 것은 호출자 몫이다.
+    """
+    labels_dir = pdir / "labels"
+    if not labels_dir.exists():
+        return {}
+    counts: dict[int, int] = {}
+    for txt in labels_dir.glob("*.txt"):
+        for line in txt.read_text().splitlines():
+            head = line.split(maxsplit=1)[:1]
+            if not head:
+                continue
+            try:
+                cid = int(head[0])
+            except ValueError:
+                continue
+            counts[cid] = counts.get(cid, 0) + 1
+    return counts
+
+
 def delete_class(pdir: Path, class_id: int) -> list[dict]:
     """Remove a class: drop its boxes, reindex higher ids across all label files,
     and rewrite classes.json contiguously. Returns the remaining classes."""
