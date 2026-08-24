@@ -41,6 +41,18 @@ def _parse_dataset_token(token: str) -> tuple[str, str]:
     return pid, dsid
 
 
+def _require_project_id(project_id: str) -> str:
+    """`project_id` 는 그대로 경로 조각이 된다 — 토큰과 **같은 기준**으로 막는다.
+
+    POST 는 토큰 안에서 걸러지지만 읽기·삭제 라우트는 쿼리스트링에서 바로 받으므로
+    여기서 한 번 더 본다. 막지 않으면 `?project_id=../../lab` 같은 값이
+    `projects_dir` 밖을 가리킨다.
+    """
+    if not project_id or any(c in project_id for c in "/\\.."):
+        raise HTTPException(422, "Invalid project id")
+    return project_id
+
+
 @router.post("/benchmarks", response_model=TestJobStart, status_code=201)
 async def start_benchmark(body: BenchmarkStart, session: Session = Depends(get_session)):
     """데이터셋의 **test 분할**을 정답 삼아 엔트리들을 채점한다.
@@ -94,38 +106,48 @@ async def start_benchmark(body: BenchmarkStart, session: Session = Depends(get_s
     out_dir = benchmarks.run_dir(project_id, bench_id)
     dataset_dir = out_dir / benchmarks.DATASET_DIR
 
+    # 자리를 만든 뒤로는 **어디서 실패하든** 런을 지운다. 잡 디렉터리 없이 run.json
+    # 만 남으면 `JobDir.status()` 가 종료 이벤트를 못 찾아 영원히 "running" 을
+    # 돌려주고, 목록에서도 상세에서도 끝나지 않는 런으로 남는다.
     try:
-        await run_in_threadpool(
-            dataset_export.materialize,
-            dataset_dir=datasets.dataset_dir(project_id, dataset_id),
-            out_dir=dataset_dir,
-            kind="test",
-            reviewed=datasets.read_reviewed(project_id, dataset_id)
-            & datasets.image_stems(project_id, dataset_id),
-            splits=datasets.read_splits(project_id, dataset_id),
-        )
-    except dataset_export.ExportError:
-        benchmarks.delete(project_id, bench_id)
-        raise HTTPException(
-            422, "Nothing in the test split — split the dataset first"
-        ) from None
+        try:
+            await run_in_threadpool(
+                dataset_export.materialize,
+                dataset_dir=datasets.dataset_dir(project_id, dataset_id),
+                out_dir=dataset_dir,
+                kind="test",
+                reviewed=datasets.read_reviewed(project_id, dataset_id)
+                & datasets.image_stems(project_id, dataset_id),
+                splits=datasets.read_splits(project_id, dataset_id),
+            )
+        except dataset_export.ExportError:
+            raise HTTPException(
+                422, "Nothing in the test split — split the dataset first"
+            ) from None
 
-    cfg = {
-        "project_id": project_id,
-        "entries": entries,
-        "dataset_dir": str(dataset_dir),
-        "out_dir": str(out_dir),
-        "conf": body.conf,
-        "iou": body.iou,
-        "iou_wbf": 0.55,
-        "device": body.device,
-    }
-    await run_in_threadpool(test_job_manager.submit_compare, bench_id, cfg)
+        cfg = {
+            "project_id": project_id,
+            "entries": entries,
+            "dataset_dir": str(dataset_dir),
+            "out_dir": str(out_dir),
+            "conf": body.conf,
+            "iou": body.iou,
+            "iou_wbf": 0.55,
+            "device": body.device,
+        }
+        await run_in_threadpool(test_job_manager.submit_compare, bench_id, cfg)
+    except HTTPException:
+        benchmarks.delete(project_id, bench_id)
+        raise
+    except Exception as exc:  # 디스크 가득 참 · 권한 · 풀 제출 실패 등
+        benchmarks.delete(project_id, bench_id)
+        raise HTTPException(500, f"Failed to start the benchmark: {exc}") from exc
     return TestJobStart(job_id=bench_id)
 
 
 @router.get("/benchmarks", response_model=list[BenchmarkOut])
 def list_benchmarks(project_id: str):
+    _require_project_id(project_id)
     return [BenchmarkOut(**row) for row in benchmarks.list_runs(project_id)]
 
 
@@ -133,6 +155,8 @@ def list_benchmarks(project_id: str):
 def delete_benchmark(bench_id: str, project_id: str):
     if not benchmarks.valid_id(bench_id):
         raise HTTPException(422, "Invalid benchmark id")
+    _require_project_id(project_id)
+    test_job_manager.cancel(bench_id)  # 아직 돌고 있으면 멈추라고 알린다
     benchmarks.delete(project_id, bench_id)
 
 
@@ -147,6 +171,7 @@ async def benchmark_events(bench_id: str):
 def benchmark_result(bench_id: str, project_id: str):
     if not benchmarks.valid_id(bench_id):
         raise HTTPException(422, "Invalid benchmark id")
+    _require_project_id(project_id)
     path = benchmarks.artifact(project_id, bench_id, benchmarks.RESULT_NAME)
     if not path.exists():
         raise HTTPException(404, "Benchmark result not ready")
@@ -159,6 +184,7 @@ def benchmark_image(bench_id: str, idx: str, project_id: str):
     가둬 경로 탈출을 막는다."""
     if not benchmarks.valid_id(bench_id) or not idx.isdigit():
         raise HTTPException(422, "Invalid id")
+    _require_project_id(project_id)
     manifest = benchmarks.artifact(project_id, bench_id, benchmarks.MANIFEST_NAME)
     if not manifest.exists():
         raise HTTPException(404, "Benchmark images not available")

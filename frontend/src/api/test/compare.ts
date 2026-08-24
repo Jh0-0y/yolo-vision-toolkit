@@ -5,7 +5,6 @@ import { BASE, api } from '../http'
 /** 잡을 시작하는 엔드포인트의 공통 응답 — 진행률은 SSE 로 따로 붙는다. */
 export interface TestJobStart {
   job_id: string
-  status: string
 }
 
 // ---------- test: model comparison (score models vs labeled ground truth) ----------

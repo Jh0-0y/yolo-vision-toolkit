@@ -84,7 +84,10 @@ const fmt = (v: number | undefined) => (v == null ? '—' : v.toFixed(3))
 const entryTitle = (e: CompareEntryResult) => {
   // 크기를 싣기 전에 돌린 옛 런은 이 값이 없다 — 그때는 방식만 보인다.
   const size = e.mode === 'tiled' ? e.tile_size : e.imgsz
-  return `${e.name} · ${e.mode}${size ? ` ${size}` : ''}`
+  // 타일은 자른 크기와 **타일을 넣는 추론 크기**가 갈릴 수 있고, 그 차이가 점수를
+  // 바꾼다. 다를 때만 `@imgsz` 를 덧붙여 크기가 같은 보통의 제목은 조용히 둔다.
+  const at = e.mode === 'tiled' && e.imgsz && e.imgsz !== e.tile_size ? ` @${e.imgsz}` : ''
+  return `${e.name} · ${e.mode}${size ? ` ${size}` : ''}${at}`
 }
 
 /** 데이터셋 test 분할로 채점한 벤치마크 한 건의 결과. 결과가 아직 없으면(404)
