@@ -138,3 +138,17 @@ def test_no_ground_truth_yields_empty_curves():
     out = curves_from_flags([(0.9, False)], n_gt=0)
 
     assert out == {"pr": [], "f1_conf": [], "best_f1": None}
+
+
+def test_best_f1_survives_downsampling():
+    """라벨이 가리키는 봉우리가 그림에 실제로 있어야 한다 — 솎아 내면서 잃기 쉽다."""
+    from lib.detect.evaluate import curves_from_flags
+
+    # 가장 높은 점수 5개만 정답이고 나머지는 전부 오검출 → 최댓값이 곡선 맨 앞에 몰린다
+    flags = [(1.0 - i / 500, i < 5) for i in range(500)]
+
+    out = curves_from_flags(flags, n_gt=5, max_points=50)
+
+    assert out["best_f1"]["value"] == max(f1 for _, f1 in out["f1_conf"])
+    assert len(out["f1_conf"]) <= 50
+    assert len(out["pr"]) <= 50

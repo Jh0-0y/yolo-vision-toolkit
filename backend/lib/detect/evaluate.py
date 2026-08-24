@@ -108,13 +108,25 @@ def average_precision(flags: list[tuple[float, bool]], n_gt: int) -> float:
     return total / 101
 
 
-def _thin(points: list, max_points: int) -> list:
-    """점을 고르게 솎되 **양 끝은 반드시 남긴다** — 끝을 잃으면 곡선 모양이 달라진다."""
+def _thin(points: list, max_points: int, keep: tuple[int, ...] = ()) -> list:
+    """점을 고르게 솎되 **양 끝과 `keep` 의 점은 반드시 남긴다.**
+
+    `keep` 은 곡선의 최댓값처럼 "이 점이 사라지면 라벨과 그림이 어긋나는" 자리다.
+    개수를 늘리지 않으려고 더하지 않고 **가장 가까운 표본을 그것으로 바꾼다.**
+    """
     if max_points <= 2 or len(points) <= max_points:
         return points
     step = (len(points) - 1) / (max_points - 1)
-    idx = sorted({int(round(i * step)) for i in range(max_points)} | {0, len(points) - 1})
-    return [points[i] for i in idx]
+    idx = {int(round(i * step)) for i in range(max_points)} | {0, len(points) - 1}
+    ends = {0, len(points) - 1}
+    for k in keep:
+        if k in idx:
+            continue
+        inner = idx - ends
+        if inner:
+            idx.discard(min(inner, key=lambda j: abs(j - k)))
+        idx.add(k)
+    return [points[i] for i in sorted(idx)]
 
 
 def curves_from_flags(
@@ -134,8 +146,9 @@ def curves_from_flags(
     pr: list[list[float]] = []
     f1c: list[list[float]] = []
     best = {"value": -1.0, "conf": 0.0}
+    best_i = -1
     tp = fp = 0
-    for score, is_tp in sorted(flags, key=lambda x: -x[0]):
+    for n, (score, is_tp) in enumerate(sorted(flags, key=lambda x: -x[0])):
         if is_tp:
             tp += 1
         else:
@@ -147,8 +160,14 @@ def curves_from_flags(
         f1c.append([round(score, 4), round(f1, 4)])
         if f1 > best["value"]:
             best = {"value": round(f1, 4), "conf": round(score, 4)}
+            best_i = n
 
-    return {"pr": _thin(pr, max_points), "f1_conf": _thin(f1c, max_points), "best_f1": best}
+    keep = (best_i,) if best_i >= 0 else ()
+    return {
+        "pr": _thin(pr, max_points, keep),
+        "f1_conf": _thin(f1c, max_points, keep),
+        "best_f1": best,
+    }
 
 
 def map_from_accumulated(
