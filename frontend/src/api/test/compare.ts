@@ -80,9 +80,12 @@ export interface CompareEntryResult {
   name: string
   mode: 'full' | 'tiled'
   /** 화면의 엔트리 제목에 크기를 붙이려고 함께 온다 — `full` 은 `imgsz`,
-   *  `tiled` 는 `tile_size` 가 그 엔트리를 규정하는 숫자다. */
-  imgsz: number
-  tile_size: number
+   *  `tiled` 는 `tile_size` 가 그 엔트리를 규정하는 숫자다.
+   *
+   *  **선택이다.** result.json 은 디스크에 남는 영속 포맷이라, 이 두 필드가
+   *  생기기 전에 돌린 런의 결과에는 키가 아예 없다. */
+  imgsz?: number
+  tile_size?: number
   overall: CompareOverall
   per_class: ClassMetric[]
   detections: number

@@ -81,8 +81,11 @@ const fmt = (v: number | undefined) => (v == null ? '—' : v.toFixed(3))
 
 /** 엔트리를 규정하는 것은 모델 이름 + 방식 + 그 방식의 크기다 —
  *  같은 모델을 `tiled 640` 과 `tiled 512` 로 두 번 넣어도 카드가 구분돼야 한다. */
-const entryTitle = (e: CompareEntryResult) =>
-  `${e.name} · ${e.mode === 'tiled' ? `tiled ${e.tile_size}` : `full ${e.imgsz}`}`
+const entryTitle = (e: CompareEntryResult) => {
+  // 크기를 싣기 전에 돌린 옛 런은 이 값이 없다 — 그때는 방식만 보인다.
+  const size = e.mode === 'tiled' ? e.tile_size : e.imgsz
+  return `${e.name} · ${e.mode}${size ? ` ${size}` : ''}`
+}
 
 /** 데이터셋 test 분할로 채점한 벤치마크 한 건의 결과. 결과가 아직 없으면(404)
  *  진행률을 구독해 기다리고, 오래전에 끝난 런은 구독 없이 바로 결과를 읽는다. */
