@@ -473,7 +473,12 @@ export default function BenchmarkDetailPage() {
                 alignSelf: 'flex-start',
                 maxHeight: 'calc(100vh - 32px)',
                 overflowY: 'auto',
-                flexShrink: 0,
+                // 세로 스크롤이 생기면 가로도 auto 가 된다 — 다른 두 컨테이너와 같이 막는다.
+                overflowX: 'hidden',
+                // 엔트리 이름이 길면 Card 의 max-content 가 커져 레일이 부풀고,
+                // 그만큼 오른쪽 탭이 좁아져 표가 가로로 스크롤된다. 폭을 묶어 둔다.
+                flex: '0 0 240px',
+                maxWidth: 240,
               }}
             >
               <SeriesRail
