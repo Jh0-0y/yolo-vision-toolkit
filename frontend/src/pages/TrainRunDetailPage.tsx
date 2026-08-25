@@ -1,3 +1,9 @@
+// 학습 런 상세 — 텐서보드 결의 화면. 왼쪽 레일에서 지표 계열을 켜고 끄고 스무딩을
+// 조절하면, 오른쪽 탭의 카드들이 그 선택만 그린다.
+//
+// 접이식 토글 넷(loss·클래스 지표·결과 이미지·로그)을 걷어낸 자리다. 하나를 펼쳐
+// 스크롤하면 다른 것에 닿으려고 위로 되돌아가야 했다 — 탭이 그 왕복을 없앤다.
+
 import {
   useEffect,
   useMemo,
@@ -10,24 +16,25 @@ import {
   Button,
   Card,
   Code,
-  Collapse,
   Group,
   Image,
   Loader,
   Modal,
   ScrollArea,
   SimpleGrid,
+  Slider,
   Stack,
+  Tabs,
   Text,
   Title,
   Tooltip,
 } from '@mantine/core'
 import {
+  ChartLegend,
   LineChart,
 } from '@mantine/charts'
 import {
   IconArrowLeft,
-  IconChevronDown,
   IconDownload,
   IconPlaylistAdd,
 } from '@tabler/icons-react'
@@ -58,6 +65,9 @@ import {
 } from '../api/client'
 import StatTile from '../components/StatTile'
 import ChartCard from '../components/charts/ChartCard'
+import ChartGrid from '../components/charts/ChartGrid'
+import SeriesRail from '../components/charts/SeriesRail'
+import { smoothSeries } from '../components/charts/smoothing'
 import DetailsCard from '../components/train/DetailsCard'
 import PerClassEpochChart from '../components/train/PerClassEpochChart'
 import PerClassTable from '../components/train/PerClassTable'
@@ -70,6 +80,160 @@ import {
   type Point,
 } from '../components/train/metrics'
 
+
+type SeriesKey =
+  | 'mAP50'
+  | 'mAP50-95'
+  | 'precision'
+  | 'recall'
+  | 'train_box'
+  | 'train_cls'
+  | 'train_dfl'
+  | 'val_box'
+  | 'val_cls'
+  | 'val_dfl'
+  | 'lr'
+
+interface SeriesDef {
+  key: SeriesKey
+  /** 차트 범례에 올리는 이름. 카드 하나가 한 묶음이라 묶음 안에서만 구분되면 된다. */
+  label: string
+  color: string
+}
+
+/** 계열 정의의 출처는 여기 하나뿐이다 — 레일 견본과 선이 같은 색을 쓰게 하려면
+ *  색이 한 곳에만 적혀 있어야 한다. 값은 접이식 차트가 쓰던 것을 그대로 옮겼고,
+ *  `var(--mantine-color-*)` 로 적어 레일의 `background` 에도 그대로 꽂힌다.
+ *  묶음마다 색이 되풀이되지만 카드 하나가 한 묶음이라 한 축에서 겹치지 않는다. */
+const METRIC_SERIES: SeriesDef[] = [
+  { key: 'mAP50', label: 'mAP50', color: 'var(--mantine-color-teal-6)' },
+  { key: 'mAP50-95', label: 'mAP50-95', color: 'var(--mantine-color-blue-6)' },
+]
+const PR_SERIES: SeriesDef[] = [
+  { key: 'precision', label: 'precision', color: 'var(--mantine-color-indigo-6)' },
+  { key: 'recall', label: 'recall', color: 'var(--mantine-color-orange-6)' },
+]
+const TRAIN_LOSS_SERIES: SeriesDef[] = [
+  { key: 'train_box', label: 'box', color: 'var(--mantine-color-teal-6)' },
+  { key: 'train_cls', label: 'cls', color: 'var(--mantine-color-orange-6)' },
+  { key: 'train_dfl', label: 'dfl', color: 'var(--mantine-color-grape-6)' },
+]
+const VAL_LOSS_SERIES: SeriesDef[] = [
+  { key: 'val_box', label: 'box', color: 'var(--mantine-color-teal-6)' },
+  { key: 'val_cls', label: 'cls', color: 'var(--mantine-color-orange-6)' },
+  { key: 'val_dfl', label: 'dfl', color: 'var(--mantine-color-grape-6)' },
+]
+const LR_SERIES: SeriesDef[] = [
+  { key: 'lr', label: 'lr', color: 'var(--mantine-color-gray-6)' },
+]
+
+const ALL_SERIES: SeriesDef[] = [
+  ...METRIC_SERIES,
+  ...PR_SERIES,
+  ...TRAIN_LOSS_SERIES,
+  ...VAL_LOSS_SERIES,
+  ...LR_SERIES,
+]
+
+/** 레일 이름표는 **데이터 키 그대로** 쓴다 — 차트 범례의 `box` 는 카드 제목이
+ *  묶음을 말해 주지만, 레일에는 세 묶음이 한 줄로 섞여 `train_box` 와 `val_box` 가
+ *  구분돼야 하기 때문이다. */
+const railLabel = (key: SeriesKey) => key
+
+/** 처음 보이는 것은 지금까지 늘 보이던 넷 — 화면의 첫인상을 바꾸지 않는다. */
+const DEFAULT_ENABLED: SeriesKey[] = ['mAP50', 'mAP50-95', 'precision', 'recall']
+
+/** 스무딩을 켜면 계열마다 선이 둘이다. 원본 값은 이 꼬리표를 단 별도 열로 옮기고
+ *  원래 키에는 스무딩한 값을 둔다 — 범례·툴팁이 가리키는 쪽이 진한 선이 되게. */
+const RAW_SUFFIX = '__raw'
+
+const isRaw = (name: string) => name.endsWith(RAW_SUFFIX)
+
+/** 원본 선은 흐리게, 점 없이. `fill: 'none'` 은 그리기와 무관하고(recharts 의 선은
+ *  언제나 fill 이 none 이다) Mantine 툴팁이 이 항목을 걸러 내게 하는 표식이다 —
+ *  한 에폭에 같은 이름이 두 줄로 뜨면 읽을 수 없다. */
+const rawLineProps = (s: { name: string }) =>
+  isRaw(s.name)
+    ? { strokeOpacity: 0.25, strokeWidth: 1.5, dot: false, activeDot: false, fill: 'none' }
+    : {}
+
+/** 범례에는 스무딩된 선만 올린다. Mantine 이 `legendProps` 를 recharts `Legend` 에
+ *  그대로 넘겨 주므로 `content` 만 갈아 끼워 원본 항목을 걸러 낸다. */
+function SmoothedLegend({
+  payload,
+  series,
+}: {
+  payload?: readonly Record<string, unknown>[]
+  series: { name: string; label: string; color: string }[]
+}) {
+  return (
+    <ChartLegend
+      payload={payload?.filter((p) => !isRaw(String(p.dataKey)))}
+      series={series}
+      onHighlight={() => {}}
+      legendPosition="top"
+    />
+  )
+}
+
+/** 켜진 계열이 하나도 없으면 카드째 사라진다 — 빈 축을 그리지 않는다. */
+function ScalarCard({
+  title,
+  hint,
+  defs,
+  data,
+  smoothing,
+  withDots,
+  withLegend = true,
+  yDomain,
+  referenceLines,
+  valueFormatter,
+}: {
+  title: string
+  hint?: string
+  defs: SeriesDef[]
+  data: Record<string, number | undefined>[]
+  smoothing: number
+  withDots: boolean
+  withLegend?: boolean
+  yDomain?: [number, number]
+  referenceLines?: { x: number; label: string; color: string }[]
+  valueFormatter: (v: number) => string
+}) {
+  if (!defs.length) return null
+
+  // 원본을 먼저 깔고 스무딩한 선을 그 위에 얹는다 — 순서가 뒤집히면 흐린 선이
+  // 진한 선을 덮어 색이 바랜다.
+  const series = defs.flatMap((s) =>
+    smoothing > 0
+      ? [
+          { name: `${s.key}${RAW_SUFFIX}`, color: s.color, label: s.label },
+          { name: s.key as string, color: s.color, label: s.label },
+        ]
+      : [{ name: s.key as string, color: s.color, label: s.label }],
+  )
+
+  return (
+    <ChartCard title={title} hint={hint}>
+      <LineChart
+        h={220}
+        data={data}
+        dataKey="epoch"
+        series={series}
+        curveType="monotone"
+        withDots={withDots}
+        withLegend={withLegend}
+        legendProps={
+          smoothing > 0 ? { content: <SmoothedLegend series={series} /> } : undefined
+        }
+        lineProps={rawLineProps}
+        yAxisProps={yDomain ? { domain: yDomain } : undefined}
+        referenceLines={referenceLines}
+        valueFormatter={valueFormatter}
+      />
+    </ChartCard>
+  )
+}
 
 export default function TrainRunDetailPage() {
   const { projectId = '', runId = '' } = useParams()
@@ -145,14 +309,13 @@ export default function TrainRunDetailPage() {
   }, [runId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [lightbox, setLightbox] = useState<{ url: string; label: string } | null>(null)
-  const [showDetailCharts, setShowDetailCharts] = useState(false)
-  const [showClassMetrics, setShowClassMetrics] = useState(false)
-  const [showResults, setShowResults] = useState(false)
-  const [showLog, setShowLog] = useState(false)
+  const [tab, setTab] = useState<string | null>('scalars')
+  const [enabled, setEnabled] = useState<Set<string>>(new Set<string>(DEFAULT_ENABLED))
+  const [smoothing, setSmoothing] = useState(0.6)
 
   // a failed run's cause lives in the log — surface it automatically
   useEffect(() => {
-    if (r?.status === 'error') setShowLog(true)
+    if (r?.status === 'error') setTab('log')
   }, [r?.status])
 
   const stop = useMutation({
@@ -179,8 +342,27 @@ export default function TrainRunDetailPage() {
     return ssePoints
   }, [results.data, ssePoints])
 
-  const hasLoss = points.some((p) => p.val_box != null || p.train_box != null)
-  const hasLr = points.some((p) => p.lr != null)
+  // 값이 한 번도 온 적 없는 계열은 레일에 올리지 않는다 — 켤 수는 있는데
+  // 켜도 아무것도 안 그려지는 줄이 남으면 고장으로 읽힌다.
+  const availableKeys = useMemo(
+    () => new Set(ALL_SERIES.filter((s) => points.some((p) => p[s.key] != null)).map((s) => s.key)),
+    [points],
+  )
+
+  // 스무딩이 켜지면 원본을 `__raw` 열로 복사해 두고 원래 키를 스무딩 값으로 덮는다.
+  const chartData = useMemo<Record<string, number | undefined>[]>(() => {
+    const rows = points.map((p) => ({ ...p }) as Record<string, number | undefined>)
+    if (smoothing <= 0) return rows
+    for (const s of ALL_SERIES) {
+      const raw = points.map((p) => p[s.key])
+      const smoothed = smoothSeries(raw, smoothing)
+      rows.forEach((row, i) => {
+        row[`${s.key}${RAW_SUFFIX}`] = raw[i]
+        row[s.key] = smoothed[i]
+      })
+    }
+    return rows
+  }, [points, smoothing])
 
   const best = useMemo(() => {
     let b: Point | null = null
@@ -227,6 +409,25 @@ export default function TrainRunDetailPage() {
   const referenceLines = bestEpoch
     ? [{ x: bestEpoch, label: 'best', color: 'gray.5' }]
     : undefined
+
+  const withDots = points.length < 40
+  /** 그 묶음에서 **켜져 있고 값도 있는** 계열만. 하나도 없으면 카드가 사라진다. */
+  const shownDefs = (defs: SeriesDef[]) =>
+    defs.filter((s) => enabled.has(s.key) && availableKeys.has(s.key))
+
+  const railSeries = ALL_SERIES.filter((s) => availableKeys.has(s.key)).map((s) => ({
+    id: s.key as string,
+    label: railLabel(s.key),
+    color: s.color,
+  }))
+
+  // 앞 런에서 고른 탭이 이 런에는 없을 수 있다 — 그때는 빈 화면 대신 Scalars 로.
+  const hasPerClass = !!perClassHistory.data?.length || !!perClass.data?.length
+  const hasPlots = !!artifacts.data?.files.length
+  const availableTabs = new Set(['scalars', 'log'])
+  if (hasPerClass) availableTabs.add('per-class')
+  if (hasPlots) availableTabs.add('plots')
+  const activeTab = tab && availableTabs.has(tab) ? tab : 'scalars'
 
   return (
     <Stack gap="md">
@@ -412,185 +613,187 @@ export default function TrainRunDetailPage() {
         </Stack>
       )}
 
-      {/* charts — primary (mAP + P/R) always; loss/LR behind a toggle */}
-      {points.length > 0 && (
-        <Stack gap="sm">
-          <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
-            <ChartCard title="mAP" hint={bestEpoch ? `best @ epoch ${bestEpoch}` : undefined}>
-              <LineChart
-                h={220}
-                data={points}
-                dataKey="epoch"
-                series={[
-                  { name: 'mAP50', color: 'teal.6' },
-                  { name: 'mAP50-95', color: 'blue.6' },
-                ]}
-                curveType="monotone"
-                withDots={points.length < 40}
-                withLegend
-                yAxisProps={{ domain: [0, 1] }}
-                referenceLines={referenceLines}
-                valueFormatter={(v) => v.toFixed(3)}
-              />
-            </ChartCard>
-
-            <ChartCard title="Precision / Recall">
-              <LineChart
-                h={220}
-                data={points}
-                dataKey="epoch"
-                series={[
-                  { name: 'precision', color: 'indigo.6' },
-                  { name: 'recall', color: 'orange.6' },
-                ]}
-                curveType="monotone"
-                withDots={points.length < 40}
-                withLegend
-                yAxisProps={{ domain: [0, 1] }}
-                referenceLines={referenceLines}
-                valueFormatter={(v) => v.toFixed(3)}
-              />
-            </ChartCard>
-          </SimpleGrid>
-
-          {(hasLoss || hasLr) && (
-            <div>
-              <Button
-                variant="subtle"
-                size="compact-sm"
-                rightSection={<IconChevronDown size={14} />}
-                onClick={() => setShowDetailCharts((v) => !v)}
-              >
-                {showDetailCharts ? 'Hide' : 'Show'} detailed graphs (loss · learning rate)
-              </Button>
-              <Collapse expanded={showDetailCharts}>
-                <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md" mt="xs">
-                  {hasLoss && (
-                    <ChartCard title="Train loss">
-                      <LineChart
-                        h={220}
-                        data={points}
-                        dataKey="epoch"
-                        series={[
-                          { name: 'train_box', label: 'box', color: 'teal.6' },
-                          { name: 'train_cls', label: 'cls', color: 'orange.6' },
-                          { name: 'train_dfl', label: 'dfl', color: 'grape.6' },
-                        ]}
-                        curveType="monotone"
-                        withDots={points.length < 40}
-                        withLegend
-                        valueFormatter={(v) => v.toFixed(3)}
-                      />
-                    </ChartCard>
-                  )}
-                  {hasLoss && (
-                    <ChartCard title="Val loss">
-                      <LineChart
-                        h={220}
-                        data={points}
-                        dataKey="epoch"
-                        series={[
-                          { name: 'val_box', label: 'box', color: 'teal.6' },
-                          { name: 'val_cls', label: 'cls', color: 'orange.6' },
-                          { name: 'val_dfl', label: 'dfl', color: 'grape.6' },
-                        ]}
-                        curveType="monotone"
-                        withDots={points.length < 40}
-                        withLegend
-                        referenceLines={referenceLines}
-                        valueFormatter={(v) => v.toFixed(3)}
-                      />
-                    </ChartCard>
-                  )}
-                  {hasLr && (
-                    <ChartCard title="Learning rate">
-                      <LineChart
-                        h={220}
-                        data={points}
-                        dataKey="epoch"
-                        series={[{ name: 'lr', color: 'gray.6' }]}
-                        curveType="monotone"
-                        withDots={false}
-                        valueFormatter={(v) => v.toExponential(1)}
-                      />
-                    </ChartCard>
-                  )}
-                </SimpleGrid>
-              </Collapse>
-            </div>
-          )}
-        </Stack>
-      )}
-
-      {/* class metrics (per-class chart + table) — its own toggle */}
-      {(!!perClassHistory.data?.length || !!perClass.data?.length) && (
-        <div>
-          <Button
-            variant="subtle"
-            size="compact-sm"
-            rightSection={<IconChevronDown size={14} />}
-            onClick={() => setShowClassMetrics((v) => !v)}
+      <Group align="flex-start" gap="md" wrap="nowrap">
+        {/* 레일은 카드를 **보면서** 만지는 것이라 스크롤해도 옆에 남아야 한다.
+            켜고 끄는 것이 Scalars 의 선뿐이므로 다른 탭에서는 걷어 낸다 —
+            아무것도 하지 않는 컨트롤을 옆에 세워 두지 않는다. */}
+        {activeTab === 'scalars' && railSeries.length > 0 && (
+          <div
+            style={{
+              position: 'sticky',
+              top: 16,
+              alignSelf: 'flex-start',
+              maxHeight: 'calc(100vh - 32px)',
+              overflowY: 'auto',
+              // 세로 스크롤이 생기면 가로도 auto 가 된다 — 함께 막는다.
+              overflowX: 'hidden',
+              // 이름이 길어져도 레일이 부풀지 않게 폭을 묶는다.
+              flex: '0 0 240px',
+              maxWidth: 240,
+            }}
           >
-            {showClassMetrics ? 'Hide' : 'Show'} class metrics (per-class)
-          </Button>
-          <Collapse expanded={showClassMetrics}>
-            <Stack gap="md" mt="xs">
-              {!!perClassHistory.data?.length && (
-                <PerClassEpochChart history={perClassHistory.data} />
-              )}
-              {!!perClass.data?.length && <PerClassTable rows={perClass.data} />}
-            </Stack>
-          </Collapse>
-        </div>
-      )}
-
-      {/* result plots (curated) + lightbox — behind a toggle */}
-      {!!artifacts.data?.files.length && (
-        <div>
-          <Button
-            variant="subtle"
-            size="compact-sm"
-            rightSection={<IconChevronDown size={14} />}
-            onClick={() => setShowResults((v) => !v)}
-          >
-            {showResults ? 'Hide' : 'Show'} result images (confusion matrix · curves · samples)
-          </Button>
-          <Collapse expanded={showResults}>
-            <div style={{ marginTop: 8 }}>
-              <PlotsSection files={artifacts.data.files} onOpen={setLightbox} />
-            </div>
-          </Collapse>
-        </div>
-      )}
-
-      {/* raw training log (stdout+stderr) — the place to see failure tracebacks */}
-      <div>
-        <Button
-          variant="subtle"
-          size="compact-sm"
-          rightSection={<IconChevronDown size={14} />}
-          onClick={() => setShowLog((v) => !v)}
-        >
-          {showLog ? 'Hide' : 'Show'} training log
-        </Button>
-        <Collapse expanded={showLog}>
-          <Card withBorder radius="md" padding="xs" mt={8}>
-            {log.data?.truncated && (
-              <Text size="xs" c="dimmed" mb={4}>
-                Showing the last 256&nbsp;KB of the log.
+            <SeriesRail
+              title="Series"
+              series={railSeries}
+              enabled={enabled}
+              onToggle={(id) =>
+                setEnabled((prev) => {
+                  const next = new Set(prev)
+                  if (next.has(id)) next.delete(id)
+                  else next.add(id)
+                  return next
+                })
+              }
+            >
+              <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={4}>
+                Smoothing
               </Text>
+              <Slider
+                min={0}
+                max={0.95}
+                step={0.05}
+                value={smoothing}
+                onChange={setSmoothing}
+                label={(v) => v.toFixed(2)}
+              />
+              <Text size="xs" c="dimmed" mt={4}>
+                {smoothing > 0
+                  ? `${smoothing.toFixed(2)} — the raw curve stays behind it, faded`
+                  : 'off — raw values only'}
+              </Text>
+            </SeriesRail>
+          </div>
+        )}
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Tabs value={activeTab} onChange={setTab} keepMounted={false}>
+            <Tabs.List mb="md">
+              <Tabs.Tab value="scalars">Scalars</Tabs.Tab>
+              {hasPerClass && <Tabs.Tab value="per-class">Per-class</Tabs.Tab>}
+              {hasPlots && <Tabs.Tab value="plots">Plots</Tabs.Tab>}
+              <Tabs.Tab value="log">Log</Tabs.Tab>
+            </Tabs.List>
+
+            {/* ---------- Scalars ---------- */}
+            <Tabs.Panel value="scalars">
+              {points.length > 0 ? (
+                <ChartGrid>
+                  <ScalarCard
+                    title="mAP"
+                    hint={bestEpoch ? `best @ epoch ${bestEpoch}` : undefined}
+                    defs={shownDefs(METRIC_SERIES)}
+                    data={chartData}
+                    smoothing={smoothing}
+                    withDots={withDots}
+                    yDomain={[0, 1]}
+                    referenceLines={referenceLines}
+                    valueFormatter={(v) => v.toFixed(3)}
+                  />
+                  <ScalarCard
+                    title="Precision / Recall"
+                    defs={shownDefs(PR_SERIES)}
+                    data={chartData}
+                    smoothing={smoothing}
+                    withDots={withDots}
+                    yDomain={[0, 1]}
+                    referenceLines={referenceLines}
+                    valueFormatter={(v) => v.toFixed(3)}
+                  />
+                  <ScalarCard
+                    title="Train loss"
+                    defs={shownDefs(TRAIN_LOSS_SERIES)}
+                    data={chartData}
+                    smoothing={smoothing}
+                    withDots={withDots}
+                    valueFormatter={(v) => v.toFixed(3)}
+                  />
+                  <ScalarCard
+                    title="Val loss"
+                    defs={shownDefs(VAL_LOSS_SERIES)}
+                    data={chartData}
+                    smoothing={smoothing}
+                    withDots={withDots}
+                    referenceLines={referenceLines}
+                    valueFormatter={(v) => v.toFixed(3)}
+                  />
+                  <ScalarCard
+                    title="Learning rate"
+                    defs={shownDefs(LR_SERIES)}
+                    data={chartData}
+                    smoothing={smoothing}
+                    withDots={false}
+                    withLegend={false}
+                    valueFormatter={(v) => v.toExponential(1)}
+                  />
+                </ChartGrid>
+              ) : (
+                <Text size="sm" c="dimmed">
+                  No epoch metrics yet.
+                </Text>
+              )}
+            </Tabs.Panel>
+
+            {/* ---------- Per-class ---------- */}
+            {hasPerClass && (
+              <Tabs.Panel value="per-class">
+                <Stack gap="md">
+                  {!!perClassHistory.data?.length && (
+                    <PerClassEpochChart history={perClassHistory.data} />
+                  )}
+                  {/* 클래스가 수십 개면 표만으로 화면을 넘긴다 — 자기 안에서 구르게 한다 */}
+                  {!!perClass.data?.length && (
+                    <div
+                      style={{
+                        maxHeight: 'calc(100vh - 420px)',
+                        minHeight: 320,
+                        overflowY: 'auto',
+                        overflowX: 'hidden',
+                        paddingRight: 4,
+                      }}
+                    >
+                      <PerClassTable rows={perClass.data} />
+                    </div>
+                  )}
+                </Stack>
+              </Tabs.Panel>
             )}
-            <ScrollArea.Autosize mah={420} type="auto">
-              <Code
-                block
-                style={{ whiteSpace: 'pre', fontSize: 12, background: 'transparent' }}
-              >
-                {log.data?.text?.trim() || 'No log yet.'}
-              </Code>
-            </ScrollArea.Autosize>
-          </Card>
-        </Collapse>
-      </div>
+
+            {/* ---------- Plots ---------- */}
+            {hasPlots && (
+              <Tabs.Panel value="plots">
+                <div
+                  style={{
+                    maxHeight: 'calc(100vh - 300px)',
+                    minHeight: 360,
+                    overflowY: 'auto',
+                    overflowX: 'hidden',
+                    paddingRight: 4,
+                  }}
+                >
+                  <PlotsSection files={artifacts.data?.files ?? []} onOpen={setLightbox} />
+                </div>
+              </Tabs.Panel>
+            )}
+
+            {/* ---------- Log ---------- */}
+            {/* 실패한 런의 traceback 이 여기 있다 — 그래서 이 탭은 언제나 있다 */}
+            <Tabs.Panel value="log">
+              <Card withBorder radius="md" padding="xs">
+                {log.data?.truncated && (
+                  <Text size="xs" c="dimmed" mb={4}>
+                    Showing the last 256&nbsp;KB of the log.
+                  </Text>
+                )}
+                <ScrollArea.Autosize mah="calc(100vh - 320px)" type="auto">
+                  <Code block style={{ whiteSpace: 'pre', fontSize: 12, background: 'transparent' }}>
+                    {log.data?.text?.trim() || 'No log yet.'}
+                  </Code>
+                </ScrollArea.Autosize>
+              </Card>
+            </Tabs.Panel>
+          </Tabs>
+        </div>
+      </Group>
 
       <Modal
         opened={lightbox !== null}
@@ -604,4 +807,3 @@ export default function TrainRunDetailPage() {
     </Stack>
   )
 }
-

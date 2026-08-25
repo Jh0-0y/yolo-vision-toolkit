@@ -231,9 +231,11 @@ Training 에 들어가면 **지난 학습 목록이 먼저** 보이고, `새 학
 - **상세 (실시간 모니터링)**:
   - 진행 중: "Epoch X / Y", 준비/최종검증(Finalizing) 상태, 경과 시간, **Stop** 버튼.
   - **Hero 지표**: mAP50 / mAP50-95 / Precision / Recall (큰 숫자=best.pt, 작은 숫자=last.pt).
-  - **차트**: mAP·P/R 라인차트(best epoch 기준선), 상세 그래프(train/val loss, LR), 클래스별 지표(에폭 추이 라인차트 + 정렬 가능한 표).
-  - **결과 이미지**: 학습 곡선·혼동행렬·PR/P/R/F1 커브·라벨 분포·예측 샘플(라이트박스).
-  - **학습 로그**: 원본 stdout/stderr(마지막 256KB), 에러 시 자동 펼침.
+  - **계열 레일 + 탭**: 왼쪽 레일에서 지표 계열(mAP·P/R·train/val loss·LR)을 켜고 끄고, **스무딩 슬라이더**(텐서보드식 지수이동평균, 원본은 흐리게 겹쳐 표시)로 곡선을 다듬습니다. 오른쪽은 탭 넷 — Scalars / Per-class / Plots / Log.
+  - **Scalars**: mAP·Precision/Recall·Train loss·Val loss·Learning rate 카드(best epoch 기준선). 켜진 계열이 없는 카드는 그리지 않습니다.
+  - **Per-class**: 클래스별 지표(에폭 추이 라인차트 + 정렬 가능한 표).
+  - **Plots**: 학습 곡선·혼동행렬·PR/P/R/F1 커브·라벨 분포·예측 샘플(라이트박스).
+  - **Log**: 원본 stdout/stderr(마지막 256KB), 에러 시 자동 선택.
   - **가중치 다운로드**(best.pt/last.pt) 및 **Add to Models**(레지스트리에 등록 → 재라벨링 루프로).
 
 ### 모델 레지스트리 (Models)

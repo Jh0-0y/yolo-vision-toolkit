@@ -56,7 +56,7 @@ frontend/src/
 ├── pages/                   라우트 1개 = 파일 1개 (Lab* 은 연구실, 나머지는 학습실)
 ├── layouts/                 공간별 셸 — ProjectLayout(학습실) · LabLayout(연구실)
 ├── components/<영역>/       화면 전용 컴포넌트 (dataset · editor · lab · test · train · upload)
-├── components/charts/       화면을 가리지 않는 차트 조각 (ChartCard · ChartGrid · SeriesRail · ConfusionMatrix)
+├── components/charts/       화면을 가리지 않는 차트 조각 (ChartCard · ChartGrid · SeriesRail · ConfusionMatrix · smoothing.ts)
 ├── components/*.tsx         여러 화면이 쓰는 공용 컴포넌트
 ├── stores/                  zustand — 화면 간 공유 상태
 └── global.css
@@ -98,7 +98,7 @@ data/                        런타임 데이터 (git 추적 안 함) → data-l
 HTTP·DB·프로세스 관리만 남았다.
 
 백엔드와 프론트 모두 한 차례 정리를 마쳤다. 다음에 손댈 곳은 그때 가장 큰 파일을 보고
-정한다 — 지금 기준으로는 `TrainRunDetailPage.tsx`(약 600줄)와 `LabelEditorPage.tsx`(약 490줄)다.
+정한다 — 지금 기준으로는 `TrainRunDetailPage.tsx`(약 810줄)와 `LabelEditorPage.tsx`(약 490줄)다.
 
 무관한 변경에서 나머지를 함께 옮기지 않는다. 새 코드는 새 자리에 두고, 기존 코드는 그 기능을
 손볼 때 같이 옮긴다.
