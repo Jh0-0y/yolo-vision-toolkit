@@ -37,12 +37,26 @@ import json
 import time
 from pathlib import Path
 
+import numpy as np
+
 from infra import jobs
 from lib.labels.io import atomic_write_text
 
 # sentinel class id for predictions whose class isn't defined in the dataset;
 # it never matches any GT box, so it is correctly counted as a false positive.
 _OTHER = -1
+
+
+def _joined(parts: list[np.ndarray], dtype, width: int = 0) -> np.ndarray:
+    """이미지마다 모아 둔 작은 배열을 한 번에 잇는다.
+
+    numpy 는 append 가 비싸서 예측마다 배열을 늘릴 수 없다 — 이미지당 조각 하나를
+    리스트에 담고 루프가 끝난 뒤 여기서 `concatenate` 한다(ultralytics 의 validator 와
+    같은 방식). 조각이 하나도 없으면 모양이 맞는 빈 배열을 준다.
+    """
+    if parts:
+        return np.concatenate(parts)
+    return np.empty((0, width) if width else 0, dtype=dtype)
 
 
 def _model_info(pt_path: str, model) -> dict | None:
@@ -167,14 +181,14 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         CONF_STEPS,
         IOU_THRESHOLDS,
         SIZE_BUCKETS,
+        _average_precision_arrays,
+        _confusion_from_arrays,
+        _counts_from_arrays,
+        _curves_from_arrays,
+        _map_from_arrays,
         accumulate,
         aggregate,
-        average_precision,
         build_cls_map,
-        confusion_at,
-        counts_at,
-        curves_from_flags,
-        map_from_accumulated,
         match_any_class,
         match_for_ap_indexed,
         match_frame,
@@ -236,30 +250,32 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
 
         totals: dict[str, dict[int, dict[str, int]]] = {e["entry_id"]: {} for e in entries}
         det_counts: dict[str, int] = {e["entry_id"]: 0 for e in entries}
-        # acc[entry_id][iou_thr][cls] -> list of (score, is_tp) for AP
-        ap_acc: dict[str, dict[float, dict[int, list]]] = {
-            e["entry_id"]: {t: {} for t in IOU_THRESHOLDS} for e in entries
+        # 채점 누적기 — 엔트리마다 **배열 넷**이고 예측 하나가 각 배열의 한 자리를 쓴다.
+        #   scores  float32[N]   예측의 점수
+        #   classes int32[N]     예측의 클래스(데이터셋 id, 어휘 밖은 _OTHER = -1)
+        #   correct bool[N, 10]  IoU 임계 열 개 각각에서 맞았는가
+        #   bucket  int8[N]      크기 구간(SIZE_BUCKETS 의 색인)
+        # 임계마다 따로 쌓지 않고 `correct` 의 열로 두는 것이 핵심이다 — 파이썬 튜플로
+        # 임계 열 개를 쌓으면 예측 하나가 650 B 를 먹는다.
+        # 크기 구간도 **열 하나**면 된다: COCO 규칙상 예측 하나는 정확히 한 구간에만 속한다
+        # (정답에 붙었으면 그 정답의 구간, 못 붙었으면 제 박스의 구간). 구간마다 따로
+        # 쌓으면 같은 정보를 세 벌 드는 셈이다.
+        # `extra` 는 매칭 IoU 가 mAP 스윕 밖일 때만 쓰는 열 하나다 — 스윕 안이면(0.5 · 0.7 …
+        # 흔한 경우) `correct` 의 그 열을 그대로 쓴다.
+        acc: dict[str, dict[str, list]] = {
+            e["entry_id"]: {"scores": [], "classes": [], "correct": [], "bucket": [], "extra": []}
+            for e in entries
         }
-        # 크기별 AP — **IoU 0.5 하나만** 쌓는다. "타일이 작은 객체에서 이기는가" 는 AP@0.5 로
-        # 답이 나는데, 임계 열 개를 다 쌓으면 큰 분할에서 엔트리마다 수백 MB 로 붓는다.
-        # 붙은 예측은 **그 정답의 구간에만** 넣는다 — 다른 구간 정답에 붙은 것을 오검출로 세면
-        # 그 구간 점수가 부당하게 나빠진다(COCO 규칙). 아무 정답에도 못 붙은 헛것은
-        # **제 박스 크기 구간에만** 넣는다 — 세 구간에 다 넣으면 큰 헛것이 small 점수를
-        # 끌어내려, 정작 재고 싶은 "작은 객체에서의 오검출"이 흐려진다.
-        size_acc: dict[str, dict[str, dict[int, list]]] = {
-            e["entry_id"]: {b: {} for b in SIZE_BUCKETS} for e in entries
-        }
+        bucket_index = {b: i for i, b in enumerate(SIZE_BUCKETS)}
         # 정답은 엔트리와 무관하게 같은 데이터셋이라 한 벌만 센다.
         size_gt: dict[str, dict[int, int]] = {b: {} for b in SIZE_BUCKETS}
         # 혼동행렬 재료 — 가장 낮은 conf 로 한 번 짝지어 두고 동작점마다 거르기만 한다
         conf_acc: dict[str, dict[str, list]] = {
-            e["entry_id"]: {"matched": [], "missed": [], "spurious": []} for e in entries
+            e["entry_id"]: {k: [] for k in ("m_gt", "m_pred", "m_score", "missed", "s_pred", "s_score")}
+            for e in entries
         }
         # 속도 — 이미지마다 추론 호출에 걸린 벽시계 시간(ms)
         timings: dict[str, list[float]] = {e["entry_id"]: [] for e in entries}
-        # 동작점 스냅샷은 이 벤치마크의 매칭 IoU 로 세야 한다. 그 값이 mAP 스윕에 이미
-        # 있으면(0.5 · 0.7 … 흔한 경우) ap_acc 를 그대로 쓰고, 없을 때만 따로 쌓는다.
-        extra_acc: dict[str, dict[int, list]] = {e["entry_id"]: {} for e in entries}
         needs_extra = iou_match not in IOU_THRESHOLDS
         gt_by_cls: dict[int, int] = {}  # identical across entries (same dataset)
         images: list[dict] = []
@@ -323,30 +339,58 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                 accumulate(totals[eid], m["per_class"])
                 det_counts[eid] += len(preds_disp)
                 # full prediction set drives mAP (independent of display conf)
-                rows50: list = []
-                for t in IOU_THRESHOLDS:
-                    bucket = ap_acc[eid][t]
-                    rows = match_for_ap_indexed(gt, preds_full, t)
-                    for cls, score, gi in rows:
-                        bucket.setdefault(cls, []).append((score, gi >= 0))
-                    if t == 0.5:
-                        rows50 = rows
-                if needs_extra:
-                    # 매칭 IoU 가 스윕 밖일 때만 한 번 더 짝짓는다
-                    for cls, score, gi in match_for_ap_indexed(gt, preds_full, iou_match):
-                        extra_acc[eid].setdefault(cls, []).append((score, gi >= 0))
-                # 크기 구간별(IoU 0.5). `match_for_ap_indexed` 는 예측을 점수 내림차순으로
-                # 훑으며 한 줄씩 쌓으므로, 같은 정렬로 zip 하면 행과 그 박스가 정확히 짝을 이룬다.
-                for p, (cls, score, gi) in zip(
-                    sorted(preds_full, key=lambda x: -x["score"]), rows50
-                ):
-                    b = gt[gi]["size"] if gi >= 0 else size_of(p["xyxyn"], img_w, img_h)
-                    size_acc[eid][b].setdefault(cls, []).append((score, gi >= 0))
+                n_pred = len(preds_full)
+                if n_pred:
+                    # `match_for_ap_indexed` 는 늘 점수 내림차순으로 훑으며 한 줄씩 쌓으므로,
+                    # 임계가 달라도 **줄의 순서가 같다.** 그래서 임계 열 개를 한 배열의
+                    # 열 열 개로 겹쳐 놓을 수 있고, 같은 정렬로 zip 하면 박스와도 짝이 맞는다.
+                    preds_ranked = sorted(preds_full, key=lambda x: -x["score"])
+                    correct = np.empty((n_pred, len(IOU_THRESHOLDS)), dtype=bool)
+                    rows50: list = []
+                    for j, t in enumerate(IOU_THRESHOLDS):
+                        rows = match_for_ap_indexed(gt, preds_full, t)
+                        correct[:, j] = [gi >= 0 for _, _, gi in rows]
+                        if t == 0.5:
+                            rows50 = rows
+                    a = acc[eid]
+                    a["scores"].append(
+                        np.fromiter((p["score"] for p in preds_ranked), np.float32, n_pred)
+                    )
+                    a["classes"].append(np.fromiter((r[0] for r in rows50), np.int32, n_pred))
+                    a["correct"].append(correct)
+                    # 붙은 예측은 **그 정답의 구간**, 못 붙은 헛것은 **제 박스의 구간**이다.
+                    # 다른 구간 정답에 붙은 것을 오검출로 세면 그 구간 점수가 부당하게
+                    # 나빠지고(COCO 규칙), 큰 헛것을 small 에도 넣으면 정작 재고 싶은
+                    # "작은 객체에서의 오검출"이 흐려진다.
+                    a["bucket"].append(np.fromiter(
+                        (
+                            bucket_index[
+                                gt[gi]["size"] if gi >= 0 else size_of(p["xyxyn"], img_w, img_h)
+                            ]
+                            for p, (_, _, gi) in zip(preds_ranked, rows50)
+                        ),
+                        np.int8, n_pred,
+                    ))
+                    if needs_extra:
+                        # 매칭 IoU 가 스윕 밖일 때만 한 번 더 짝짓는다
+                        extra_rows = match_for_ap_indexed(gt, preds_full, iou_match)
+                        a["extra"].append(
+                            np.fromiter((gi >= 0 for _, _, gi in extra_rows), bool, n_pred)
+                        )
                 # 혼동행렬 재료는 IoU 임계 하나(표시용 iou_match)에서 한 번만 짝지어 둔다
                 matched_rows, missed_rows, spurious_rows = match_any_class(gt, preds_full, iou_match)
-                conf_acc[eid]["matched"].extend(matched_rows)
-                conf_acc[eid]["missed"].extend(missed_rows)
-                conf_acc[eid]["spurious"].extend(spurious_rows)
+                ca = conf_acc[eid]
+                if matched_rows:
+                    n_m = len(matched_rows)
+                    ca["m_gt"].append(np.fromiter((r[0] for r in matched_rows), np.int32, n_m))
+                    ca["m_pred"].append(np.fromiter((r[1] for r in matched_rows), np.int32, n_m))
+                    ca["m_score"].append(np.fromiter((r[2] for r in matched_rows), np.float32, n_m))
+                if missed_rows:
+                    ca["missed"].append(np.fromiter(missed_rows, np.int32, len(missed_rows)))
+                if spurious_rows:
+                    n_s = len(spurious_rows)
+                    ca["s_pred"].append(np.fromiter((r[0] for r in spurious_rows), np.int32, n_s))
+                    ca["s_score"].append(np.fromiter((r[1] for r in spurious_rows), np.float32, n_s))
                 img_entry["per_entry"].append({
                     "entry_id": eid,
                     "pred_boxes": [
@@ -361,22 +405,34 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         per_entry = []
         for e in entries:
             eid = e["entry_id"]
+            scores = _joined(acc[eid]["scores"], np.float32)
+            classes = _joined(acc[eid]["classes"], np.int32)
+            correct = _joined(acc[eid]["correct"], bool, len(IOU_THRESHOLDS))
+            bucket = _joined(acc[eid]["bucket"], np.int8)
+            m_gt = _joined(conf_acc[eid]["m_gt"], np.int32)
+            m_pred = _joined(conf_acc[eid]["m_pred"], np.int32)
+            m_score = _joined(conf_acc[eid]["m_score"], np.float32)
+            missed = _joined(conf_acc[eid]["missed"], np.int32)
+            s_pred = _joined(conf_acc[eid]["s_pred"], np.int32)
+            s_score = _joined(conf_acc[eid]["s_score"], np.float32)
+
             agg = aggregate(totals[eid], names)
-            ap = map_from_accumulated(ap_acc[eid], gt_by_cls)
+            ap = _map_from_arrays(scores, classes, correct, gt_by_cls)
             for row in agg["per_class"]:
                 cls_ap = ap["per_class"].get(row["cls"], {})
                 row["ap50"] = cls_ap.get("ap50", 0.0)
                 row["ap"] = cls_ap.get("ap", 0.0)
 
-            flags50 = ap_acc[eid].get(0.5, {})
             # 곡선·AP 는 정답이 있어야 잴 수 있다. 정답 없는 클래스를 넣으면 gt_by_cls[c] 에서 죽는다.
             scored_ids = sorted(c for c, n in gt_by_cls.items() if n > 0)
             # 혼동행렬은 **예측에 나올 수 있는 클래스를 전부** 받아야 한다(confusion_at 의 계약).
             # 데이터셋에 없는 클래스(_OTHER)로 간 예측이 실제로 있었다면 그것도 열을 가져야
             # 오검출이 숨지 않는다.
-            oov = _OTHER in flags50 or any(
-                pc == _OTHER for _, pc, _ in conf_acc[eid]["matched"]
-            ) or any(pc == _OTHER for pc, _ in conf_acc[eid]["spurious"])
+            oov = bool(
+                np.any(classes == _OTHER)
+                or np.any(m_pred == _OTHER)
+                or np.any(s_pred == _OTHER)
+            )
             matrix_ids = scored_ids + ([_OTHER] if oov else [])
 
             by_size = {}
@@ -384,15 +440,21 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                 bucket_cls = [c for c, n in size_gt[b].items() if n > 0]
                 if not bucket_cls:
                     continue  # 정답이 없는 구간은 비운다 — 0 으로 적으면 거짓말이 된다
+                in_bucket = bucket == bucket_index[b]
                 ap50_b = sum(
-                    average_precision(size_acc[eid][b].get(c, []), size_gt[b][c])
+                    _average_precision_arrays(
+                        scores[in_bucket & (classes == c)],
+                        correct[in_bucket & (classes == c), 0],
+                        size_gt[b][c],
+                    )
                     for c in bucket_cls
                 ) / len(bucket_cls)
                 by_size[b] = {"ap50": round(ap50_b, 4), "gt": sum(size_gt[b].values())}
 
             pr_curves, f1_curves, best = [], [], None
             for c in scored_ids:
-                cur = curves_from_flags(flags50.get(c, []), gt_by_cls[c])
+                of_cls = classes == c
+                cur = _curves_from_arrays(scores[of_cls], correct[of_cls, 0], gt_by_cls[c])
                 if not cur["pr"]:
                     continue
                 pr_curves.append({"cls": c, "name": names.get(c, str(c)), "points": cur["pr"]})
@@ -405,9 +467,10 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
             # 스냅샷은 이 벤치마크가 고른 매칭 IoU 로 센다 — 대표 숫자(overall)와 같은 잣대여야
             # 슬라이더를 기본 동작점에 놓았을 때 두 숫자가 어긋나지 않는다. 곡선은 그대로
             # IoU 0.5 다(PR·F1 곡선은 관례가 0.5 이고 차트 라벨도 그렇게 적는다).
-            snap_flags = ap_acc[eid].get(iou_match)
-            if snap_flags is None:
-                snap_flags = extra_acc[eid]
+            if needs_extra:
+                snap_hits = _joined(acc[eid]["extra"], bool)
+            else:
+                snap_hits = correct[:, IOU_THRESHOLDS.index(iou_match)]
 
             # 격자에 **이 런의 conf 를 반드시 넣는다.** 화면은 슬라이더를 런의 conf 에
             # 가장 가까운 단계에 놓는데, 정확히 일치하는 단계가 없으면 대표 숫자(overall)와
@@ -417,14 +480,15 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
 
             ops = []
             for step in steps:
-                snap = aggregate(counts_at(snap_flags, gt_by_cls, step), names)
+                snap = aggregate(
+                    _counts_from_arrays(scores, classes, snap_hits, gt_by_cls, step), names
+                )
                 ops.append({
                     "conf": step,
                     "overall": snap["overall"],
                     "per_class": snap["per_class"],
-                    "confusion": confusion_at(
-                        step, conf_acc[eid]["matched"], conf_acc[eid]["missed"],
-                        conf_acc[eid]["spurious"], matrix_ids, names,
+                    "confusion": _confusion_from_arrays(
+                        step, m_gt, m_pred, m_score, missed, s_pred, s_score, matrix_ids, names,
                     ),
                 })
 
@@ -455,7 +519,11 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                 "ap50": ap["map50"],
                 "ap75": round(
                     sum(
-                        average_precision(ap_acc[eid].get(0.75, {}).get(c, []), gt_by_cls[c])
+                        _average_precision_arrays(
+                            scores[classes == c],
+                            correct[classes == c, IOU_THRESHOLDS.index(0.75)],
+                            gt_by_cls[c],
+                        )
                         for c in scored_ids
                     ) / len(scored_ids), 4,
                 ) if scored_ids else None,
