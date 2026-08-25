@@ -89,16 +89,20 @@ def match_for_ap(gt: list[dict], pred: list[dict], iou_thr: float) -> list[tuple
 
 def match_for_ap_indexed(
     gt: list[dict], pred: list[dict], iou_thr: float
-) -> list[tuple[int, float, int]]:
-    """`match_for_ap` 과 같은 규칙이되, **어느 정답에 붙었는지**까지 돌려준다.
+) -> list[tuple[int, float, int, int]]:
+    """`match_for_ap` 과 같은 규칙이되, **어느 정답에 붙었는지와 몇 번째 예측인지**까지 돌려준다.
+
+    마지막 원소는 호출자가 넘긴 `pred` 리스트에서의 색인이다. 이것이 없으면 호출자가
+    같은 정렬을 다시 만들어 zip 해야 하는데, 그러면 여기 정렬 규칙이 조금만 바뀌어도
+    점수·클래스·박스가 **조용히 서로 다른 예측에 붙는다.** 색인을 주면 그 결합이 사라진다.
 
     크기별 AP 의 COCO 규칙("다른 구간 정답에 붙은 예측은 무시")을 지키려면 참/거짓만으로는
     부족하다 — 그 예측이 *어느* 정답을 claim 했는지 알아야 구간 밖인지 판단할 수 있다.
     매칭을 한 번만 하고 크기별 AP·동작점 스냅샷·전체 AP 를 모두 여기서 파생시킨다.
     """
     gt_used = [False] * len(gt)
-    rows: list[tuple[int, float, int]] = []
-    for p in sorted(pred, key=lambda x: -x["score"]):
+    rows: list[tuple[int, float, int, int]] = []
+    for pi, p in sorted(enumerate(pred), key=lambda x: -x[1]["score"]):
         pb = tuple(p["xyxyn"])
         best_iou, best_j = iou_thr, -1
         for j, g in enumerate(gt):
@@ -109,7 +113,7 @@ def match_for_ap_indexed(
                 best_iou, best_j = v, j
         if best_j >= 0:
             gt_used[best_j] = True
-        rows.append((p["cls"], p["score"], best_j))
+        rows.append((p["cls"], p["score"], best_j, pi))
     return rows
 
 

@@ -170,7 +170,8 @@ def test_indexed_match_reports_which_ground_truth_was_claimed():
 
     rows = match_for_ap_indexed(gt, pred, 0.5)
 
-    assert rows == [(0, 0.9, 1), (0, 0.8, 0)]  # 점수 높은 것이 먼저 claim
+    # (클래스, 점수, 붙은 정답 색인, 예측 색인) — 점수 높은 것이 먼저 claim 한다
+    assert rows == [(0, 0.9, 1, 0), (0, 0.8, 0, 1)]
 
 
 def test_indexed_match_marks_unmatched_predictions_with_minus_one():
@@ -179,7 +180,7 @@ def test_indexed_match_marks_unmatched_predictions_with_minus_one():
     gt = [_g(0, 0.0, 0.0, 0.1, 0.1)]
     pred = [_p(0, 0.9, 0.8, 0.8, 0.9, 0.9)]  # 전혀 다른 자리
 
-    assert match_for_ap_indexed(gt, pred, 0.5) == [(0, 0.9, -1)]
+    assert match_for_ap_indexed(gt, pred, 0.5) == [(0, 0.9, -1, 0)]
 
 
 def test_indexed_match_agrees_with_the_existing_matcher():
@@ -196,8 +197,8 @@ def test_indexed_match_agrees_with_the_existing_matcher():
     old = match_for_ap(gt, pred, 0.5)
     new = match_for_ap_indexed(gt, pred, 0.5)
 
-    assert [(c, s) for c, s, _ in new] == [(c, s) for c, s, _ in old]
-    assert [i >= 0 for _, _, i in new] == [t for _, _, t in old]
+    assert [(c, s) for c, s, _, _ in new] == [(c, s) for c, s, _ in old]
+    assert [i >= 0 for _, _, i, _ in new] == [t for _, _, t in old]
 
 
 def test_size_buckets_follow_coco_area_thresholds():

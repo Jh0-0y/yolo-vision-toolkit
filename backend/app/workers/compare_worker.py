@@ -285,6 +285,7 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         # 속도 — 이미지마다 추론 호출에 걸린 벽시계 시간(ms)
         timings: dict[str, list[float]] = {e["entry_id"]: [] for e in entries}
         needs_extra = iou_match not in IOU_THRESHOLDS
+        disp_thr32 = np.float32(conf_thr)  # 위 비교에 쓸 float32 임계값
         gt_by_cls: dict[int, int] = {}  # identical across entries (same dataset)
         # 오버레이 후보의 최소 힙 — (틀린 수, -원래 순번, 원래 순번, 이미지 경로, 오버레이)
         overlay_heap: list[tuple] = []
@@ -342,8 +343,10 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                             {"cls": cid, "name": b["name"], "xyxyn": b["xyxyn"], "score": b["score"]}
                         )
                 timings[eid].append((time.perf_counter() - t0) * 1000.0)
-                # display-confidence subset drives P/R/F1 counts + the overlay boxes
-                preds_disp = [p for p in preds_full if p["score"] >= conf_thr]
+                # display-confidence subset drives P/R/F1 counts + the overlay boxes.
+                # 비교는 **누적기와 같은 정밀도(float32)로** 한다 — 대표 숫자(overall)와
+                # 같은 conf 의 동작점 스냅샷이 한 예측 차이로 갈리면 안 되기 때문이다.
+                preds_disp = [p for p in preds_full if np.float32(p["score"]) >= disp_thr32]
                 m = match_frame(gt, preds_disp, iou_match)
                 accumulate(totals[eid], m["per_class"])
                 det_counts[eid] += len(preds_disp)
@@ -351,21 +354,21 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                 # full prediction set drives mAP (independent of display conf)
                 n_pred = len(preds_full)
                 if n_pred:
-                    # `match_for_ap_indexed` 는 늘 점수 내림차순으로 훑으며 한 줄씩 쌓으므로,
-                    # 임계가 달라도 **줄의 순서가 같다.** 그래서 임계 열 개를 한 배열의
-                    # 열 열 개로 겹쳐 놓을 수 있고, 같은 정렬로 zip 하면 박스와도 짝이 맞는다.
-                    preds_ranked = sorted(preds_full, key=lambda x: -x["score"])
+                    # `match_for_ap_indexed` 는 늘 점수 내림차순으로 훑으므로 임계가 달라도
+                    # **줄의 순서가 같다.** 그래서 임계 열 개를 한 배열의 열 열 개로 겹칠 수 있다.
+                    # 박스는 정렬을 다시 만들어 zip 하지 않고 행이 실어 주는 예측 색인으로 집는다.
                     correct = np.empty((n_pred, len(IOU_THRESHOLDS)), dtype=bool)
                     rows50: list = []
                     for j, t in enumerate(IOU_THRESHOLDS):
                         rows = match_for_ap_indexed(gt, preds_full, t)
-                        correct[:, j] = [gi >= 0 for _, _, gi in rows]
+                        correct[:, j] = [gi >= 0 for _, _, gi, _ in rows]
                         if t == 0.5:
                             rows50 = rows
                     a = acc[eid]
-                    a["scores"].append(
-                        np.fromiter((p["score"] for p in preds_ranked), np.float32, n_pred)
-                    )
+                    # 점수·클래스는 **행에서 그대로** 꺼낸다. 예전에는 같은 정렬을 다시
+                    # 만들어 zip 했는데, 그러면 매칭의 정렬 규칙이 조금만 바뀌어도
+                    # 값이 서로 다른 예측에 조용히 붙는다.
+                    a["scores"].append(np.fromiter((r[1] for r in rows50), np.float32, n_pred))
                     a["classes"].append(np.fromiter((r[0] for r in rows50), np.int32, n_pred))
                     a["correct"].append(correct)
                     # 붙은 예측은 **그 정답의 구간**, 못 붙은 헛것은 **제 박스의 구간**이다.
@@ -377,7 +380,8 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                             bucket_index[
                                 gt[gi]["size"] if gi >= 0 else size_of(p["xyxyn"], img_w, img_h)
                             ]
-                            for p, (_, _, gi) in zip(preds_ranked, rows50)
+                            for _, _, gi, pi in rows50
+                            for p in (preds_full[pi],)
                         ),
                         np.int8, n_pred,
                     ))
@@ -385,7 +389,7 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                         # 매칭 IoU 가 스윕 밖일 때만 한 번 더 짝짓는다
                         extra_rows = match_for_ap_indexed(gt, preds_full, iou_match)
                         a["extra"].append(
-                            np.fromiter((gi >= 0 for _, _, gi in extra_rows), bool, n_pred)
+                            np.fromiter((gi >= 0 for _, _, gi, _ in extra_rows), bool, n_pred)
                         )
                 # 혼동행렬 재료는 IoU 임계 하나(표시용 iou_match)에서 한 번만 짝지어 둔다
                 matched_rows, missed_rows, spurious_rows = match_any_class(gt, preds_full, iou_match)
