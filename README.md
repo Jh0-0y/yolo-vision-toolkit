@@ -231,7 +231,7 @@ Training 에 들어가면 **지난 학습 목록이 먼저** 보이고, `새 학
 - **상세 (실시간 모니터링)**:
   - 진행 중: "Epoch X / Y", 준비/최종검증(Finalizing) 상태, 경과 시간, **Stop** 버튼.
   - **Hero 지표**: mAP50 / mAP50-95 / Precision / Recall (큰 숫자=best.pt, 작은 숫자=last.pt).
-  - **계열 레일 + 탭**: 왼쪽 레일에서 지표 계열(mAP·P/R·train/val loss·LR)을 켜고 끄고, **스무딩 슬라이더**(텐서보드식 지수이동평균, 원본은 흐리게 겹쳐 표시)로 곡선을 다듬습니다. 오른쪽은 탭 넷 — Scalars / Per-class / Plots / Log.
+  - **계열 레일 + 탭**: 오른쪽은 탭 넷 — Scalars / Per-class / Plots / Log. **Scalars 탭에서만** 왼쪽에 레일이 붙어, 지표 계열(mAP·P/R·train/val loss·LR)을 켜고 끄고 **스무딩 슬라이더**(텐서보드식 지수이동평균, 원본은 흐리게 겹쳐 표시)로 곡선을 다듬습니다. 나머지 세 탭은 계열과 무관해 폭을 다 씁니다.
   - **Scalars**: mAP·Precision/Recall·Train loss·Val loss·Learning rate 카드(best epoch 기준선). 켜진 계열이 없는 카드는 그리지 않습니다.
   - **Per-class**: 클래스별 지표(에폭 추이 라인차트 + 정렬 가능한 표).
   - **Plots**: 학습 곡선·혼동행렬·PR/P/R/F1 커브·라벨 분포·예측 샘플(라이트박스).

@@ -8,6 +8,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useDeferredValue,
   useState,
 } from 'react'
 import {
@@ -312,6 +313,10 @@ export default function TrainRunDetailPage() {
   const [tab, setTab] = useState<string | null>('scalars')
   const [enabled, setEnabled] = useState<Set<string>>(new Set<string>(DEFAULT_ENABLED))
   const [smoothing, setSmoothing] = useState(0.6)
+  // 슬라이더는 0.05 눈금마다 값을 바꾸는데, 그때마다 계열 열 개 × 에폭 수를 다시 계산하고
+  // 차트 다섯을 다시 그린다. 600 에폭짜리 런에서는 끄는 손이 걸린다.
+  // 표시는 즉시 따라가되(`smoothing`) **계산만 미뤄**(`deferredSmoothing`) 끌기가 매끄럽게 한다.
+  const deferredSmoothing = useDeferredValue(smoothing)
 
   // a failed run's cause lives in the log — surface it automatically
   useEffect(() => {
@@ -352,17 +357,17 @@ export default function TrainRunDetailPage() {
   // 스무딩이 켜지면 원본을 `__raw` 열로 복사해 두고 원래 키를 스무딩 값으로 덮는다.
   const chartData = useMemo<Record<string, number | undefined>[]>(() => {
     const rows = points.map((p) => ({ ...p }) as Record<string, number | undefined>)
-    if (smoothing <= 0) return rows
+    if (deferredSmoothing <= 0) return rows
     for (const s of ALL_SERIES) {
       const raw = points.map((p) => p[s.key])
-      const smoothed = smoothSeries(raw, smoothing)
+      const smoothed = smoothSeries(raw, deferredSmoothing)
       rows.forEach((row, i) => {
         row[`${s.key}${RAW_SUFFIX}`] = raw[i]
         row[s.key] = smoothed[i]
       })
     }
     return rows
-  }, [points, smoothing])
+  }, [points, deferredSmoothing])
 
   const best = useMemo(() => {
     let b: Point | null = null
@@ -414,6 +419,8 @@ export default function TrainRunDetailPage() {
   /** 그 묶음에서 **켜져 있고 값도 있는** 계열만. 하나도 없으면 카드가 사라진다. */
   const shownDefs = (defs: SeriesDef[]) =>
     defs.filter((s) => enabled.has(s.key) && availableKeys.has(s.key))
+  /** 카드가 하나도 안 그려지는 상태인가 — 흰 화면만 남기지 않으려고 본다. */
+  const shownAny = ALL_SERIES.some((s) => enabled.has(s.key) && availableKeys.has(s.key))
 
   const railSeries = ALL_SERIES.filter((s) => availableKeys.has(s.key)).map((s) => ({
     id: s.key as string,
@@ -666,7 +673,11 @@ export default function TrainRunDetailPage() {
         )}
 
         <div style={{ flex: 1, minWidth: 0 }}>
-          <Tabs value={activeTab} onChange={setTab} keepMounted={false}>
+          {/* keepMounted 를 끄지 않는다 — 클래스별 패널이 고른 지표·클래스와 표 정렬을
+                들고 있어서, 탭을 오갈 때마다 초기화되면 진단하다 말고 매번 다시 고르게 된다.
+                Mantine 9 는 숨은 패널을 React 의 Activity 로 감싸 **이펙트는 멈추고 상태만
+                남기므로**, 안 보이는 탭이 폴링을 돌리는 일도 없다. */}
+          <Tabs value={activeTab} onChange={setTab}>
             <Tabs.List mb="md">
               <Tabs.Tab value="scalars">Scalars</Tabs.Tab>
               {hasPerClass && <Tabs.Tab value="per-class">Per-class</Tabs.Tab>}
@@ -683,7 +694,7 @@ export default function TrainRunDetailPage() {
                     hint={bestEpoch ? `best @ epoch ${bestEpoch}` : undefined}
                     defs={shownDefs(METRIC_SERIES)}
                     data={chartData}
-                    smoothing={smoothing}
+                    smoothing={deferredSmoothing}
                     withDots={withDots}
                     yDomain={[0, 1]}
                     referenceLines={referenceLines}
@@ -693,7 +704,7 @@ export default function TrainRunDetailPage() {
                     title="Precision / Recall"
                     defs={shownDefs(PR_SERIES)}
                     data={chartData}
-                    smoothing={smoothing}
+                    smoothing={deferredSmoothing}
                     withDots={withDots}
                     yDomain={[0, 1]}
                     referenceLines={referenceLines}
@@ -703,7 +714,7 @@ export default function TrainRunDetailPage() {
                     title="Train loss"
                     defs={shownDefs(TRAIN_LOSS_SERIES)}
                     data={chartData}
-                    smoothing={smoothing}
+                    smoothing={deferredSmoothing}
                     withDots={withDots}
                     valueFormatter={(v) => v.toFixed(3)}
                   />
@@ -711,7 +722,7 @@ export default function TrainRunDetailPage() {
                     title="Val loss"
                     defs={shownDefs(VAL_LOSS_SERIES)}
                     data={chartData}
-                    smoothing={smoothing}
+                    smoothing={deferredSmoothing}
                     withDots={withDots}
                     referenceLines={referenceLines}
                     valueFormatter={(v) => v.toFixed(3)}
@@ -720,7 +731,7 @@ export default function TrainRunDetailPage() {
                     title="Learning rate"
                     defs={shownDefs(LR_SERIES)}
                     data={chartData}
-                    smoothing={smoothing}
+                    smoothing={deferredSmoothing}
                     withDots={false}
                     withLegend={false}
                     valueFormatter={(v) => v.toExponential(1)}
@@ -729,6 +740,11 @@ export default function TrainRunDetailPage() {
               ) : (
                 <Text size="sm" c="dimmed">
                   No epoch metrics yet.
+                </Text>
+              )}
+              {points.length > 0 && shownAny === false && (
+                <Text size="sm" c="dimmed">
+                  Every series is turned off — pick one in the rail to draw a chart.
                 </Text>
               )}
             </Tabs.Panel>
