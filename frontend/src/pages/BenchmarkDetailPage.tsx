@@ -120,10 +120,21 @@ const entryTitle = (e: CompareEntryResult) => {
 /** 곡선들을 하나의 x 격자에 얹는다 — LineChart 가 계열마다 다른 x 를 못 받는다.
  *  각 계열은 자기 점들 중 그 x 이하의 마지막 값을 쓴다(계단 보간). */
 function mergeCurves(series: { key: string; points: [number, number][] }[], gridSize = 101) {
+  // 계열마다 x 오름차순으로 **한 번** 정렬해 둔다. PR 곡선의 x(재현율)는 오름차순이지만
+  // F1–conf 곡선의 x 는 **점수**라서 내림차순이다 — 점수 높은 것부터 쌓기 때문이다.
+  // 정렬하지 않으면 아래 스캔이 첫 점에서 끊겨 F1 곡선이 통째로 비어 버린다.
+  const sorted = series.map((s) => ({
+    key: s.key,
+    points: [...s.points].sort((a, b) => a[0] - b[0]),
+  }))
   const grid = Array.from({ length: gridSize }, (_, i) => i / (gridSize - 1))
   return grid.map((x) => {
     const row: Record<string, number> = { x: Number(x.toFixed(3)) }
-    for (const s of series) {
+    for (const s of sorted) {
+      // 이 계열이 닿지 못한 x 에는 값을 주지 않는다 — 마지막 값을 늘려 그리면
+      // 도달한 적 없는 재현율에서 정밀도가 있는 것처럼 보인다.
+      const last = s.points[s.points.length - 1]
+      if (!last || x > last[0]) continue
       let v: number | undefined
       for (const [px, py] of s.points) {
         if (px <= x) v = py
