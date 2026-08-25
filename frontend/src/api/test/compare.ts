@@ -156,10 +156,24 @@ export interface CompareImage {
   per_entry: { entry_id: string; pred_boxes: CompareBox[] }[]
 }
 
+/** 오버레이를 어떻게 골랐는지 — 화면이 사용자에게 "전수가 아니라 표본"임을 설명하는 근거.
+ *
+ *  **선택이다.** result.json 은 디스크에 남는 영속 포맷이라, 상한이 생기기 전에 돌린
+ *  런의 결과에는 키가 아예 없다(그때는 전수가 실려 있다). */
+export interface OverlaySelection {
+  /** `most_errors` — 그 이미지에서 엔트리들의 `fn + fp` 합이 큰 순. */
+  criterion: string
+  limit: number
+  kept: number
+}
+
 export interface CompareResult {
   per_entry: CompareEntryResult[]
+  /** 오버레이를 남긴 이미지들. **채점한 전부가 아니다** — `overlay_selection` 참고. */
   images: CompareImage[]
+  /** **채점한** 전체 장수. `images.length` 와 갈라질 수 있다(오버레이에는 상한이 있다). */
   image_count: number
+  overlay_selection?: OverlaySelection
   conf: number
   iou: number
   warning?: string | null

@@ -111,9 +111,19 @@ pt = settings.model_dir(project_id, model_id) / "model.pt"   # ○
 | 파일 | 담는 것 |
 |---|---|
 | `run.json` | 설정 스냅샷(데이터셋 토큰 · 엔트리 · conf · 매칭 IoU). 잡을 **던지기 전에** 쓴다 — 실패한 시도도 목록에 남는다 |
-| `result.json` | 채점 결과 — 엔트리별 P/R/F1 · mAP(+ap50/ap75) · 크기별 AP · PR/F1 곡선 · conf 단계별 동작점(혼동행렬 포함) · 추론 속도 · 모델 크기·파라미터 수, 그리고 이미지별 박스 |
-| `images_manifest.json` | 색인 → 이미지 경로. 오버레이 이미지는 이 색인으로만 낸다(경로는 런 디렉터리 안으로 가둔다) |
+| `result.json` | 채점 결과 — 엔트리별 P/R/F1 · mAP(+ap50/ap75) · 크기별 AP · PR/F1 곡선 · conf 단계별 동작점(혼동행렬 포함) · 추론 속도 · 모델 크기·파라미터 수, 그리고 **표본** 이미지의 박스 |
+| `images_manifest.json` | 색인 → 이미지 경로. 오버레이 이미지는 이 색인으로만 낸다(경로는 런 디렉터리 안으로 가둔다). 색인은 **채점 순번**이라 `result.json` 의 `images` 와 짝이 맞는다 |
 | `dataset/` | 데이터셋의 test 분할을 `dataset_export.materialize(kind="test")` 로 펼친 트리 |
+
+**`images` 에는 상한이 있다.** `compare_worker.OVERLAY_LIMIT`(200) 장까지만 박스를 싣는다 —
+10만 장을 전부 실으면 파일이 기가 단위가 되고 워커가 OOM 킬러에 맞는데, 자식 프로세스가 그렇게
+죽으면 종료 이벤트가 없어 화면에 영원히 `running` 으로 남는다. 남기는 기준은 **그 이미지에서
+엔트리들의 `fn + fp` 합이 큰 순**이고, 무엇으로 골랐는지는 `overlay_selection`
+(`criterion` · `limit` · `kept`) 에 함께 실린다. `images_manifest.json` 에도 남긴 것만 넣되
+색인은 원래 순번 그대로다.
+
+**`image_count` 는 채점한 전체 장수다** — `len(images)` 가 아니다. 상한에 걸린 런에서는 둘이
+갈라지고, 화면은 그 차이로 "표본을 보고 있다"를 알아낸다. **채점 자체는 늘 전수다.**
 
 이번에 늘어난 필드(크기별 AP · 곡선 · 동작점 스냅샷 · 속도 · 모델 정보)는 **전부 선택**이다.
 그 전에 만들어진 옛 런의 `result.json` 에는 이 자리가 아예 없을 뿐 그대로 읽힌다 — 화면도 없는

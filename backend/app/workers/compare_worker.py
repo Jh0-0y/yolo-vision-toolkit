@@ -29,10 +29,13 @@ a predicted class that isn't in the dataset is kept as a false positive
 
 Overlay images are served by index via the benchmark images manifest — see
 `images_manifest.json` next to result.json and the benchmark image route.
+Scoring is exhaustive, but only the `OVERLAY_LIMIT` most-wrong images keep their
+overlay boxes — `image_count` is the number SCORED, not the number kept.
 """
 
 from __future__ import annotations
 
+import heapq
 import json
 import time
 from pathlib import Path
@@ -45,6 +48,11 @@ from lib.labels.io import atomic_write_text
 # sentinel class id for predictions whose class isn't defined in the dataset;
 # it never matches any GT box, so it is correctly counted as a false positive.
 _OTHER = -1
+
+# result.json 에 오버레이를 남기는 이미지 수의 상한. 10만 장을 전부 실으면 파일이
+# 기가 단위가 되고 화면이 그것을 통째로 받는데, 그만큼을 눈으로 넘겨볼 사람은 없다 —
+# 오버레이 뷰어는 "왜 틀렸는지 몇 장 확인"하는 도구다. **채점은 전수로 한다.**
+OVERLAY_LIMIT = 200
 
 
 def _joined(parts: list[np.ndarray], dtype, width: int = 0) -> np.ndarray:
@@ -278,8 +286,9 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         timings: dict[str, list[float]] = {e["entry_id"]: [] for e in entries}
         needs_extra = iou_match not in IOU_THRESHOLDS
         gt_by_cls: dict[int, int] = {}  # identical across entries (same dataset)
-        images: list[dict] = []
-        manifest: dict[str, str] = {}  # image index -> absolute path (served by route)
+        # 오버레이 후보의 최소 힙 — (틀린 수, -원래 순번, 원래 순번, 이미지 경로, 오버레이)
+        overlay_heap: list[tuple] = []
+        scored = 0  # 채점한 전체 장수. 남긴 오버레이 수와 갈라진다.
         jobs.emit(progress, {"phase": "start", "total": len(pairs)})
 
         for i, (img_path, label_path) in enumerate(pairs):
@@ -296,7 +305,7 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                 g["size"] = size_of(g["xyxy_n"], img_w, img_h)
                 size_gt[g["size"]][g["cls"]] = size_gt[g["size"]].get(g["cls"], 0) + 1
 
-            manifest[str(i)] = str(img_path)
+            wrong = 0  # 이 이미지에서 엔트리들이 틀린 수(fn + fp) — 오버레이를 고르는 잣대
             img_entry = {
                 "stem": img_path.stem,
                 "name": img_path.name,
@@ -338,6 +347,7 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                 m = match_frame(gt, preds_disp, iou_match)
                 accumulate(totals[eid], m["per_class"])
                 det_counts[eid] += len(preds_disp)
+                wrong += m["fn"] + m["fp"]
                 # full prediction set drives mAP (independent of display conf)
                 n_pred = len(preds_full)
                 if n_pred:
@@ -398,9 +408,21 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                         for p in preds_disp
                     ],
                 })
-            images.append(img_entry)
+            scored += 1
+            # 채점은 전수로 끝났고, 여기서 **저장할 오버레이만** 고른다. 기준은 틀린 것이
+            # 많은 순 — 디버깅할 때 실제로 보고 싶은 것이 그것이다. 크기 OVERLAY_LIMIT 의
+            # 최소 힙을 유지하며 제일 덜 틀린 것을 그때그때 밀어낸다(전부 모아 두고 나중에
+            # 고르면 메모리를 아끼는 뜻이 없다). 같은 수로 틀렸으면 앞선 이미지를 남긴다.
+            heapq.heappush(overlay_heap, (wrong, -i, i, str(img_path), img_entry))
+            if len(overlay_heap) > OVERLAY_LIMIT:
+                heapq.heappop(overlay_heap)
             if (i + 1) % 3 == 0 or i + 1 == len(pairs):
                 jobs.emit(progress, {"phase": "analyze", "done": i + 1, "total": len(pairs)})
+
+        # 남긴 것은 **원래 순번 그대로** 늘어놓는다 — 색인이 어긋나면 오버레이 URL 이 어긋난다.
+        kept = sorted(overlay_heap, key=lambda row: row[2])
+        images = [row[4] for row in kept]
+        manifest = {str(row[2]): row[3] for row in kept}  # image index -> absolute path
 
         per_entry = []
         for e in entries:
@@ -539,14 +561,21 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         result = {
             "per_entry": per_entry,
             "images": images,
-            "image_count": len(images),
+            # 채점한 **전체** 장수다. `images` 는 그중 남긴 표본이라 수가 갈라진다.
+            "image_count": scored,
+            # 무엇을 기준으로 골랐는지 화면이 사용자에게 설명할 수 있게 함께 싣는다.
+            "overlay_selection": {
+                "criterion": "most_errors",
+                "limit": OVERLAY_LIMIT,
+                "kept": len(images),
+            },
             "conf": conf_thr,
             "iou": iou_match,
             "warning": warning,
         }
         atomic_write_text(out_dir / "result.json", json.dumps(result))
         jobs.emit(progress, {"phase": "done", "done": len(pairs), "total": len(pairs)})
-        return {"status": "done", "images": len(images)}
+        return {"status": "done", "images": scored}
     except Exception as e:
         jobs.emit(progress, {"phase": "error", "msg": str(e)})
         raise

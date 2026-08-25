@@ -840,6 +840,17 @@ export default function BenchmarkDetailPage() {
                         metricConf < runConf &&
                         ` — the slider is at ${metricConf.toFixed(2)}, but this benchmark stored no boxes below its own confidence of ${runConf.toFixed(2)}`}
                     </Text>
+                    {/* 상한에 걸린 런에서만 뜬다 — 전수가 실린 런에서 "표본입니다"라고
+                        말하면 그 자체가 거짓이다. 무엇을 기준으로 골랐는지까지 밝혀야
+                        "왜 쉬운 이미지가 안 보이지"가 의문으로 남지 않는다. */}
+                    {data.images.length < data.image_count && (
+                      <Text size="xs" c="dimmed">
+                        Showing {data.images.length} of {data.image_count} scored images — the ones
+                        with the most errors (highest false negatives + false positives). Every
+                        image was scored; only the overlays are capped
+                        {data.overlay_selection && ` at ${data.overlay_selection.limit}`}.
+                      </Text>
+                    )}
                     {/* 격자가 문서를 늘리면 오버레이 몇백 장 아래에서 탭 바로 돌아가는 데
                         긴 스크롤이 든다. 뷰포트에 맞춰 높이를 묶어 **격자 안에서만** 구른다.
                         세로를 auto 로 두면 가로도 auto 가 되므로 x 는 hidden 으로 못박아
