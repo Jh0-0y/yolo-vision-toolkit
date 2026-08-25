@@ -13,8 +13,8 @@ Metrics per entry:
   - mAP@0.5 and mAP@0.5:0.95 + per-class AP, computed COCO-style over the FULL
     prediction set (every box down to the detector floor), independent of the
     display confidence.
-  - ap50 / ap75 and per-object-size AP (`by_size`: small / medium / large by
-    COCO area in ORIGINAL frame pixels; a bucket with no GT is omitted).
+  - ap50 / ap75 and per-object-size AP@0.5 (`by_size`: small / medium / large
+    by COCO area in ORIGINAL frame pixels; a bucket with no GT is omitted).
   - PR and F1-vs-confidence curves (`curves`) plus one snapshot per confidence
     step (`operating_points`: overall + per-class counts and a confusion matrix
     at each of `CONF_STEPS`) — all derived from the same accumulated ranking, so
@@ -240,11 +240,14 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         ap_acc: dict[str, dict[float, dict[int, list]]] = {
             e["entry_id"]: {t: {} for t in IOU_THRESHOLDS} for e in entries
         }
-        # 크기별 AP — 구간마다 따로 쌓는다. COCO 규칙에 따라 **다른 구간 정답에 붙은
-        # 예측은 아예 넣지 않는다**(오검출로 세면 그 구간 점수가 부당하게 나빠진다).
-        size_acc: dict[str, dict[str, dict[float, dict[int, list]]]] = {
-            e["entry_id"]: {b: {t: {} for t in IOU_THRESHOLDS} for b in SIZE_BUCKETS}
-            for e in entries
+        # 크기별 AP — **IoU 0.5 하나만** 쌓는다. "타일이 작은 객체에서 이기는가" 는 AP@0.5 로
+        # 답이 나는데, 임계 열 개를 다 쌓으면 큰 분할에서 엔트리마다 수백 MB 로 붓는다.
+        # 붙은 예측은 **그 정답의 구간에만** 넣는다 — 다른 구간 정답에 붙은 것을 오검출로 세면
+        # 그 구간 점수가 부당하게 나빠진다(COCO 규칙). 아무 정답에도 못 붙은 헛것은
+        # **제 박스 크기 구간에만** 넣는다 — 세 구간에 다 넣으면 큰 헛것이 small 점수를
+        # 끌어내려, 정작 재고 싶은 "작은 객체에서의 오검출"이 흐려진다.
+        size_acc: dict[str, dict[str, dict[int, list]]] = {
+            e["entry_id"]: {b: {} for b in SIZE_BUCKETS} for e in entries
         }
         # 정답은 엔트리와 무관하게 같은 데이터셋이라 한 벌만 센다.
         size_gt: dict[str, dict[int, int]] = {b: {} for b in SIZE_BUCKETS}
@@ -254,6 +257,10 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
         }
         # 속도 — 이미지마다 추론 호출에 걸린 벽시계 시간(ms)
         timings: dict[str, list[float]] = {e["entry_id"]: [] for e in entries}
+        # 동작점 스냅샷은 이 벤치마크의 매칭 IoU 로 세야 한다. 그 값이 mAP 스윕에 이미
+        # 있으면(0.5 · 0.7 … 흔한 경우) ap_acc 를 그대로 쓰고, 없을 때만 따로 쌓는다.
+        extra_acc: dict[str, dict[int, list]] = {e["entry_id"]: {} for e in entries}
+        needs_extra = iou_match not in IOU_THRESHOLDS
         gt_by_cls: dict[int, int] = {}  # identical across entries (same dataset)
         images: list[dict] = []
         manifest: dict[str, str] = {}  # image index -> absolute path (served by route)
@@ -316,20 +323,25 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                 accumulate(totals[eid], m["per_class"])
                 det_counts[eid] += len(preds_disp)
                 # full prediction set drives mAP (independent of display conf)
+                rows50: list = []
                 for t in IOU_THRESHOLDS:
                     bucket = ap_acc[eid][t]
                     rows = match_for_ap_indexed(gt, preds_full, t)
                     for cls, score, gi in rows:
                         bucket.setdefault(cls, []).append((score, gi >= 0))
-                    # 크기 구간별 — 다른 구간의 정답에 붙은 예측은 **넣지 않는다**
-                    for b in SIZE_BUCKETS:
-                        sb = size_acc[eid][b][t]
-                        for cls, score, gi in rows:
-                            if gi >= 0:
-                                if gt[gi]["size"] == b:
-                                    sb.setdefault(cls, []).append((score, True))
-                            else:
-                                sb.setdefault(cls, []).append((score, False))
+                    if t == 0.5:
+                        rows50 = rows
+                if needs_extra:
+                    # 매칭 IoU 가 스윕 밖일 때만 한 번 더 짝짓는다
+                    for cls, score, gi in match_for_ap_indexed(gt, preds_full, iou_match):
+                        extra_acc[eid].setdefault(cls, []).append((score, gi >= 0))
+                # 크기 구간별(IoU 0.5). `match_for_ap_indexed` 는 예측을 점수 내림차순으로
+                # 훑으며 한 줄씩 쌓으므로, 같은 정렬로 zip 하면 행과 그 박스가 정확히 짝을 이룬다.
+                for p, (cls, score, gi) in zip(
+                    sorted(preds_full, key=lambda x: -x["score"]), rows50
+                ):
+                    b = gt[gi]["size"] if gi >= 0 else size_of(p["xyxyn"], img_w, img_h)
+                    size_acc[eid][b].setdefault(cls, []).append((score, gi >= 0))
                 # 혼동행렬 재료는 IoU 임계 하나(표시용 iou_match)에서 한 번만 짝지어 둔다
                 matched_rows, missed_rows, spurious_rows = match_any_class(gt, preds_full, iou_match)
                 conf_acc[eid]["matched"].extend(matched_rows)
@@ -369,11 +381,14 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
 
             by_size = {}
             for b in SIZE_BUCKETS:
-                n_gt = sum(size_gt[b].values())
-                if n_gt == 0:
+                bucket_cls = [c for c, n in size_gt[b].items() if n > 0]
+                if not bucket_cls:
                     continue  # 정답이 없는 구간은 비운다 — 0 으로 적으면 거짓말이 된다
-                m = map_from_accumulated(size_acc[eid][b], size_gt[b])
-                by_size[b] = {"ap50": m["map50"], "ap": m["map"], "gt": n_gt}
+                ap50_b = sum(
+                    average_precision(size_acc[eid][b].get(c, []), size_gt[b][c])
+                    for c in bucket_cls
+                ) / len(bucket_cls)
+                by_size[b] = {"ap50": round(ap50_b, 4), "gt": sum(size_gt[b].values())}
 
             pr_curves, f1_curves, best = [], [], None
             for c in scored_ids:
@@ -382,12 +397,21 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
                     continue
                 pr_curves.append({"cls": c, "name": names.get(c, str(c)), "points": cur["pr"]})
                 f1_curves.append({"cls": c, "name": names.get(c, str(c)), "points": cur["f1_conf"]})
+                # 어느 클래스의 최적점인지 함께 싣는다 — 다중 클래스에서 이름 없는 conf 하나만
+                # 보여 주면 화면이 무엇을 최적화한 값인지 말할 수 없다.
                 if best is None or cur["best_f1"]["value"] > best["value"]:
-                    best = cur["best_f1"]
+                    best = {**cur["best_f1"], "cls": c, "name": names.get(c, str(c))}
+
+            # 스냅샷은 이 벤치마크가 고른 매칭 IoU 로 센다 — 대표 숫자(overall)와 같은 잣대여야
+            # 슬라이더를 기본 동작점에 놓았을 때 두 숫자가 어긋나지 않는다. 곡선은 그대로
+            # IoU 0.5 다(PR·F1 곡선은 관례가 0.5 이고 차트 라벨도 그렇게 적는다).
+            snap_flags = ap_acc[eid].get(iou_match)
+            if snap_flags is None:
+                snap_flags = extra_acc[eid]
 
             ops = []
             for step in CONF_STEPS:
-                snap = aggregate(counts_at(flags50, gt_by_cls, step), names)
+                snap = aggregate(counts_at(snap_flags, gt_by_cls, step), names)
                 ops.append({
                     "conf": step,
                     "overall": snap["overall"],
