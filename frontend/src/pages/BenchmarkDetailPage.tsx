@@ -106,6 +106,13 @@ const fmtParams = (v: number | null | undefined) => {
   return String(v)
 }
 
+/** 모델 파일 크기. 속도와 함께 "배포 비용" 을 이루는 다른 한 축이다. */
+const fmtBytes = (v: number | null | undefined) => {
+  if (v == null) return '—'
+  if (v >= 1024 ** 3) return `${(v / 1024 ** 3).toFixed(2)} GB`
+  return `${(v / 1024 ** 2).toFixed(1)} MB`
+}
+
 /** 엔트리를 규정하는 것은 모델 이름 + 방식 + 그 방식의 크기다 —
  *  같은 모델을 `tiled 640` 과 `tiled 512` 로 두 번 넣어도 카드가 구분돼야 한다. */
 const entryTitle = (e: CompareEntryResult) => {
@@ -340,6 +347,19 @@ export default function BenchmarkDetailPage() {
       ]
     : []
 
+  // 슬라이더가 가리키는 동작점의 conf. 동작점이 없는 옛 런은 런에 박힌 conf 다.
+  const metricConf = op?.conf ?? data?.conf
+
+  // 오버레이 상자는 워커가 **런 conf 이상만** 저장한다. 슬라이더가 그보다 위면 남은
+  // 것을 걸러 낼 수 있지만, 아래로 내리면 없는 상자를 되살릴 수 없다. 그래서 실제로
+  // 그려지는 conf 는 `max(슬라이더, 런 conf)` 이고 — `min` 이 아니다 — 그 값을 탭에 밝힌다.
+  const runConf = data?.conf
+  const overlayConf =
+    runConf != null && metricConf != null && metricConf > runConf ? metricConf : runConf
+  /** 그 conf 에 못 미치는 예측 상자를 뺀다. 점수가 없는 옛 결과는 거를 수 없어 그대로 둔다. */
+  const visibleBoxes = (boxes: CompareBox[]) =>
+    overlayConf == null ? boxes : boxes.filter((b) => b.score == null || b.score >= overlayConf)
+
   const notReady = result.error instanceof ApiError && result.error.status === 404
   const resultError = result.error && !notReady ? (result.error as Error).message : null
   const conf = bench?.conf ?? data?.conf
@@ -441,49 +461,65 @@ export default function BenchmarkDetailPage() {
           )}
 
           <Group align="flex-start" gap="md" wrap="nowrap">
-            <SeriesRail
-              title="Entries"
-              series={entries.map((e) => ({
-                id: e.entry_id,
-                label: labelOf(e),
-                color: colorOf(e.entry_id),
-                hint: e.speed
-                  ? `${e.speed.ms_median.toFixed(1)} ms${e.speed.fps ? ` · ${e.speed.fps.toFixed(1)} fps` : ''}`
-                  : undefined,
-              }))}
-              enabled={enabledIds}
-              onToggle={(id) =>
-                setEnabledIds((prev) => {
-                  const next = new Set(prev)
-                  if (next.has(id)) next.delete(id)
-                  else next.add(id)
-                  return next
-                })
-              }
+            {/* 레일은 패널을 **보면서** 만지는 것이다(엔트리 토글·conf 슬라이더) —
+                긴 패널을 스크롤해도 옆에 남아 있어야 한다. `SeriesRail` 은 charts/ 의
+                공용 조각이라 손대지 않고 여기서 감싸기만 한다. 위 조상 중 `overflow` 를
+                건 것이 없고 바깥 Group 이 `align-items: flex-start` 라 sticky 가 먹는다.
+                stretch 를 물려받아 조용히 죽는 일이 없도록 `alignSelf` 를 한 번 더 박는다. */}
+            <div
+              style={{
+                position: 'sticky',
+                top: 16,
+                alignSelf: 'flex-start',
+                maxHeight: 'calc(100vh - 32px)',
+                overflowY: 'auto',
+                flexShrink: 0,
+              }}
             >
-              {steps.length > 0 && (
-                <>
-                  <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={4}>
-                    Confidence
-                  </Text>
-                  <Slider
-                    min={0}
-                    max={steps.length - 1}
-                    step={1}
-                    value={Math.min(confIdx, steps.length - 1)}
-                    onChange={setConfIdx}
-                    label={(i) => steps[i]?.conf.toFixed(2) ?? ''}
-                  />
-                  <Text size="xs" c="dimmed" mt={4}>
-                    {op?.conf.toFixed(2)}
-                    {op != null &&
-                      data.conf != null &&
-                      Math.abs(op.conf - data.conf) < 1e-9 &&
-                      ' · benchmark default'}
-                  </Text>
-                </>
-              )}
-            </SeriesRail>
+              <SeriesRail
+                title="Entries"
+                series={entries.map((e) => ({
+                  id: e.entry_id,
+                  label: labelOf(e),
+                  color: colorOf(e.entry_id),
+                  hint: e.speed
+                    ? `${e.speed.ms_median.toFixed(1)} ms${e.speed.fps ? ` · ${e.speed.fps.toFixed(1)} fps` : ''}`
+                    : undefined,
+                }))}
+                enabled={enabledIds}
+                onToggle={(id) =>
+                  setEnabledIds((prev) => {
+                    const next = new Set(prev)
+                    if (next.has(id)) next.delete(id)
+                    else next.add(id)
+                    return next
+                  })
+                }
+              >
+                {steps.length > 0 && (
+                  <>
+                    <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={4}>
+                      Confidence
+                    </Text>
+                    <Slider
+                      min={0}
+                      max={steps.length - 1}
+                      step={1}
+                      value={Math.min(confIdx, steps.length - 1)}
+                      onChange={setConfIdx}
+                      label={(i) => steps[i]?.conf.toFixed(2) ?? ''}
+                    />
+                    <Text size="xs" c="dimmed" mt={4}>
+                      {op?.conf.toFixed(2)}
+                      {op != null &&
+                        data.conf != null &&
+                        Math.abs(op.conf - data.conf) < 1e-9 &&
+                        ' · benchmark default'}
+                    </Text>
+                  </>
+                )}
+              </SeriesRail>
+            </div>
 
             <div style={{ flex: 1, minWidth: 0 }}>
               <Tabs value={activeTab} onChange={setTab} keepMounted={false}>
@@ -498,7 +534,20 @@ export default function BenchmarkDetailPage() {
                 <Tabs.Panel value="scalars">
                   <Stack gap="md">
                     <Card withBorder radius="md" padding="sm">
-                      <Table.ScrollContainer minWidth={940}>
+                      {/* 어느 칸이 슬라이더를 따라 움직이고 어느 칸이 아닌지 밝힌다 —
+                          곡선 카드가 `· IoU 0.50` 을 달고 있는 것과 같은 이유다. */}
+                      <Group justify="space-between" mb="xs" wrap="wrap" gap={4}>
+                        <Text size="sm" fw={600}>
+                          Headline metrics
+                        </Text>
+                        <Text size="xs" c="dimmed">
+                          P · R · F1 · TP · FP · FN · Detections at conf{' '}
+                          {metricConf != null ? metricConf.toFixed(2) : '—'}
+                          {iou != null && ` · match IoU ${iou.toFixed(2)}`} — mAP50, mAP50-95 and
+                          AP75 average over all confidences and do not follow the slider
+                        </Text>
+                      </Group>
+                      <Table.ScrollContainer minWidth={1020}>
                         <Table striped highlightOnHover fz="xs" verticalSpacing={6}>
                           <Table.Thead>
                             <Table.Tr>
@@ -515,6 +564,7 @@ export default function BenchmarkDetailPage() {
                               <Table.Th ta="right">Detections</Table.Th>
                               <Table.Th ta="right">ms/img</Table.Th>
                               <Table.Th ta="right">Params</Table.Th>
+                              <Table.Th ta="right">Size</Table.Th>
                             </Table.Tr>
                           </Table.Thead>
                           <Table.Tbody>
@@ -566,12 +616,13 @@ export default function BenchmarkDetailPage() {
                                     {e.speed ? e.speed.ms_median.toFixed(1) : '—'}
                                   </Table.Td>
                                   <Table.Td ta="right">{fmtParams(e.model?.params)}</Table.Td>
+                                  <Table.Td ta="right">{fmtBytes(e.model?.size_bytes)}</Table.Td>
                                 </Table.Tr>
                               )
                             })}
                             {shown.length === 0 && (
                               <Table.Tr>
-                                <Table.Td colSpan={13}>
+                                <Table.Td colSpan={14}>
                                   <Text size="xs" c="dimmed" ta="center">
                                     No entries selected. Turn one on in the rail.
                                   </Text>
@@ -616,72 +667,90 @@ export default function BenchmarkDetailPage() {
                       <Text size="sm" fw={600}>
                         Per-class metrics
                       </Text>
-                      <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="sm">
-                        {shown.map((e) => {
-                          // P/R/F1 은 동작점을 따라 움직이고, AP 는 conf 와 무관한
-                          // 곡선 아래 면적이라 엔트리 본체의 값을 그대로 쓴다.
-                          const byCls = new Map<number, ClassMetric>()
-                          for (const c of opOf(e)?.per_class ?? []) byCls.set(c.cls, c)
-                          return (
-                            <Card key={e.entry_id} withBorder radius="md" padding="sm">
-                              <Group gap={6} mb={6}>
-                                <span
-                                  style={{
-                                    width: 10,
-                                    height: 10,
-                                    borderRadius: 2,
-                                    background: colorOf(e.entry_id),
-                                  }}
-                                />
-                                <Text size="sm" fw={600}>
-                                  {labelOf(e)}
-                                </Text>
-                              </Group>
-                              <Table.ScrollContainer minWidth={420}>
-                                <Table striped highlightOnHover fz="xs" verticalSpacing={4}>
-                                  <Table.Thead>
-                                    <Table.Tr>
-                                      <Table.Th>Class</Table.Th>
-                                      <Table.Th ta="right">GT</Table.Th>
-                                      <Table.Th ta="right">P</Table.Th>
-                                      <Table.Th ta="right">R</Table.Th>
-                                      <Table.Th ta="right">F1</Table.Th>
-                                      <Table.Th ta="right">AP@.5</Table.Th>
-                                      <Table.Th ta="right">AP@.5:.95</Table.Th>
-                                    </Table.Tr>
-                                  </Table.Thead>
-                                  <Table.Tbody>
-                                    {e.per_class.map((c) => {
-                                      const at = byCls.get(c.cls) ?? c
-                                      return (
-                                        <Table.Tr key={c.cls}>
-                                          <Table.Td>{c.name}</Table.Td>
-                                          <Table.Td ta="right">{c.gt}</Table.Td>
-                                          <Table.Td ta="right">{fmt(at.precision)}</Table.Td>
-                                          <Table.Td ta="right">{fmt(at.recall)}</Table.Td>
-                                          <Table.Td ta="right">{fmt(at.f1)}</Table.Td>
-                                          <Table.Td ta="right">{fmt(c.ap50)}</Table.Td>
-                                          <Table.Td ta="right">{fmt(c.ap)}</Table.Td>
-                                        </Table.Tr>
-                                      )
-                                    })}
-                                    {e.per_class.length === 0 && (
+                      {/* 엔트리마다 카드 한 장이라 이 구역도 길어질 수 있다. 위의 대표 표와
+                          카드가 이미 자리를 먹으니 이미지 격자보다 여유를 더 둔다. */}
+                      <div
+                        style={{
+                          maxHeight: 'calc(100vh - 420px)',
+                          minHeight: 320,
+                          overflowY: 'auto',
+                          overflowX: 'hidden',
+                          paddingRight: 4,
+                        }}
+                      >
+                        <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="sm">
+                          {shown.map((e) => {
+                            // 행은 **동작점**의 클래스 목록으로 짓는다. `e.per_class` 는 런 conf
+                            // 에서 만들어져, 그보다 **아래**에만 나타나는 클래스는 아예 행이 없다 —
+                            // 그것으로 행을 지으면 슬라이더를 내려도 그 오검출이 영영 안 보이고,
+                            // 행의 합이 위 대표 숫자와 어긋난다.
+                            const point = opOf(e)
+                            const rows = point?.per_class ?? e.per_class
+                            // AP 는 동작점의 함수가 아니라 곡선 아래 면적이라 엔트리 본체에서 온다.
+                            // 스냅샷에만 있는 클래스는 AP 가 없어 `—` 로 남는다(행은 지우지 않는다).
+                            const apOf = new Map<number, ClassMetric>()
+                            for (const c of e.per_class) apOf.set(c.cls, c)
+                            return (
+                              <Card key={e.entry_id} withBorder radius="md" padding="sm">
+                                <Group gap={6} mb={6}>
+                                  <span
+                                    style={{
+                                      width: 10,
+                                      height: 10,
+                                      borderRadius: 2,
+                                      background: colorOf(e.entry_id),
+                                    }}
+                                  />
+                                  <Text size="sm" fw={600}>
+                                    {labelOf(e)}
+                                  </Text>
+                                </Group>
+                                <Table.ScrollContainer minWidth={420}>
+                                  <Table striped highlightOnHover fz="xs" verticalSpacing={4}>
+                                    <Table.Thead>
                                       <Table.Tr>
-                                        <Table.Td colSpan={7}>
-                                          <Text size="xs" c="dimmed" ta="center">
-                                            No overlapping classes between this model and the test
-                                            split.
-                                          </Text>
-                                        </Table.Td>
+                                        <Table.Th>Class</Table.Th>
+                                        <Table.Th ta="right">GT</Table.Th>
+                                        <Table.Th ta="right">P</Table.Th>
+                                        <Table.Th ta="right">R</Table.Th>
+                                        <Table.Th ta="right">F1</Table.Th>
+                                        <Table.Th ta="right">AP@.5</Table.Th>
+                                        <Table.Th ta="right">AP@.5:.95</Table.Th>
                                       </Table.Tr>
-                                    )}
-                                  </Table.Tbody>
-                                </Table>
-                              </Table.ScrollContainer>
-                            </Card>
-                          )
-                        })}
-                      </SimpleGrid>
+                                    </Table.Thead>
+                                    <Table.Tbody>
+                                      {rows.map((c) => {
+                                        const ap = apOf.get(c.cls)
+                                        return (
+                                          <Table.Tr key={c.cls}>
+                                            <Table.Td>{c.name}</Table.Td>
+                                            <Table.Td ta="right">{c.gt}</Table.Td>
+                                            <Table.Td ta="right">{fmt(c.precision)}</Table.Td>
+                                            <Table.Td ta="right">{fmt(c.recall)}</Table.Td>
+                                            <Table.Td ta="right">{fmt(c.f1)}</Table.Td>
+                                            <Table.Td ta="right">{fmt(ap?.ap50)}</Table.Td>
+                                            <Table.Td ta="right">{fmt(ap?.ap)}</Table.Td>
+                                          </Table.Tr>
+                                        )
+                                      })}
+                                      {rows.length === 0 && (
+                                        <Table.Tr>
+                                          <Table.Td colSpan={7}>
+                                            <Text size="xs" c="dimmed" ta="center">
+                                              No overlapping classes between this model and the test
+                                              split.
+                                            </Text>
+                                          </Table.Td>
+                                        </Table.Tr>
+                                      )}
+                                    </Table.Tbody>
+                                  </Table>
+                                </Table.ScrollContainer>
+                              </Card>
+                            )
+                          })}
+                        </SimpleGrid>
+                      </div>
                     </Stack>
                   </Stack>
                 </Tabs.Panel>
@@ -722,6 +791,15 @@ export default function BenchmarkDetailPage() {
                               labels={point.confusion.labels}
                               rows={point.confusion.rows}
                             />
+                            {/* 이 행렬은 **클래스를 무시하고** 매칭한다 — 그래야 "공을 선수라
+                                불렀다" 를 말할 수 있다. Scalars 의 TP 는 클래스까지 맞아야 세므로
+                                두 숫자는 정당하게 어긋난다(Ultralytics 도 같다). */}
+                            <Text size="xs" c="dimmed" mt={6}>
+                              Matching here ignores the class label, so a box on the right object
+                              with the wrong label lands off the diagonal instead of on it. The
+                              diagonal can therefore be lower than the TP column in Scalars, which
+                              only counts a match when the class agrees too.
+                            </Text>
                           </ChartCard>
                         )
                       })}
@@ -748,33 +826,56 @@ export default function BenchmarkDetailPage() {
                         ))}
                       </Group>
                     </Group>
-                    <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="sm">
-                      {data.images.map((img) => (
-                        <Stack
-                          key={img.stem}
-                          gap={4}
-                          style={{ cursor: 'zoom-in' }}
-                          onClick={() => setEnlarged(img)}
-                        >
-                          <BoxOverlay
-                            src={img.url}
-                            layers={[
-                              { boxes: img.gt_boxes, color: GT_COLOR, dashed: true },
-                              ...img.per_entry
-                                .filter((pe) => enabledIds.has(pe.entry_id))
-                                .map((pe) => ({
-                                  boxes: pe.pred_boxes,
-                                  color: colorOf(pe.entry_id),
-                                  dashed: false,
-                                })),
-                            ]}
-                          />
-                          <Text size="xs" c="dimmed" truncate="end">
-                            {img.name}
-                          </Text>
-                        </Stack>
-                      ))}
-                    </SimpleGrid>
+                    {/* 오버레이가 실제로 어느 conf 를 반영하는지 말해 준다 — 슬라이더를 런
+                        conf 아래로 내려도 그림이 그대로인 이유가 여기 적혀 있어야 한다. */}
+                    <Text size="xs" c="dimmed">
+                      Boxes drawn at conf {overlayConf != null ? overlayConf.toFixed(2) : '—'}
+                      {metricConf != null &&
+                        runConf != null &&
+                        metricConf < runConf &&
+                        ` — the slider is at ${metricConf.toFixed(2)}, but this benchmark stored no boxes below its own confidence of ${runConf.toFixed(2)}`}
+                    </Text>
+                    {/* 격자가 문서를 늘리면 오버레이 몇백 장 아래에서 탭 바로 돌아가는 데
+                        긴 스크롤이 든다. 뷰포트에 맞춰 높이를 묶어 **격자 안에서만** 구른다.
+                        세로를 auto 로 두면 가로도 auto 가 되므로 x 는 hidden 으로 못박아
+                        페이지 본문에 가로 스크롤바가 생기지 않게 한다. */}
+                    <div
+                      style={{
+                        maxHeight: 'calc(100vh - 320px)',
+                        minHeight: 360,
+                        overflowY: 'auto',
+                        overflowX: 'hidden',
+                        paddingRight: 4,
+                      }}
+                    >
+                      <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="sm">
+                        {data.images.map((img) => (
+                          <Stack
+                            key={img.stem}
+                            gap={4}
+                            style={{ cursor: 'zoom-in' }}
+                            onClick={() => setEnlarged(img)}
+                          >
+                            <BoxOverlay
+                              src={img.url}
+                              layers={[
+                                { boxes: img.gt_boxes, color: GT_COLOR, dashed: true },
+                                ...img.per_entry
+                                  .filter((pe) => enabledIds.has(pe.entry_id))
+                                  .map((pe) => ({
+                                    boxes: visibleBoxes(pe.pred_boxes),
+                                    color: colorOf(pe.entry_id),
+                                    dashed: false,
+                                  })),
+                              ]}
+                            />
+                            <Text size="xs" c="dimmed" truncate="end">
+                              {img.name}
+                            </Text>
+                          </Stack>
+                        ))}
+                      </SimpleGrid>
+                    </div>
                   </Stack>
                 </Tabs.Panel>
               </Tabs>
@@ -792,7 +893,7 @@ export default function BenchmarkDetailPage() {
               ...enlarged.per_entry
                 .filter((pe) => enabledIds.has(pe.entry_id))
                 .map((pe) => ({
-                  boxes: pe.pred_boxes,
+                  boxes: visibleBoxes(pe.pred_boxes),
                   color: colorOf(pe.entry_id),
                   dashed: false,
                 })),
