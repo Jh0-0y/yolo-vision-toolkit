@@ -56,6 +56,7 @@ frontend/src/
 ├── pages/                   라우트 1개 = 파일 1개 (Lab* 은 연구실, 나머지는 학습실)
 ├── layouts/                 공간별 셸 — ProjectLayout(학습실) · LabLayout(연구실)
 ├── components/<영역>/       화면 전용 컴포넌트 (dataset · editor · lab · test · train · upload)
+├── components/charts/       화면을 가리지 않는 차트 조각 (ChartCard · ChartGrid · SeriesRail · ConfusionMatrix)
 ├── components/*.tsx         여러 화면이 쓰는 공용 컴포넌트
 ├── stores/                  zustand — 화면 간 공유 상태
 └── global.css

@@ -57,7 +57,7 @@ import {
   type TrainRunOut,
 } from '../api/client'
 import StatTile from '../components/StatTile'
-import ChartCard from '../components/train/ChartCard'
+import ChartCard from '../components/charts/ChartCard'
 import DetailsCard from '../components/train/DetailsCard'
 import PerClassEpochChart from '../components/train/PerClassEpochChart'
 import PerClassTable from '../components/train/PerClassTable'

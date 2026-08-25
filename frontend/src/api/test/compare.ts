@@ -72,6 +72,34 @@ export interface BenchmarkOut {
   error: string | null
 }
 
+/** 곡선 하나 — 클래스 하나의 점 목록. `points` 는 `[x, y]` 쌍으로,
+ *  PR 곡선은 `[recall, precision]`, F1-conf 곡선은 `[conf, f1]` 이다. */
+export interface CurvePoints {
+  cls: number
+  name: string
+  points: [number, number][]
+}
+
+/** conf 를 하나로 고정해 다시 채점한 스냅샷 — 화면의 conf 슬라이더가 이 목록 위를 움직인다. */
+export interface OperatingPoint {
+  conf: number
+  overall: CompareOverall
+  per_class: ClassMetric[]
+  /** 행이 실제, 열이 예측. 마지막 행·열은 background 이고,
+   *  background×background 칸은 뜻이 없어 `null` 이다. */
+  confusion: {
+    labels: string[]
+    rows: (number | null)[][]
+  }
+}
+
+/** 객체 크기 구간별 성적. 0.5:0.95 평균은 메모리 비용이 너무 커서 싣지 않는다 —
+ *  이 지표가 답하려는 질문에는 AP@0.5 로 충분하다. */
+export interface SizeMetric {
+  ap50: number
+  gt: number
+}
+
 /** 결과는 **엔트리 단위**로 키를 잡는다 — 같은 모델을 방식만 바꿔 두 번 넣을 수 있다. */
 export interface CompareEntryResult {
   entry_id: string
@@ -90,6 +118,34 @@ export interface CompareEntryResult {
   detections: number
   map50: number
   map: number
+  /** 여기부터는 전부 **선택**이다 — result.json 은 디스크에 남는 영속 포맷이라
+   *  이 지표들이 생기기 전에 돌린 런의 결과에는 키가 아예 없다. */
+  ap50?: number | null
+  ap75?: number | null
+  /** 정답이 하나도 없는 구간은 아예 빠진다 — 그래서 세 키가 다 있다고 볼 수 없다. */
+  by_size?: Partial<Record<'small' | 'medium' | 'large', SizeMetric>>
+  curves?: {
+    pr: CurvePoints[]
+    f1_conf: CurvePoints[]
+    /** F1 이 가장 높은 지점. `cls`·`name` 은 그 F1 이 어느 클래스의 것인지 —
+     *  다중 클래스에서 이름 없는 conf 하나만 보여 주면 뜻이 흐려진다. */
+    best_f1: {
+      value: number
+      conf: number
+      cls: number
+      name: string
+    } | null
+  }
+  operating_points?: OperatingPoint[]
+  speed?: {
+    ms_median: number
+    ms_p95: number
+    fps: number | null
+  } | null
+  model?: {
+    size_bytes: number | null
+    params: number | null
+  } | null
 }
 
 export interface CompareImage {
