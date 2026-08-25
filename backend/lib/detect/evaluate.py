@@ -5,6 +5,13 @@ model's predictions, greedily match by IoU (same class) to count TP/FP/FN, then
 aggregate per-class Precision/Recall/F1 across images.
 
 Reuses `ml.ensemble.iou`. Box coords are normalized xyxy in [0,1].
+
+**리스트를 받는 함수들은 지우면 안 된다.**
+`match_for_ap` · `average_precision` · `map_from_accumulated` · `curves_from_flags` ·
+`counts_at` · `confusion_at` 여섯은 프로덕션에서 부르지 않는다 — 워커는 `_*_arrays`
+배열 핵심을 직접 쓴다. 그래도 남겨 둔 이유는 이것들이 **등가성 그물**이기 때문이다:
+저장소의 테스트가 이 시그니처로 실제 AP 값을 pin 하고 있어서, 배열 구현이 옛 계산과
+어긋나는 순간 그 테스트가 깨진다. "호출자가 없다"는 이유로 정리하면 그 그물이 사라진다.
 """
 
 from __future__ import annotations
@@ -67,6 +74,8 @@ def match_for_ap(gt: list[dict], pred: list[dict], iou_thr: float) -> list[tuple
     best unused same-class GT with IoU ≥ thr), but instead of counts it returns
     one ``(cls, score, is_tp)`` row per prediction. GT totals are counted by the
     caller (they don't depend on the IoU threshold).
+
+    (프로덕션은 배열 핵심을 쓴다. 이 함수는 **등가성 그물**이라 남긴다 — 모듈 docstring 참고.)
     """
     gt_used = [False] * len(gt)
     rows: list[tuple[int, float, bool]] = []
@@ -190,6 +199,8 @@ def average_precision(flags: list[tuple[float, bool]], n_gt: int) -> float:
     images of the class; ``n_gt`` is the class's total ground-truth count (> 0).
 
     리스트를 받는 기존 진입점 — `_average_precision_arrays` 를 부르는 어댑터다.
+
+    (프로덕션은 배열 핵심을 쓴다. 이 함수는 **등가성 그물**이라 남긴다 — 모듈 docstring 참고.)
     """
     return _average_precision_arrays(*_as_flag_arrays(flags), n_gt)
 
@@ -225,6 +236,8 @@ def curves_from_flags(
 
     정답이 없으면(`n_gt <= 0`) 곡선을 만들지 않는다 — 0 짜리 곡선은 "성능이 0"으로
     읽히지만 실제로는 "잴 것이 없다"이다.
+
+    (프로덕션은 배열 핵심을 쓴다. 이 함수는 **등가성 그물**이라 남긴다 — 모듈 docstring 참고.)
     """
     return _curves_from_arrays(*_as_flag_arrays(flags), n_gt, max_points)
 
@@ -282,6 +295,8 @@ def map_from_accumulated(
     excluded from the class mean, exactly like Ultralytics.
 
     Returns ``{map50, map, per_class: {cls: {ap50, ap}}}``.
+
+    (프로덕션은 배열 핵심을 쓴다. 이 함수는 **등가성 그물**이라 남긴다 — 모듈 docstring 참고.)
     """
     classes = [c for c, n in gt_by_cls.items() if n > 0]
     per_class: dict[int, dict[str, float]] = {}
@@ -447,6 +462,8 @@ def confusion_at(
     비우지 않는다** — 호출자가 예측에 나올 수 있는 클래스를 전부 `class_ids` 에
     넣으면 이 값은 늘 0 이지만, 계약을 어긴 경우 그 자리에 쌓인 헛것의 오검출을
     지워서는 안 된다.
+
+    (프로덕션은 배열 핵심을 쓴다. 이 함수는 **등가성 그물**이라 남긴다 — 모듈 docstring 참고.)
     """
     m_gt = np.fromiter((m[0] for m in matched), np.int32, len(matched))
     m_pred = np.fromiter((m[1] for m in matched), np.int32, len(matched))
@@ -537,6 +554,8 @@ def counts_at(
     벤치마크는 그 런에 설정된 IoU 의 것을 넘겨, 대표 숫자와 같은 잣대가 되게 한다.
 
     FN 은 세지 않고 뺀다: 정답 수는 conf 와 무관하게 고정이므로 `정답 − TP` 가 곧 놓침이다.
+
+    (프로덕션은 배열 핵심을 쓴다. 이 함수는 **등가성 그물**이라 남긴다 — 모듈 docstring 참고.)
     """
     total = sum(len(rows) for rows in flags_by_cls.values())
     scores = np.empty(total, np.float64)
