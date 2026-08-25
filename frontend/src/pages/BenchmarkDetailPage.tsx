@@ -498,7 +498,7 @@ export default function BenchmarkDetailPage() {
                 <Tabs.Panel value="scalars">
                   <Stack gap="md">
                     <Card withBorder radius="md" padding="sm">
-                      <Table.ScrollContainer minWidth={760}>
+                      <Table.ScrollContainer minWidth={940}>
                         <Table striped highlightOnHover fz="xs" verticalSpacing={6}>
                           <Table.Thead>
                             <Table.Tr>
@@ -509,6 +509,9 @@ export default function BenchmarkDetailPage() {
                               <Table.Th ta="right">P</Table.Th>
                               <Table.Th ta="right">R</Table.Th>
                               <Table.Th ta="right">F1</Table.Th>
+                              <Table.Th ta="right">TP</Table.Th>
+                              <Table.Th ta="right">FP</Table.Th>
+                              <Table.Th ta="right">FN</Table.Th>
                               <Table.Th ta="right">Detections</Table.Th>
                               <Table.Th ta="right">ms/img</Table.Th>
                               <Table.Th ta="right">Params</Table.Th>
@@ -518,7 +521,14 @@ export default function BenchmarkDetailPage() {
                             {shown.map((e) => {
                               // 동작점이 있으면 슬라이더가 가리키는 값을, 옛 런은
                               // 결과에 박힌 공식 동작점의 값을 그대로 쓴다.
-                              const o = opOf(e)?.overall ?? e.overall
+                              const point = opOf(e)
+                              const o = point?.overall ?? e.overall
+                              // 검출 수도 한 줄 안의 다른 칸과 **같은 동작점**에서 와야 한다.
+                              // `e.detections` 는 런에 설정된 conf 에서 센 값이라, 슬라이더를
+                              // 옮기면 P/R/F1 만 움직이고 이 칸만 굳어 한 줄이 두 동작점을
+                              // 말하게 된다. 그 conf 에서 살아남은 예측의 수가 곧 TP+FP 다.
+                              // 동작점이 없는 옛 런은 결과에 박힌 값을 그대로 쓴다.
+                              const detections = point ? o.tp + o.fp : e.detections
                               return (
                                 <Table.Tr key={e.entry_id}>
                                   <Table.Td>
@@ -548,7 +558,10 @@ export default function BenchmarkDetailPage() {
                                   <Table.Td ta="right">{fmt(o.precision)}</Table.Td>
                                   <Table.Td ta="right">{fmt(o.recall)}</Table.Td>
                                   <Table.Td ta="right">{fmt(o.f1)}</Table.Td>
-                                  <Table.Td ta="right">{e.detections}</Table.Td>
+                                  <Table.Td ta="right">{o.tp.toLocaleString()}</Table.Td>
+                                  <Table.Td ta="right">{o.fp.toLocaleString()}</Table.Td>
+                                  <Table.Td ta="right">{o.fn.toLocaleString()}</Table.Td>
+                                  <Table.Td ta="right">{detections.toLocaleString()}</Table.Td>
                                   <Table.Td ta="right">
                                     {e.speed ? e.speed.ms_median.toFixed(1) : '—'}
                                   </Table.Td>
@@ -558,7 +571,7 @@ export default function BenchmarkDetailPage() {
                             })}
                             {shown.length === 0 && (
                               <Table.Tr>
-                                <Table.Td colSpan={10}>
+                                <Table.Td colSpan={13}>
                                   <Text size="xs" c="dimmed" ta="center">
                                     No entries selected. Turn one on in the rail.
                                   </Text>
