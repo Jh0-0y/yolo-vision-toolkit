@@ -197,7 +197,7 @@ def _tiled_entry(entry_id, model_id, name, pt):
     }
 
 
-def _run(job, ds, out_dir, entries, iou=0.5):
+def _run(job, ds, out_dir, entries, iou=0.5, conf=0.4):
     (settings.jobs_dir / job).mkdir(parents=True, exist_ok=True)
     out_dir.mkdir(parents=True, exist_ok=True)
     run_compare(
@@ -207,7 +207,7 @@ def _run(job, ds, out_dir, entries, iou=0.5):
             "entries": entries,
             "dataset_dir": str(ds),
             "out_dir": str(out_dir),
-            "conf": 0.4,
+            "conf": conf,
             "iou": iou,
             "device": "cpu",
         },
@@ -443,3 +443,30 @@ def test_compare_operating_points_use_the_configured_match_iou(
             assert snap_rows[cls]["fn"] == row["fn"]
         # 혼동행렬도 같은 매칭에서 나왔으니 대각선이 헤드라인 TP 와 맞아야 한다
         assert snap["confusion"]["rows"][0][0] == expect_tp
+
+
+def test_compare_snapshot_grid_always_contains_the_runs_own_conf(
+    tmp_path, fake_ultralytics, monkeypatch
+):
+    """격자 밖 conf 로 돌려도 **그 conf 의 스냅샷이 반드시 있어야** 한다.
+
+    화면은 슬라이더를 런의 conf 에 가장 가까운 단계에 놓는다. 정확히 일치하는 단계가
+    없으면 슬라이더가 가리키는 숫자와 목록의 대표 숫자가 어긋난다 — 지금은 생성 화면이
+    0.05 격자로 제한해 우연히 맞을 뿐이라, 여기서 구조로 못 박는다.
+    """
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    ds = _seed_dataset(tmp_path)
+    out = tmp_path / "out_offgrid"
+
+    _run("joffgrid", ds, out, [_entry("m1", "m1", "Model A", "m1.pt")], conf=0.42)
+    result = json.loads((out / "result.json").read_text())
+    e = result["per_entry"][0]
+
+    confs = [o["conf"] for o in e["operating_points"]]
+    assert len(confs) == 20                 # 19 + 격자에 없던 0.42
+    assert 0.42 in confs
+    assert confs == sorted(confs)
+
+    # 그 스냅샷은 대표 숫자와 같아야 한다 — 그것이 이 격자를 넣는 이유다
+    snap = next(o for o in e["operating_points"] if o["conf"] == result["conf"])
+    assert snap["overall"] == e["overall"]

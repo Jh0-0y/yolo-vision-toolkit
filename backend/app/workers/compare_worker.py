@@ -409,8 +409,14 @@ def run_compare(job_id: str, cfg: dict, jobs_dir: str) -> dict:
             if snap_flags is None:
                 snap_flags = extra_acc[eid]
 
+            # 격자에 **이 런의 conf 를 반드시 넣는다.** 화면은 슬라이더를 런의 conf 에
+            # 가장 가까운 단계에 놓는데, 정확히 일치하는 단계가 없으면 대표 숫자(overall)와
+            # 슬라이더가 가리키는 값이 어긋난다. 지금은 생성 화면이 0.05 격자로 제한해
+            # 우연히 맞지만, API 를 직접 부르면 임의의 conf 가 들어올 수 있다.
+            steps = sorted({*CONF_STEPS, round(conf_thr, 4)})
+
             ops = []
-            for step in CONF_STEPS:
+            for step in steps:
                 snap = aggregate(counts_at(snap_flags, gt_by_cls, step), names)
                 ops.append({
                     "conf": step,
